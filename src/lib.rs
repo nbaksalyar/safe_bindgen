@@ -65,8 +65,6 @@ impl lint::EarlyLintPass for CheddarPass {
             // If it's not visible it can't be called from C.
             if let ast::Visibility::Inherited = item.vis { continue; }
 
-            // TODO: create a local buffer in each method then return that if the function
-                // succeeds, None if the function aborts and Err if the function fails.
             // Dispatch to correct method.
             let res = match item.node {
                 // TODO: Check for ItemStatic and ItemConst as well.
@@ -150,10 +148,6 @@ fn retrieve_docstring(attr: &Attribute, prepend: &str) -> Option<String> {
 // TODO: refactor:
 //     - path_to_c(&ast::Path)
 //     - probably pull the FnDecl parsing logic out of parse_fn
-//     - return Result<String, (Option<Span>, String)>
-//         - since rusty-cheddar physically can't handle anything other than pointers, function
-//           pointers, and paths
-//     - -> Result<Some(String)> where None indicates a non-erroneous abort.
 fn rust_to_c(ty: &ast::Ty) -> Result {
     match ty.node {
         // standard pointers
