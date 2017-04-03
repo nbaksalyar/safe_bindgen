@@ -653,9 +653,9 @@ fn source_file_from_cargo() -> std::result::Result<String, Error> {
         }),
     };
 
-    let table = match toml::Parser::new(&buf).parse() {
-        Some(value) => value,
-        None => return Err(Error {
+    let table = match (&buf).parse::<toml::Value>() {
+        Ok(value) => value,
+        Err(..) => return Err(Error {
             level: Level::Fatal,
             span: None,
             message: "could not parse cargo manifest".into(),
@@ -664,7 +664,7 @@ fn source_file_from_cargo() -> std::result::Result<String, Error> {
 
     // If not explicitly stated then defaults to `src/lib.rs`.
     Ok(table.get("lib")
-        .and_then(|t| t.lookup("path"))
+        .and_then(|t| t.get("path"))
         .and_then(|s| s.as_str())
         .unwrap_or(default)
         .into())
