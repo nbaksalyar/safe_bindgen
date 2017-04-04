@@ -10,18 +10,19 @@ is available._**
 
 moz-cheddar is a library for converting Rust source files into C header files.
 
-**A note on versioning:** While moz-cheddar is still pre-`v1.0.0` it will
-likely go through numerous breaking changes. We attempt to follow semver
-and bump the minor version any time a new feature is added or output
+**A note on versioning:**
+While moz-cheddar is still pre-`v1.0.0` it will likely go through
+numerous breaking changes. We attempt to follow semver and bump
+the minor version any time a new feature is added or output
 behavior is changed.
 
-moz-cheddar targets C99 or later (for single line comments, `stdint.h` and
-`stdbool.h`).
+moz-cheddar targets C99 or later (for single line comments, and
+use of `stdint.h` and `stdbool.h`).
 
 The most useful way to use moz-cheddar is in a build script.
-To do this add the following `build-dependencies` section to your `Cargo.toml`
-(to use it as a normal library simply replace `build-dependencies`
-with `dependencies`):
+To do this add the following `build-dependencies` section to
+your `Cargo.toml` (to use it as a normal library simply replace
+`build-dependencies` with `dependencies`):
 
 ```toml
 # Cargo.toml
@@ -48,7 +49,7 @@ This should work as is providing you've set up your project correctly.
 see [the cargo docs] for more info.**
 
 moz-cheddar will then create a `my_header.h` file in `include/`.
-Note that moz-cheddar emits very few warnings; it is up to the
+Note that moz-cheddar emits very few warnings, it is up to the
 programmer to write a library which can be correctly called from C.
 
 #### API In a Module
@@ -109,8 +110,9 @@ typedef uint64_t UInt64;
 ### Enums
 
 moz-cheddar will convert public enums which are marked `#[repr(C)]`.
-If the enum is generic or contains tuple or struct variants then `cheddar`
-will fail. moz-cheddar should correctly handle explicit discriminants.
+If the enum is generic or contains tuple or struct variants then
+`cheddar` will fail. moz-cheddar should correctly handle explicit
+discriminants.
 
 Rust:
 
@@ -229,8 +231,8 @@ marked `#[no_mangle]` and have one of the following ABIs:
 - Fastcall
 - System
 
-If you believe one of these has been included in error, or if one has
-been omitted, then please open an issue at the [repo].
+If you believe one of these has been included in error, or if one
+has been omitted, then please open an issue at the [repo].
 
 moz-cheddar will fail on functions which are marked as diverging (`-> !`).
 
@@ -303,7 +305,7 @@ regard is appreciated.
 
 Pull requests are also welcome, of course.
 
-#### Tests
+### Tests
 
 The tests require you to have a version (> `v2.7.2`) of [CppHeaderParser]
 installed for the version of Python which is installed as `python`

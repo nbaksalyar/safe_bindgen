@@ -1,24 +1,24 @@
-//! rusty-cheddar is a library for converting Rust source files into C header files.
+//! moz-cheddar is a library for converting Rust source files into C header files.
 //!
-//! **A note on versioning:** While rusty-cheddar is still in a significant flux (i.e.
-//! pre-`v1.0.0`) it will likely go through numerous breaking changes. However, until `v1.0.0`, any
-//! time a breaking change is made the minor version will be bumped and any time a new feature is
-//! added the path version will be bumped.
+//! **A note on versioning:**
+//! While moz-cheddar is still pre-`v1.0.0` it will likely go through
+//! numerous breaking changes. We attempt to follow semver and bump
+//! the minor version any time a new feature is added or output
+//! behavior is changed.
 //!
-//! rusty-cheddar targets C99 or later (for sane single line comments and use of `stdint.h` and
-//! `stdbool.h`), if you really really really really really have to use an older standard then please
-//! open an issue at the [repo] and I will begrudgingly figure out how to implement support for it
-//! (after arguing with you lots and lots).
+//! moz-cheddar targets C99 or later (for single line comments, and
+//! use of `stdint.h` and `stdbool.h`).
 //!
-//! The most useful way to use rusty-cheddar is in a build script. To do this add the following
-//! `build-dependencies` section to your `Cargo.toml` (to use it as a normal library simply replace
+//! The most useful way to use moz-cheddar is in a build script.
+//! To do this add the following `build-dependencies` section to
+//! your `Cargo.toml` (to use it as a normal library simply replace
 //! `build-dependencies` with `dependencies`):
 //!
 //! ```toml
 //! # Cargo.toml
 //!
 //! [build-dependencies]
-//! rusty-cheddar = "0.3.0"
+//! moz-cheddar = "0.4.0"
 //! ```
 //!
 //! Then create the following `build.rs`:
@@ -34,18 +34,19 @@
 //! }
 //! ```
 //!
-//! This should work as is providing you've set up your project correctly. **Don't forget to add a
-//! `build = ...` to your `[package]` section, see [the cargo docs] for more info.**
+//! This should work as is providing you've set up your project correctly.
+//! **Don't forget to add a `build = ...` to your `[package]` section,
+//! see [the cargo docs] for more info.**
 //!
-//! rusty-cheddar will then create a `my_header.h` file in `include/`. Note that rusty-cheddar
-//! emits very few warnings, it is up to the programmer to write a library which can be correctly
-//! called from C.
+//! moz-cheddar will then create a `my_header.h` file in `include/`.
+//! Note that moz-cheddar emits very few warnings, it is up to the
+//! programmer to write a library which can be correctly called from C.
 //!
 //! ### API In a Module
 //!
-//! You can also place your API in a module to help keep your source code neat. To do this you must
-//! supply the name of the module to Cheddar, then ensure that the items are available in the
-//! top-level scope:
+//! You can also place your API in a module to help keep your source code neat.
+//! To do this you must supply the name of the module to Cheddar, then ensure
+//! that the items are available in the top-level scope:
 //!
 //! ```no_run
 //! // build.rs
@@ -69,7 +70,7 @@
 //! }
 //! ```
 //!
-//! There is also the `.compile()` and `.compile_code()` methods for finer control.
+//! There are also `.compile()` and `.compile_code()` methods for finer control.
 //!
 //! # Conversions
 //!
@@ -77,7 +78,8 @@
 //!
 //! ## Typedefs
 //!
-//! rusty-cheddar converts `pub type A = B` into `typedef B A;`. Types containing generics are ignored.
+//! moz-cheddar converts `pub type A = B` into `typedef B A;`.
+//! Types containing generics are ignored.
 //!
 //! Rust:
 //!
@@ -97,9 +99,10 @@
 //!
 //! ## Enums
 //!
-//! rusty-cheddar will convert public enums which are marked `#[repr(C)]`. If the enum is generic or
-//! contains tuple or struct variants then `cheddar` will fail. rusty-cheddar should correctly handle
-//! explicit discriminants.
+//! moz-cheddar will convert public enums which are marked `#[repr(C)]`.
+//! If the enum is generic or contains tuple or struct variants then
+//! `cheddar` will fail. moz-cheddar should correctly handle explicit
+//! discriminants.
 //!
 //! Rust:
 //!
@@ -146,8 +149,10 @@
 //!
 //! ## Structs
 //!
-//! Structs are handled very similarly to enums, they must be public, marked `#[repr(C)]`, and they must not
-//! contain generics (this currently only checked at the struct-level, generic fields are not checked).
+//! Structs are handled very similarly to enums, they must be public,
+//! marked `#[repr(C)]`, and they must not contain generics.
+//! This currently only checked at the struct-level.
+//! Generic fields are not checked.
 //!
 //! Rust:
 //!
@@ -174,11 +179,13 @@
 //!
 //! ### Opaque Structs
 //!
-//! One common C idiom is to hide the implementation of a struct using an opaque struct, which can
-//! only be used behind a pointer. This is especially useful in Rust-C interfaces as it allows you
+//! One common C idiom is to hide the implementation of a struct using
+//! an opaque struct, which can only be used behind a pointer.
+//! This is especially useful in Rust-C interfaces as it allows you
 //! to use _any arbitrary Rust struct_ in C.
 //!
-//! To define an opaque struct you must define a public newtype which is marked as `#[repr(C)]`.
+//! To define an opaque struct you must define a public newtype which
+//! is marked as `#[repr(C)]`.
 //!
 //! Rust:
 //!
@@ -200,12 +207,13 @@
 //! // Some boilerplate omitted.
 //! ```
 //!
-//! Note that the newtype _must not_ be generic but the type that it wraps can be arbitrary.
+//! Note that the newtype _must not_ be generic but the type that
+//! it wraps can be arbitrary.
 //!
 //! ## Functions
 //!
-//! For rusty-cheddar to pick up on a function declaration it must be public, marked `#[no_mangle]` and
-//! have one of the following ABIs:
+//! For moz-cheddar to pick up on a function declaration it must be public,
+//! marked `#[no_mangle]` and have one of the following ABIs:
 //!
 //! - C
 //! - Cdecl
@@ -213,10 +221,10 @@
 //! - Fastcall
 //! - System
 //!
-//! I'm not totally up to speed on calling conventions so if you believe one of these has been including
-//! in error, or if one has been omitted, then please open an issue at the [repo].
+//! If you believe one of these has been included in error, or if one
+//! has been omitted, then please open an issue at the [repo].
 //!
-//! rusty-cheddar will fail on functions which are marked as diverging (`-> !`).
+//! moz-cheddar will fail on functions which are marked as diverging (`-> !`).
 //!
 //! Rust:
 //!
@@ -259,9 +267,10 @@
 //!
 //! ## Paths
 //!
-//! You must not put types defined in other modules in an exported type signature without hiding it
-//! behind an opaque struct. This is because the C compiler must know the layout of the type and
-//! rusty-cheddar can not yet search other modules.
+//! You must not put types defined in other modules in an exported
+//! type signature without hiding it behind an opaque struct.
+//! This is because the C compiler must know the layout of the type
+//! and moz-cheddar can not yet search other modules.
 //!
 //! The very important exception to this rule are the C ABI types defined in
 //! the `libc` crate and `std::os::raw`. Types from these two modules _must_
@@ -270,7 +279,7 @@
 //! statement will not work.
 //!
 //! [the cargo docs]: http://doc.crates.io/build-script.html
-//! [repo]: https://github.com/Sean1708/rusty-cheddar
+//! [repo]: https://github.com/mozilla/moz-cheddar
 
 #![cfg_attr(not(feature = "with-syntex"), feature(rustc_private))]
 
@@ -513,7 +522,7 @@ impl Cheddar {
     ///
     /// This does not add any include-guards, includes, or extern declarations. It is mainly
     /// intended for internal use, but may be of interest to people who wish to embed
-    /// rusty-cheddar's generated code in another file.
+    /// moz-cheddar's generated code in another file.
     pub fn compile_code(&self) -> Result<String, Vec<Error>> {
         let sess = &self.session;
         let krate = match self.input {

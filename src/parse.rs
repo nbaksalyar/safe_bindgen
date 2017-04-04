@@ -79,7 +79,7 @@ pub fn parse_crate(krate: &ast::Crate, path: &ast::Path) -> Result<String, Vec<E
     parse_mod(&current_module)
 }
 
-/// The manager of rusty-cheddar and entry point when the crate is the module.
+/// The manager of moz-cheddar and entry point when the crate is the module.
 ///
 /// Iterates through all items in the module and dispatches to correct methods, then pulls all
 /// the results together into a header.
