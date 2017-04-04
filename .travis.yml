@@ -10,12 +10,7 @@ matrix:
 before_script:
     - pip install 'travis-cargo>=0.1.0,<0.2.0' --user
     - pip install 'CppHeaderParser>=2.7.2,<3.0.0' --user
-    - export PATH="$HOME/.local/bin:$PATH"
-    - git clone https://github.com/arcnmx/cargo-clippy.git
-    - cd cargo-clippy
-    - travis-cargo --only nightly build
-    - export PATH="$PWD/target/debug:$PATH"
-    - cd ..
+    - travis-cargo --only nightly install clippy
 script:
     - travis-cargo build
     - ./on-nightly cargo clippy --lib
