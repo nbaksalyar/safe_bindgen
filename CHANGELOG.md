@@ -1,5 +1,19 @@
 # [master]
 
+# [0.4.0] - 2017-04-05
+
+## Changed
+
+- Rename to moz-cheddar.
+- `enum` values are prefixed with the type name on the C side.
+- nullable `Option<fn(..)>` types convert to function pointers.
+
+## Fixed
+
+- Bump dependency versions.
+- Make `syntex` an optional feature.
+- Documentation cleanup.
+
 # [0.3.3] - 2016-05-03
 
 ## Fixed
