@@ -1,35 +1,33 @@
-**_Please be aware that version `v0.4.0` of rusty-cheddar will be based around the more general
-[rusty-binder] framework, though this is still work in progress. Change to this version on GitHub
-should be bug fixes and minor updates only, any major changes should be made to the [version on
-GitLab](https://gitlab.com/rusty-binder/rusty-cheddar)._**
+**_This is a fork of rusty-cheddar until such time as
+the [rusty-binder version](https://gitlab.com/rusty-binder/rusty-cheddar)
+is available._**
 
-# rusty-cheddar
+# moz-cheddar
 
-[![Build Status](https://travis-ci.org/Sean1708/rusty-cheddar.svg)](https://travis-ci.org/Sean1708/rusty-cheddar)
-[![crates.io](http://meritbadge.herokuapp.com/rusty-cheddar)](https://crates.io/crates/rusty-cheddar)
+[![Build Status](https://travis-ci.org/mozilla/moz-cheddar.svg?branch=master)](https://travis-ci.org/mozilla/moz-cheddar)
+[![crates.io](http://meritbadge.herokuapp.com/moz-cheddar)](https://crates.io/crates/moz-cheddar)
 ![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)
 
-rusty-cheddar is a library for converting Rust source files into C header files.
+moz-cheddar is a library for converting Rust source files into C header files.
 
-**A note on versioning:** While rusty-cheddar is still in a significant flux (i.e.
-pre-`v1.0.0`) it will likely go through numerous breaking changes. However, until `v1.0.0`, any
-time a breaking change is made the minor version will be bumped and any time a new feature is
-added the path version will be bumped.
+**A note on versioning:** While moz-cheddar is still pre-`v1.0.0` it will
+likely go through numerous breaking changes. We attempt to follow semver
+and bump the minor version any time a new feature is added or output
+behavior is changed.
 
-rusty-cheddar targets C99 or later (for sane single line comments and use of `stdint.h` and
-`stdbool.h`), if you really really really really really have to use an older standard then please
-open an issue at the [repo] and I will begrudgingly figure out how to implement support for it
-(after arguing with you lots and lots).
+moz-cheddar targets C99 or later (for single line comments, `stdint.h` and
+`stdbool.h`).
 
-The most useful way to use rusty-cheddar is in a build script. To do this add the following
-`build-dependencies` section to your `Cargo.toml` (to use it as a normal library simply replace
-`build-dependencies` with `dependencies`):
+The most useful way to use moz-cheddar is in a build script.
+To do this add the following `build-dependencies` section to your `Cargo.toml`
+(to use it as a normal library simply replace `build-dependencies`
+with `dependencies`):
 
 ```toml
 # Cargo.toml
 
 [build-dependencies]
-rusty-cheddar = "0.3.0"
+moz-cheddar = "0.4.0"
 ```
 
 Then create the following `build.rs`:
@@ -45,18 +43,19 @@ fn main() {
 }
 ```
 
-This should work as is providing you've set up your project correctly. **Don't forget to add a
-`build = ...` to your `[package]` section, see [the cargo docs] for more info.**
+This should work as is providing you've set up your project correctly.
+**Don't forget to add a `build = ...` to your `[package]` section,
+see [the cargo docs] for more info.**
 
-rusty-cheddar will then create a `my_header.h` file in `include/`. Note that rusty-cheddar
-emits very few warnings, it is up to the programmer to write a library which can be correctly
-called from C.
+moz-cheddar will then create a `my_header.h` file in `include/`.
+Note that moz-cheddar emits very few warnings; it is up to the
+programmer to write a library which can be correctly called from C.
 
 #### API In a Module
 
-You can also place your API in a module to help keep your source code neat. To do this you must
-supply the name of the module to Cheddar, then ensure that the items are available in the
-top-level scope:
+You can also place your API in a module to help keep your source code neat.
+To do this you must supply the name of the module to Cheddar, then ensure
+that the items are available in the top-level scope:
 
 ```rust
 // build.rs
@@ -80,7 +79,7 @@ mod c_api {
 }
 ```
 
-There is also the `.compile()` and `.compile_code()` methods for finer control.
+There are also `.compile()` and `.compile_code()` methods for finer control.
 
 ## Conversions
 
@@ -88,7 +87,8 @@ In the examples below, boilerplate has been omitted from the header.
 
 ### Typedefs
 
-rusty-cheddar converts `pub type A = B` into `typedef B A;`. Types containing generics are ignored.
+moz-cheddar converts `pub type A = B` into `typedef B A;`.
+Types containing generics are ignored.
 
 Rust:
 
@@ -108,9 +108,9 @@ typedef uint64_t UInt64;
 
 ### Enums
 
-rusty-cheddar will convert public enums which are marked `#[repr(C)]`. If the enum is generic or
-contains tuple or struct variants then `cheddar` will fail. rusty-cheddar should correctly handle
-explicit discriminants.
+moz-cheddar will convert public enums which are marked `#[repr(C)]`.
+If the enum is generic or contains tuple or struct variants then `cheddar`
+will fail. moz-cheddar should correctly handle explicit discriminants.
 
 Rust:
 
@@ -157,8 +157,10 @@ typedef enum Colours {
 
 ### Structs
 
-Structs are handled very similarly to enums, they must be public, marked `#[repr(C)]`, and they must not
-contain generics (this currently only checked at the struct-level, generic fields are not checked).
+Structs are handled very similarly to enums, they must be public,
+marked `#[repr(C)]`, and they must not contain generics.
+This currently only checked at the struct-level.
+Generic fields are not checked.
 
 Rust:
 
@@ -185,11 +187,13 @@ typedef struct Person {
 
 #### Opaque Structs
 
-One common C idiom is to hide the implementation of a struct using an opaque struct, which can
-only be used behind a pointer. This is especially useful in Rust-C interfaces as it allows you
+One common C idiom is to hide the implementation of a struct using
+an opaque struct, which can only be used behind a pointer.
+This is especially useful in Rust-C interfaces as it allows you
 to use _any arbitrary Rust struct_ in C.
 
-To define an opaque struct you must define a public newtype which is marked as `#[repr(C)]`.
+To define an opaque struct you must define a public newtype which
+is marked as `#[repr(C)]`.
 
 Rust:
 
@@ -211,12 +215,13 @@ typedef struct MyCrate_Foo MyCrate_Foo;
 // Some boilerplate omitted.
 ```
 
-Note that the newtype _must not_ be generic but the type that it wraps can be arbitrary.
+Note that the newtype _must not_ be generic but the type that
+it wraps can be arbitrary.
 
 ### Functions
 
-For rusty-cheddar to pick up on a function declaration it must be public, marked `#[no_mangle]` and
-have one of the following ABIs:
+For moz-cheddar to pick up on a function declaration it must be public,
+marked `#[no_mangle]` and have one of the following ABIs:
 
 - C
 - Cdecl
@@ -224,10 +229,10 @@ have one of the following ABIs:
 - Fastcall
 - System
 
-I'm not totally up to speed on calling conventions so if you believe one of these has been including
-in error, or if one has been omitted, then please open an issue at the [repo].
+If you believe one of these has been included in error, or if one has
+been omitted, then please open an issue at the [repo].
 
-rusty-cheddar will fail on functions which are marked as diverging (`-> !`).
+moz-cheddar will fail on functions which are marked as diverging (`-> !`).
 
 Rust:
 
@@ -270,9 +275,10 @@ uint16_t MyAdd_add_u16(uint16_t l, uint16_t r);
 
 ### Paths
 
-You must not put types defined in other modules in an exported type signature without hiding it
-behind an opaque struct. This is because the C compiler must know the layout of the type and
-rusty-cheddar can not yet search other modules.
+You must not put types defined in other modules in an exported
+type signature without hiding it behind an opaque struct.
+This is because the C compiler must know the layout of the type
+and moz-cheddar can not yet search other modules.
 
 The very important exception to this rule are the C ABI types defined in
 the `libc` crate and `std::os::raw`. Types from these two modules _must_
@@ -281,33 +287,34 @@ so that they can be converted properly. Importing them with a `use`
 statement will not work.
 
 [the cargo docs]: http://doc.crates.io/build-script.html
-[repo]: https://github.com/Sean1708/rusty-cheddar
+[repo]: https://github.com/mozilla/moz-cheddar
 
 ## Contributing
 
-Contributions to rusty-cheddar are more than welcome.
+Contributions to moz-cheddar are more than welcome.
 
 ### Bugs
 
-If you find a bug or have a feature request please open an issue. I can't guarantee that I'll fix it
-but I'll give it a damn good go.
+If you find a bug or have a feature request please open an issue.
 
-If you find the source code unclear in any way then I consider that a bug. I try to make my source
-code as clear as possible but I'm not very good at it, so any help in that regard is appreciated.
+If you find the source code unclear in any way then I consider that a bug.
+I try to make my source code as clear as possible, so any help in that
+regard is appreciated.
 
-### PRs
-
-I love pull requests they tend to make my job much easier, so if you want to fix a bug or implement
-a feature yourself then that would be great. If you're confused by anything or need some pointers on
-how to proceed then feel free to open an issue so that I can help, otherwise [these docs] are a good
-place to start.
+Pull requests are also welcome, of course.
 
 #### Tests
 
-The tests require you to have a recent version (> `v2.7.2`) of [CppHeaderParser] installed for the
-version of Python which is installed as `python` (usually Python 2). Furthermore due to the fact
-that the tests are a massive pile of wanky hacks, you must be in the same directory as
-rusty-cheddar's `Cargo.toml` to successfully run them.
+The tests require you to have a version (> `v2.7.2`) of [CppHeaderParser]
+installed for the version of Python which is installed as `python`
+(usually Python 2). Furthermore, due to the fact that the tests are a
+massive pile of wanky hacks, you must be in the same directory as
+moz-cheddar's `Cargo.toml` to successfully run them.
+
+If you don't have this, try
+```bash
+pip install CppHeaderParser
+```
 
 [rusty-binder]: https://gitlab.com/rusty-binder/rusty-binder
 [these docs]: http://manishearth.github.io/rust-internals-docs/syntax/ast/index.html
