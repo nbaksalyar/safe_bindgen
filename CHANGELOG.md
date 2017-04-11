@@ -1,5 +1,11 @@
 # [master]
 
+# [0.4.1] - 2017-04-11
+
+## Fixed
+
+- Bump syntex dependency version.
+
 # [0.4.0] - 2017-04-05
 
 ## Changed
