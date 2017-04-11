@@ -489,7 +489,6 @@ impl Cheddar {
         let result = {
             let mut parser = ::syntax::parse::new_parser_from_source_str(
                 &sess,
-                vec![],
                 "".into(),
                 module.into(),
             );
@@ -526,13 +525,12 @@ impl Cheddar {
     pub fn compile_code(&self) -> Result<String, Vec<Error>> {
         let sess = &self.session;
         let krate = match self.input {
-            Source::File(ref path) => syntax::parse::parse_crate_from_file(path, vec![], sess),
+            Source::File(ref path) => syntax::parse::parse_crate_from_file(path, sess),
             Source::String(ref source) => syntax::parse::parse_crate_from_source_str(
                 "cheddar_source".to_owned(),
                 // TODO: this clone could be quite costly, maybe rethink this design?
                 //     or just use a slice.
                 source.clone(),
-                vec![],
                 sess,
             ),
         }.unwrap();

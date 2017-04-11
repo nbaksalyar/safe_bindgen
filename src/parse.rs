@@ -23,7 +23,11 @@ fn check_pub_use(item: &ast::Item, expected: &ast::Path) -> bool {
         if let ast::Visibility::Public = item.vis {
             // Easiest way to ensure all of API has been brought into scope.
             if let ast::ViewPath_::ViewPathGlob(ref path) = path.node {
-                return path.segments == expected.segments;
+                let mut segments = path.segments.iter();
+                if path.is_global() {
+                    segments.next();
+                }
+                return segments.eq(expected.segments.iter());
             }
         }
     }
@@ -383,11 +387,11 @@ fn parse_attr<C, R>(attrs: &[ast::Attribute], check: C, retrieve: R) -> (bool, S
 
 /// Check the attribute is #[repr(C)].
 fn check_repr_c(attr: &ast::Attribute) -> bool {
-    match attr.node.value.node {
-        ast::MetaItemKind::List(ref name, ref word) if *name == "repr" => match word.first() {
+    match attr.value.node {
+        ast::MetaItemKind::List(ref word) if attr.name() == "repr" => match word.first() {
             Some(word) => match word.node {
                 // Return true only if attribute is #[repr(C)].
-                ast::MetaItemKind::Word(ref name) if *name == "C" => true,
+                ast::NestedMetaItemKind::MetaItem(ref item) if item.name == "C" => true,
                 _ => false,
             },
             _ => false,
@@ -398,16 +402,16 @@ fn check_repr_c(attr: &ast::Attribute) -> bool {
 
 /// Check the attribute is #[no_mangle].
 fn check_no_mangle(attr: &ast::Attribute) -> bool {
-    match attr.node.value.node {
-        ast::MetaItemKind::Word(ref name) if *name == "no_mangle" => true,
+    match attr.value.node {
+        ast::MetaItemKind::Word if attr.name() == "no_mangle" => true,
         _ => false,
     }
 }
 
 /// If the attribute is  a docstring, indent it the required amount and return it.
 fn retrieve_docstring(attr: &ast::Attribute, prepend: &str) -> Option<String> {
-    match attr.node.value.node {
-        ast::MetaItemKind::NameValue(ref name, ref val) if *name == "doc" => match val.node {
+    match attr.value.node {
+        ast::MetaItemKind::NameValue(ref val) if attr.name() == "doc" => match val.node {
             // Docstring attributes omit the trailing newline.
             ast::LitKind::Str(ref docs, _) => Some(format!("{}{}\n", prepend, docs)),
             _ => unreachable!("docs must be literal strings"),
