@@ -1,11 +1,61 @@
 //! Functions for converting Rust types to C types.
 
+use common;
 use syntax::ast;
 use syntax::codemap;
 use syntax::print;
 
 use Error;
 use Level;
+
+/// Transform a Rust FFI function into a C function decl
+pub fn transform_native_fn(
+    fn_decl: &ast::FnDecl,
+    docs: &str,
+    name: &str,
+) -> Result<Option<String>, Error> {
+    // Handle the case when the return type is a function pointer (which requires that the
+    // entire declaration is wrapped by the function pointer type) by first creating the name
+    // and parameters, then passing that whole thing to `rust_to_c`.
+    let fn_args = common::fn_args(&fn_decl.inputs, name)?;
+    let mut args = Vec::new();
+
+    // Arguments
+    for &(ref arg_name, ref arg_ty) in &fn_args {
+        args.push(try_some!(rust_to_c(&arg_ty, &arg_name)));
+    }
+
+    let buf = format!(
+        "{}({})",
+        name,
+        if args.is_empty() {
+            String::from("void")
+        } else {
+            args.join(", ")
+        }
+    );
+
+    // Generate return type
+    let output_type = &fn_decl.output;
+    let full_declaration = match *output_type {
+        ast::FunctionRetTy::Ty(ref ty) if ty.node == ast::TyKind::Never => {
+            return Err(Error {
+                level: Level::Error,
+                span: Some(ty.span),
+                message: "panics across a C boundary are naughty!".into(),
+            });
+        }
+        ast::FunctionRetTy::Default(..) => format!("void {}", buf),
+        ast::FunctionRetTy::Ty(ref ty) => try_some!(rust_to_c(&*ty, &buf)),
+    };
+
+    let mut output = String::new();
+    output.push_str(docs);
+    output.push_str(&full_declaration);
+    output.push_str(";\n\n");
+
+    Ok(Some(output))
+}
 
 /// Turn a Rust type with an associated name or type into a C type.
 pub fn rust_to_c(ty: &ast::Ty, assoc: &str) -> Result<Option<String>, Error> {
@@ -14,19 +64,18 @@ pub fn rust_to_c(ty: &ast::Ty, assoc: &str) -> Result<Option<String>, Error> {
         ast::TyKind::BareFn(ref bare_fn) => fn_ptr_to_c(bare_fn, ty.span, assoc),
         // Special case Options wrapping function pointers.
         ast::TyKind::Path(None, ref path) => {
-            if path.segments.len() == 1 &&
-                path.segments[0].identifier.name == "Option" {
-                    if let Some(ref param) = path.segments[0].parameters {
-                        if let ast::PathParameters::AngleBracketed(ref d) = **param {
-                            assert!(d.lifetimes.is_empty() && d.bindings.is_empty());
-                            if d.types.len() == 1 {
-                                if let ast::TyKind::BareFn(ref bare_fn) = d.types[0].node {
-                                    return fn_ptr_to_c(bare_fn, ty.span, assoc);
-                                }
+            if path.segments.len() == 1 && path.segments[0].identifier.name == "Option" {
+                if let Some(ref param) = path.segments[0].parameters {
+                    if let ast::PathParameters::AngleBracketed(ref d) = **param {
+                        assert!(d.lifetimes.is_empty() && d.bindings.is_empty());
+                        if d.types.len() == 1 {
+                            if let ast::TyKind::BareFn(ref bare_fn) = d.types[0].node {
+                                return fn_ptr_to_c(bare_fn, ty.span, assoc);
                             }
                         }
                     }
                 }
+            }
 
             Ok(Some(format!("{} {}", try_some!(anon_rust_to_c(ty)), assoc)))
         }
@@ -42,7 +91,8 @@ fn anon_rust_to_c(ty: &ast::Ty) -> Result<Option<String>, Error> {
         ast::TyKind::BareFn(..) => Err(Error {
             level: Level::Error,
             span: Some(ty.span),
-            message: "C function pointers must have a name or function declaration associated with them".into(),
+            message: "C function pointers must have a name or function declaration associated with them"
+                .into(),
         }),
         // Standard pointers.
         ast::TyKind::Ptr(ref ptr) => ptr_to_c(ptr),
@@ -60,7 +110,7 @@ fn anon_rust_to_c(ty: &ast::Ty) -> Result<Option<String>, Error> {
                     message: format!("cheddar can not handle the type `{}`", new_type),
                 })
             }
-        },
+        }
     }
 }
 
@@ -69,7 +119,7 @@ fn ptr_to_c(ty: &ast::MutTy) -> Result<Option<String>, Error> {
     let new_type = try_some!(anon_rust_to_c(&ty.ty));
     let const_spec = match ty.mutbl {
         // *const T
-        ast::Mutability::Immutable => " const" ,
+        ast::Mutability::Immutable => " const",
         // *mut T
         ast::Mutability::Mutable => "",
     };
@@ -92,11 +142,15 @@ fn ptr_to_c(ty: &ast::MutTy) -> Result<Option<String>, Error> {
 /// ```
 ///
 /// where `inner` could either be a name or the rest of a function declaration.
-fn fn_ptr_to_c(fn_ty: &ast::BareFnTy, fn_span: codemap::Span, inner: &str) -> Result<Option<String>, Error> {
+fn fn_ptr_to_c(
+    fn_ty: &ast::BareFnTy,
+    fn_span: codemap::Span,
+    inner: &str,
+) -> Result<Option<String>, Error> {
     use syntax::abi::Abi;
     match fn_ty.abi {
         // If it doesn't have a C ABI it can't be called from C.
-        Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {},
+        Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
         _ => return Ok(None),
     }
 
@@ -126,7 +180,7 @@ fn fn_ptr_to_c(fn_ty: &ast::BareFnTy, fn_span: codemap::Span, inner: &str) -> Re
         buf_without_return.pop();
         buf_without_return.pop();
     } else {
-      buf_without_return.push_str("void");
+        buf_without_return.push_str("void");
     }
 
     buf_without_return.push(')');
@@ -139,7 +193,7 @@ fn fn_ptr_to_c(fn_ty: &ast::BareFnTy, fn_span: codemap::Span, inner: &str) -> Re
                 span: Some(ty.span),
                 message: "panics across a C boundary are naughty!".into(),
             });
-        },
+        }
         ast::FunctionRetTy::Default(..) => format!("void {}", buf_without_return),
         ast::FunctionRetTy::Ty(ref ty) => try_some!(rust_to_c(&*ty, &buf_without_return)),
     };
@@ -162,8 +216,9 @@ fn path_to_c(path: &ast::Path) -> Result<Option<String>, Error> {
         })
     // Types in modules, `my_mod::MyType`.
     } else if path.segments.len() > 1 {
-        let (ty, module) = path.segments.split_last()
-            .expect("already checked that there were at least two elements");
+        let (ty, module) = path.segments.split_last().expect(
+            "already checked that there were at least two elements",
+        );
         let ty: &str = &ty.identifier.name.as_str();
         let mut segments = Vec::with_capacity(module.len());
         for segment in module {
@@ -174,13 +229,17 @@ fn path_to_c(path: &ast::Path) -> Result<Option<String>, Error> {
             "libc" => Ok(Some(libc_ty_to_c(ty).into())),
             "std::os::raw" => Ok(Some(osraw_ty_to_c(ty).into())),
             _ => Err(Error {
-                    level: Level::Error,
-                    span: Some(path.span),
-                    message: "cheddar can not handle types in other modules (except `libc` and `std::os::raw`)".into(),
+                level: Level::Error,
+                span: Some(path.span),
+                message: "cheddar can not handle types in other modules (except `libc` and `std::os::raw`)"
+                    .into(),
             }),
         }
     } else {
-        Ok(Some(rust_ty_to_c(&path.segments[0].identifier.name.as_str()).into()))
+        Ok(Some(
+            rust_ty_to_c(&path.segments[0].identifier.name.as_str())
+                .into(),
+        ))
     }
 }
 
@@ -263,17 +322,19 @@ mod test {
     fn ty(source: &str) -> ::syntax::ast::Ty {
         let sess = ::syntax::parse::ParseSess::new();
         let result = {
-            let mut parser = ::syntax::parse::new_parser_from_source_str(
-                &sess,
-                "".into(),
-                source.into(),
-            );
+            let mut parser =
+                ::syntax::parse::new_parser_from_source_str(&sess, "".into(), source.into());
             parser.parse_ty()
         };
 
         match result {
             Ok(p) => (*p).clone(),
-            _ => panic!("internal testing error: could not parse type from {:?}", source),
+            _ => {
+                panic!(
+                    "internal testing error: could not parse type from {:?}",
+                    source
+                )
+            }
         }
     }
 
@@ -286,14 +347,28 @@ mod test {
         let name = "azazael";
 
         let source = "Result<f64, i32>";
-        let typ = super::anon_rust_to_c(&ty(source))
-            .expect(&format!("error while parsing {:?} with no name", source));
-        assert!(typ.is_none(), "successfully parsed invalid type {:?} with no name", source);
+        let typ = super::anon_rust_to_c(&ty(source)).expect(&format!(
+            "error while parsing {:?} with no name",
+            source
+        ));
+        assert!(
+            typ.is_none(),
+            "successfully parsed invalid type {:?} with no name",
+            source
+        );
 
         let source = "Option<i16>";
-        let typ = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name));
-        assert!(typ.is_none(), "successfully parsed invalid type {:?} with name {:?}", source, name);
+        let typ = super::rust_to_c(&ty(source), name).expect(&format!(
+            "error while parsing {:?} with name {:?}",
+            source,
+            name
+        ));
+        assert!(
+            typ.is_none(),
+            "successfully parsed invalid type {:?} with name {:?}",
+            source,
+            name
+        );
     }
 
     #[test]
@@ -323,8 +398,16 @@ mod test {
             assert_eq!(parsed_c_type, correct_c_type);
 
             let parsed_c_type = super::rust_to_c(&ty(rust_type), name)
-                .expect(&format!("error while parsing {:?} with name {:?}", rust_type, name))
-                .expect(&format!("did not parse {:?} with name {:?}", rust_type, name));
+                .expect(&format!(
+                    "error while parsing {:?} with name {:?}",
+                    rust_type,
+                    name
+                ))
+                .expect(&format!(
+                    "did not parse {:?} with name {:?}",
+                    rust_type,
+                    name
+                ));
             assert_eq!(parsed_c_type, format!("{} {}", correct_c_type, name));
         }
     }
@@ -361,8 +444,16 @@ mod test {
             assert_eq!(parsed_c_type, correct_c_type);
 
             let parsed_c_type = super::rust_to_c(&ty(rust_type), name)
-                .expect(&format!("error while parsing {:?} with name {:?}", rust_type, name))
-                .expect(&format!("did not parse {:?} with name {:?}", rust_type, name));
+                .expect(&format!(
+                    "error while parsing {:?} with name {:?}",
+                    rust_type,
+                    name
+                ))
+                .expect(&format!(
+                    "did not parse {:?} with name {:?}",
+                    rust_type,
+                    name
+                ));
             assert_eq!(parsed_c_type, format!("{} {}", correct_c_type, name));
         }
     }
@@ -379,7 +470,11 @@ mod test {
 
         let source = "*const ()";
         let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name))
+            .expect(&format!(
+                "error while parsing {:?} with name {:?}",
+                source,
+                name
+            ))
             .expect(&format!("did not parse {:?} with name {:?}", source, name));
         assert_eq!(parsed_type, format!("void const* {}", name));
 
@@ -391,7 +486,11 @@ mod test {
 
         let source = "*const *const i64";
         let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name))
+            .expect(&format!(
+                "error while parsing {:?} with name {:?}",
+                source,
+                name
+            ))
             .expect(&format!("did not parse {:?} with name {:?}", source, name));
         assert_eq!(parsed_type, format!("int64_t const* const* {}", name));
     }
@@ -408,7 +507,11 @@ mod test {
 
         let source = "*mut f32";
         let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name))
+            .expect(&format!(
+                "error while parsing {:?} with name {:?}",
+                source,
+                name
+            ))
             .expect(&format!("did not parse {:?} with name {:?}", source, name));
         assert_eq!(parsed_type, format!("float* {}", name));
 
@@ -420,7 +523,11 @@ mod test {
 
         let source = "*mut *mut i8";
         let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name))
+            .expect(&format!(
+                "error while parsing {:?} with name {:?}",
+                source,
+                name
+            ))
             .expect(&format!("did not parse {:?} with name {:?}", source, name));
         assert_eq!(parsed_type, format!("int8_t** {}", name));
     }
@@ -437,13 +544,21 @@ mod test {
 
         let source = "*mut *mut *const libc::c_ulonglong";
         let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name))
+            .expect(&format!(
+                "error while parsing {:?} with name {:?}",
+                source,
+                name
+            ))
             .expect(&format!("did not parse {:?} with name {:?}", source, name));
         assert_eq!(parsed_type, format!("unsigned long long const*** {}", name));
 
         let source = "*const *mut *mut i8";
         let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name))
+            .expect(&format!(
+                "error while parsing {:?} with name {:?}",
+                source,
+                name
+            ))
             .expect(&format!("did not parse {:?} with name {:?}", source, name));
         assert_eq!(parsed_type, format!("int8_t** const* {}", name));
     }
@@ -454,22 +569,36 @@ mod test {
 
         let source = "fn(a: bool)";
         let parsed_type = super::anon_rust_to_c(&ty(source));
-        assert!(parsed_type.is_err(), "C function pointers should have an inner or name associated");
+        assert!(
+            parsed_type.is_err(),
+            "C function pointers should have an inner or name associated"
+        );
 
         let source = "fn(a: i8) -> f64";
-        let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name));
+        let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
+            "error while parsing {:?} with name {:?}",
+            source,
+            name
+        ));
         assert!(parsed_type.is_none(), "parsed a non-C function pointer");
 
         let source = "extern fn(hi: libc::c_int) -> libc::c_double";
         let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name))
+            .expect(&format!(
+                "error while parsing {:?} with name {:?}",
+                source,
+                name
+            ))
             .expect(&format!("did not parse {:?} with name {:?}", source, name));
         assert_eq!(parsed_type, format!("double (*{})(int hi)", name));
 
         let source = "Option<extern fn(hi: libc::c_int) -> libc::c_double>";
         let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name))
+            .expect(&format!(
+                "error while parsing {:?} with name {:?}",
+                source,
+                name
+            ))
             .expect(&format!("did not parse {:?} with name {:?}", source, name));
         assert_eq!(parsed_type, format!("double (*{})(int hi)", name));
     }
@@ -486,16 +615,26 @@ mod test {
 
         let source = "SomeType";
         let parsed_type = super::rust_to_c(&ty(source), name)
-            .expect(&format!("error while parsing {:?} with name {:?}", source, name))
+            .expect(&format!(
+                "error while parsing {:?} with name {:?}",
+                source,
+                name
+            ))
             .expect(&format!("did not parse {:?} with name {:?}", source, name));
         assert_eq!(parsed_type, format!("SomeType {}", name));
 
         let source = "my_mod::MyType";
         let parsed_type = super::anon_rust_to_c(&ty(source));
-        assert!(parsed_type.is_err(), "can't use a multi-segment path which isn't `libc`");
+        assert!(
+            parsed_type.is_err(),
+            "can't use a multi-segment path which isn't `libc`"
+        );
 
         let source = "some_mod::SomeType";
         let parsed_type = super::rust_to_c(&ty(source), name);
-        assert!(parsed_type.is_err(), "can't use a multi-segment path which isn't `libc`");
+        assert!(
+            parsed_type.is_err(),
+            "can't use a multi-segment path which isn't `libc`"
+        );
     }
 }

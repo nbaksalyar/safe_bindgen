@@ -291,6 +291,7 @@ extern crate rustc_errors as errors;
 extern crate syntex_syntax as syntax;
 #[cfg(not(feature = "with-syntex"))]
 extern crate syntax;
+extern crate inflector;
 extern crate toml;
 
 use std::convert;
@@ -308,7 +309,9 @@ macro_rules! try_some {
 }
 
 
+mod common;
 mod types;
+mod types_java;
 mod parse;
 
 
@@ -351,22 +354,52 @@ impl Error {
         // Throw away the results (with { ...; }) since they are handled elsewhere.
         if let Some(span) = self.span {
             match self.level {
-                Level::Bug => { sess.span_diagnostic.span_bug(span, &self.message); },
-                Level::Fatal => { sess.span_diagnostic.span_fatal(span, &self.message); },
-                Level::Error => { sess.span_diagnostic.span_err(span, &self.message); },
-                Level::Warning => { sess.span_diagnostic.span_warn(span, &self.message); },
-                Level::Note => { sess.span_diagnostic.span_note_without_error(span, &self.message); },
-                Level::Help => { sess.span_diagnostic.struct_dummy().span_help(span, &self.message); },
+                Level::Bug => {
+                    sess.span_diagnostic.span_bug(span, &self.message);
+                }
+                Level::Fatal => {
+                    sess.span_diagnostic.span_fatal(span, &self.message);
+                }
+                Level::Error => {
+                    sess.span_diagnostic.span_err(span, &self.message);
+                }
+                Level::Warning => {
+                    sess.span_diagnostic.span_warn(span, &self.message);
+                }
+                Level::Note => {
+                    sess.span_diagnostic.span_note_without_error(
+                        span,
+                        &self.message,
+                    );
+                }
+                Level::Help => {
+                    sess.span_diagnostic.struct_dummy().span_help(
+                        span,
+                        &self.message,
+                    );
+                }
                 _ => unreachable!(),
             };
         } else {
             match self.level {
-                Level::Bug => { sess.span_diagnostic.bug(&self.message); },
-                Level::Fatal => { sess.span_diagnostic.fatal(&self.message); },
-                Level::Error => { sess.span_diagnostic.err(&self.message); },
-                Level::Warning => { sess.span_diagnostic.warn(&self.message); },
-                Level::Note => { sess.span_diagnostic.note_without_error(&self.message); },
-                Level::Help => { sess.span_diagnostic.struct_dummy().help(&self.message); },
+                Level::Bug => {
+                    sess.span_diagnostic.bug(&self.message);
+                }
+                Level::Fatal => {
+                    sess.span_diagnostic.fatal(&self.message);
+                }
+                Level::Error => {
+                    sess.span_diagnostic.err(&self.message);
+                }
+                Level::Warning => {
+                    sess.span_diagnostic.warn(&self.message);
+                }
+                Level::Note => {
+                    sess.span_diagnostic.note_without_error(&self.message);
+                }
+                Level::Help => {
+                    sess.span_diagnostic.struct_dummy().help(&self.message);
+                }
                 _ => unreachable!(),
             };
         }
@@ -461,7 +494,8 @@ impl Cheddar {
     ///
     /// This should only be used when not using a `cargo` build system.
     pub fn source_file<T>(&mut self, path: T) -> &mut Cheddar
-        where path::PathBuf: convert::From<T>,
+    where
+        path::PathBuf: convert::From<T>,
     {
         self.input = Source::File(path::PathBuf::from(path));
         self
@@ -487,11 +521,8 @@ impl Cheddar {
         // TODO: `parse_item_from_source_str` doesn't work. Why?
         let sess = syntax::parse::ParseSess::new();
         let result = {
-            let mut parser = ::syntax::parse::new_parser_from_source_str(
-                &sess,
-                "".into(),
-                module.into(),
-            );
+            let mut parser =
+                ::syntax::parse::new_parser_from_source_str(&sess, "".into(), module.into());
             parser.parse_path(syntax::parse::parser::PathStyle::Mod)
         };
 
@@ -499,11 +530,13 @@ impl Cheddar {
             self.module = Some(path);
             Ok(self)
         } else {
-            Err(vec![Error {
-                level: Level::Fatal,
-                span: None,
-                message: format!("malformed module path `{}`", module),
-            }])
+            Err(vec![
+                Error {
+                    level: Level::Fatal,
+                    span: None,
+                    message: format!("malformed module path `{}`", module),
+                },
+            ])
         }
     }
 
@@ -526,13 +559,15 @@ impl Cheddar {
         let sess = &self.session;
         let krate = match self.input {
             Source::File(ref path) => syntax::parse::parse_crate_from_file(path, sess),
-            Source::String(ref source) => syntax::parse::parse_crate_from_source_str(
-                "cheddar_source".to_owned(),
-                // TODO: this clone could be quite costly, maybe rethink this design?
-                //     or just use a slice.
-                source.clone(),
-                sess,
-            ),
+            Source::String(ref source) => {
+                syntax::parse::parse_crate_from_source_str(
+                    "cheddar_source".to_owned(),
+                    // TODO: this clone could be quite costly, maybe rethink this design?
+                    //     or just use a slice.
+                    source.clone(),
+                    sess,
+                )
+            }
         }.unwrap();
 
         if let Some(ref module) = self.module {
@@ -551,7 +586,10 @@ impl Cheddar {
     fn compile_with_includes(&self) -> Result<String, Vec<Error>> {
         let code = try!(self.compile_code());
 
-        Ok(format!("#include <stdint.h>\n#include <stdbool.h>\n\n{}", code))
+        Ok(format!(
+            "#include <stdint.h>\n#include <stdbool.h>\n\n{}",
+            code
+        ))
     }
 
     /// Compile a header while conforming to C89 (or ANSI C).
@@ -589,24 +627,35 @@ impl Cheddar {
 
         if let Some(dir) = file.parent() {
             if let Err(error) = std::fs::create_dir_all(dir) {
-                return Err(vec![Error {
-                    level: Level::Fatal,
-                    span: None,
-                    message: format!("could not create directories in '{}': {}", dir.display(), error),
-                }]);
+                return Err(vec![
+                    Error {
+                        level: Level::Fatal,
+                        span: None,
+                        message: format!(
+                            "could not create directories in '{}': {}",
+                            dir.display(),
+                            error
+                        ),
+                    },
+                ]);
             }
         }
 
-        let file_name = file.file_stem().map_or("default".into(), |os| os.to_string_lossy());
+        let file_name = file.file_stem().map_or(
+            "default".into(),
+            |os| os.to_string_lossy(),
+        );
         let header = try!(self.compile(&file_name));
 
         let bytes_buf = header.into_bytes();
         if let Err(error) = std::fs::File::create(&file).and_then(|mut f| f.write_all(&bytes_buf)) {
-            Err(vec![Error {
-                level: Level::Fatal,
-                span: None,
-                message: format!("could not write to '{}': {}", file.display(), error),
-            }])
+            Err(vec![
+                Error {
+                    level: Level::Fatal,
+                    span: None,
+                    message: format!("could not write to '{}': {}", file.display(), error),
+                },
+            ])
         } else {
             Ok(())
         }
@@ -638,10 +687,9 @@ impl Cheddar {
 
 /// Extract the path to the root source file from a `Cargo.toml`.
 fn source_file_from_cargo() -> std::result::Result<String, Error> {
-    let cargo_toml = path::Path::new(
-        &std::env::var_os("CARGO_MANIFEST_DIR")
-            .unwrap_or(std::ffi::OsString::from(""))
-    ).join("Cargo.toml");
+    let cargo_toml = path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or(
+        std::ffi::OsString::from(""),
+    )).join("Cargo.toml");
 
     // If no `Cargo.toml` assume `src/lib.rs` until told otherwise.
     let default = "src/lib.rs";
@@ -652,34 +700,42 @@ fn source_file_from_cargo() -> std::result::Result<String, Error> {
 
     let mut buf = String::new();
     match cargo_toml.read_to_string(&mut buf) {
-        Ok(..) => {},
-        Err(..) => return Err(Error {
-            level: Level::Fatal,
-            span: None,
-            message: "could not read cargo manifest".into(),
-        }),
+        Ok(..) => {}
+        Err(..) => {
+            return Err(Error {
+                level: Level::Fatal,
+                span: None,
+                message: "could not read cargo manifest".into(),
+            })
+        }
     };
 
     let table = match (&buf).parse::<toml::Value>() {
         Ok(value) => value,
-        Err(..) => return Err(Error {
-            level: Level::Fatal,
-            span: None,
-            message: "could not parse cargo manifest".into(),
-        }),
+        Err(..) => {
+            return Err(Error {
+                level: Level::Fatal,
+                span: None,
+                message: "could not parse cargo manifest".into(),
+            })
+        }
     };
 
     // If not explicitly stated then defaults to `src/lib.rs`.
-    Ok(table.get("lib")
-        .and_then(|t| t.get("path"))
-        .and_then(|s| s.as_str())
-        .unwrap_or(default)
-        .into())
+    Ok(
+        table
+            .get("lib")
+            .and_then(|t| t.get("path"))
+            .and_then(|s| s.as_str())
+            .unwrap_or(default)
+            .into(),
+    )
 }
 
 /// Wrap a block of code with an extern declaration.
 fn wrap_extern(code: &str) -> String {
-    format!(r#"
+    format!(
+        r#"
 #ifdef __cplusplus
 extern "C" {{
 #endif
@@ -689,19 +745,25 @@ extern "C" {{
 #ifdef __cplusplus
 }}
 #endif
-"#, code)
+"#,
+        code
+    )
 }
 
 /// Wrap a block of code with an include-guard.
 fn wrap_guard(code: &str, id: &str) -> String {
-    format!(r"
+    format!(
+        r"
 #ifndef cheddar_generated_{0}_h
 #define cheddar_generated_{0}_h
 
 {1}
 
 #endif
-", sanitise_id(id), code)
+",
+        sanitise_id(id),
+        code
+    )
 }
 
 /// Remove illegal characters from the identifier.
@@ -710,7 +772,9 @@ fn wrap_guard(code: &str, id: &str) -> String {
 /// be concatenated onto `cheddar_generated_` so can start with a digit.
 fn sanitise_id(id: &str) -> String {
     // `char.is_digit(36)` ensures `char` is in `[A-Za-z0-9]`
-    id.chars().filter(|ch| ch.is_digit(36) || *ch == '_').collect()
+    id.chars()
+        .filter(|ch| ch.is_digit(36) || *ch == '_')
+        .collect()
 }
 
 

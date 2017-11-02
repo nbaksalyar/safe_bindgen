@@ -35,3 +35,4 @@ syntex_errors = {version = "0.58.1", optional = true}
 syntex_syntax = {version = "0.58.1", optional = true}
 toml = "0.3.2"
 clap = "2"
+Inflector = "0.10.1"
