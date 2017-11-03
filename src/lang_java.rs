@@ -6,6 +6,7 @@ use inflector::Inflector;
 use std::collections::hash_map::Entry;
 use syntax::ast;
 use syntax::codemap;
+use syntax::abi::Abi;
 use syntax::print::pprust;
 
 use Error;
@@ -27,7 +28,6 @@ impl common::Lang for LangJava {
         let name = item.ident.name.as_str();
 
         if let ast::ItemKind::Fn(ref fn_decl, _, _, abi, ref generics, _) = item.node {
-            use syntax::abi::Abi;
             match abi {
                 // If it doesn't have a C ABI it can't be called from C.
                 Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
@@ -163,7 +163,6 @@ fn callback_to_java(
     fn_ty: &ast::BareFnTy,
     fn_span: codemap::Span,
 ) -> Result<Option<String>, Error> {
-    use syntax::abi::Abi;
     match fn_ty.abi {
         // If it doesn't have a C ABI it can't be called from C.
         Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
@@ -179,9 +178,7 @@ fn callback_to_java(
     }
 
     let fn_decl: &ast::FnDecl = &*fn_ty.decl;
-
-    let mut buf = String::new();
-    let has_args = !fn_decl.inputs.is_empty();
+    let mut args = Vec::new();
 
     for arg in &fn_decl.inputs {
         if is_user_data_arg(arg) {
@@ -190,21 +187,10 @@ fn callback_to_java(
         }
 
         let arg_name = pprust::pat_to_string(&*arg.pat);
-        let arg_type = try_some!(rust_to_java(&*arg.ty, &arg_name));
-
-        buf.push_str(&arg_type);
-        buf.push_str(", ");
+        args.push(try_some!(rust_to_java(&*arg.ty, &arg_name)));
     }
 
-    if has_args {
-        // Remove the trailing comma and space.
-        buf.pop();
-        buf.pop();
-    } else {
-        buf.push_str("void");
-    }
-
-    Ok(Some(buf))
+    Ok(Some(args.join(", ")))
 }
 
 /// Converts a callback function argument into a Java interface name
@@ -213,7 +199,6 @@ fn callback_arg_to_java(
     fn_span: codemap::Span,
     inner: &str,
 ) -> Result<Option<String>, Error> {
-    use syntax::abi::Abi;
     match fn_ty.abi {
         // If it doesn't have a C ABI it can't be called from C.
         Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
