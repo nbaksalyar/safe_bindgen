@@ -106,23 +106,17 @@ pub fn parse_mod<L: Lang>(module: &ast::Mod) -> Result<Outputs, Vec<Error>> {
             // TODO: Check for ItemStatic and ItemConst as well.
             //     - How would this work?
             //     - Is it even possible?
-            ast::ItemKind::Ty(..) => L::parse_ty(item),
-            ast::ItemKind::Enum(..) => L::parse_enum(item),
-            ast::ItemKind::Struct(..) => L::parse_struct(item),
-            ast::ItemKind::Fn(..) => L::parse_fn(item),
-            _ => Ok(None),
+            ast::ItemKind::Ty(..) => L::parse_ty(item, &mut buffer),
+            ast::ItemKind::Enum(..) => L::parse_enum(item, &mut buffer),
+            ast::ItemKind::Struct(..) => L::parse_struct(item, &mut buffer),
+            ast::ItemKind::Fn(..) => L::parse_fn(item, &mut buffer),
+            _ => Ok(()),
         };
 
         match res {
             // Display any non-fatal errors, fatal errors are handled at cause.
             Err(error) => errors.push(error),
-            Ok(Some(buf)) => {
-                for (key, value) in buf.into_iter() {
-                    buffer.insert(key, value);
-                }
-            }
-            // TODO: put span notes in these or would that just get annoying?
-            Ok(None) => {}  // Item should not be written to header.
+            Ok(_) => {}  // Item should not be written to header.
         };
     }
 

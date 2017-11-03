@@ -3,7 +3,7 @@
 use common::{self, Outputs, is_user_data_arg, is_result_arg, parse_attr, check_no_mangle,
              retrieve_docstring};
 use inflector::Inflector;
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use syntax::ast;
 use syntax::codemap;
 use syntax::print::pprust;
@@ -15,13 +15,13 @@ pub struct LangJava;
 
 impl common::Lang for LangJava {
     /// Convert a Rust function declaration into Java.
-    fn parse_fn(item: &ast::Item) -> Result<Option<Outputs>, Error> {
+    fn parse_fn(item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
         let (no_mangle, docs) = parse_attr(&item.attrs, check_no_mangle, |attr| {
             retrieve_docstring(attr, "")
         });
         // If it's not #[no_mangle] then it can't be called from C.
         if !no_mangle {
-            return Ok(None);
+            return Ok(());
         }
 
         let name = item.ident.name.as_str();
@@ -31,7 +31,7 @@ impl common::Lang for LangJava {
             match abi {
                 // If it doesn't have a C ABI it can't be called from C.
                 Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
-                _ => return Ok(None),
+                _ => return Ok(()),
             }
 
             if generics.is_parameterized() {
@@ -42,9 +42,9 @@ impl common::Lang for LangJava {
                 });
             }
 
-            Ok(Some(
-                transform_native_fn(&*fn_decl, &docs, &format!("{}", name))?,
-            ))
+            transform_native_fn(&*fn_decl, &docs, &format!("{}", name), outputs)?;
+
+            Ok(())
         } else {
             Err(Error {
                 level: Level::Bug,
@@ -80,8 +80,8 @@ pub fn transform_native_fn(
     fn_decl: &ast::FnDecl,
     docs: &str,
     name: &str,
-) -> Result<Outputs, Error> {
-    let mut outputs = HashMap::new();
+    outputs: &mut Outputs,
+) -> Result<(), Error> {
     let mut args_str = Vec::new();
     let fn_args = common::fn_args(&fn_decl.inputs, name)?;
 
@@ -131,9 +131,14 @@ pub fn transform_native_fn(
     buffer.push_str(&func_decl);
     buffer.push_str(";\n\n");
 
-    let _ = outputs.insert(From::from("NativeBindings.java"), buffer);
+    match outputs.entry(From::from("NativeBindings.java")) {
+        Entry::Occupied(o) => o.into_mut().push_str(&buffer),
+        Entry::Vacant(v) => {
+            let _ = v.insert(buffer);
+        }
+    }
 
-    Ok(outputs)
+    Ok(())
 }
 
 /// Turn a Rust callback function type into a Java interface.

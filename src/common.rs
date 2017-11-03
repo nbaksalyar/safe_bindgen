@@ -14,23 +14,23 @@ pub type Outputs = HashMap<PathBuf, String>;
 /// Target language support
 pub trait Lang {
     /// Convert `pub type A = B;` into `typedef B A;`.
-    fn parse_ty(_item: &ast::Item) -> Result<Option<Outputs>, Error> {
-        Ok(None)
+    fn parse_ty(_item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        Ok(())
     }
 
     /// Convert a Rust enum into a target language enum.
-    fn parse_enum(_item: &ast::Item) -> Result<Option<Outputs>, Error> {
-        Ok(None)
+    fn parse_enum(_item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        Ok(())
     }
 
     /// Convert a Rust struct into a target language struct.
-    fn parse_struct(_item: &ast::Item) -> Result<Option<Outputs>, Error> {
-        Ok(None)
+    fn parse_struct(_item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        Ok(())
     }
 
     /// Convert a Rust function declaration into a target language function declaration.
-    fn parse_fn(_item: &ast::Item) -> Result<Option<Outputs>, Error> {
-        Ok(None)
+    fn parse_fn(_item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        Ok(())
     }
 }
 
