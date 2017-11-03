@@ -1,8 +1,9 @@
 //! Functions for converting Rust types to C types.
 
-use common::{self, is_user_data_arg, is_result_arg};
+use common::{self, Outputs, is_user_data_arg, is_result_arg, parse_attr, check_no_mangle,
+             retrieve_docstring};
 use inflector::Inflector;
-use std::path::PathBuf;
+use std::collections::HashMap;
 use syntax::ast;
 use syntax::codemap;
 use syntax::print::pprust;
@@ -10,10 +11,52 @@ use syntax::print::pprust;
 use Error;
 use Level;
 
-// type Outputs = HashMap<PathBuf, String>;
+pub struct LangJava;
+
+impl common::Lang for LangJava {
+    /// Convert a Rust function declaration into Java.
+    fn parse_fn(item: &ast::Item) -> Result<Option<Outputs>, Error> {
+        let (no_mangle, docs) = parse_attr(&item.attrs, check_no_mangle, |attr| {
+            retrieve_docstring(attr, "")
+        });
+        // If it's not #[no_mangle] then it can't be called from C.
+        if !no_mangle {
+            return Ok(None);
+        }
+
+        let name = item.ident.name.as_str();
+
+        if let ast::ItemKind::Fn(ref fn_decl, _, _, abi, ref generics, _) = item.node {
+            use syntax::abi::Abi;
+            match abi {
+                // If it doesn't have a C ABI it can't be called from C.
+                Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
+                _ => return Ok(None),
+            }
+
+            if generics.is_parameterized() {
+                return Err(Error {
+                    level: Level::Error,
+                    span: Some(item.span),
+                    message: "cheddar can not handle parameterized extern functions".into(),
+                });
+            }
+
+            Ok(Some(
+                transform_native_fn(&*fn_decl, &docs, &format!("{}", name))?,
+            ))
+        } else {
+            Err(Error {
+                level: Level::Bug,
+                span: Some(item.span),
+                message: "`parse_fn` called on wrong `Item_`".into(),
+            })
+        }
+    }
+}
 
 /// Get the Java interface name for the callback based on its types
-pub fn callback_name(inputs: &[ast::Arg], _name: &str) -> Result<Option<String>, Error> {
+pub fn callback_name(inputs: &[ast::Arg], _name: &str) -> Result<String, Error> {
     let mut basename = String::from("Callback");
 
     for ref arg in inputs {
@@ -22,11 +65,14 @@ pub fn callback_name(inputs: &[ast::Arg], _name: &str) -> Result<Option<String>,
             continue;
         }
 
-        let arg_type = try_some!(anon_rust_to_java(&*arg.ty)).to_class_case();
+        let arg_type = anon_rust_to_java(&*arg.ty)?
+            .map(|s| s.to_class_case())
+            .unwrap_or_default();
+
         basename.push_str(&arg_type);
     }
 
-    Ok(Some(basename))
+    Ok(basename)
 }
 
 /// Transform a Rust FFI function into a Java native function
@@ -34,15 +80,18 @@ pub fn transform_native_fn(
     fn_decl: &ast::FnDecl,
     docs: &str,
     name: &str,
-) -> Result<Option<String>, Error> {
-    let mut buffer = String::new();
+) -> Result<Outputs, Error> {
+    let mut outputs = HashMap::new();
     let mut args_str = Vec::new();
     let fn_args = common::fn_args(&fn_decl.inputs, name)?;
 
     // Generate callback classes
     for &(ref cb_name, ref cb_ty) in &fn_args {
-        if let ast::TyKind::BareFn(..) = cb_ty.node {
-            buffer.push_str(&try_some!(transform_callback(&*cb_ty, cb_name)));
+        if let ast::TyKind::BareFn(ref bare_fn) = cb_ty.node {
+            let cb_class = callback_name(&*bare_fn.decl.inputs, cb_name)?;
+            let cb_output = transform_callback(&*cb_ty, cb_name)?.unwrap_or_default();
+
+            let _ = outputs.insert(From::from(format!("{}.java", cb_class)), cb_output);
         }
     }
 
@@ -52,7 +101,7 @@ pub fn transform_native_fn(
             // Skip user_data args
             continue;
         }
-        args_str.push(try_some!(rust_to_java(&arg_ty, &arg_name)));
+        args_str.push(rust_to_java(&arg_ty, &arg_name)?.unwrap_or_default());
     }
 
     let output_type = &fn_decl.output;
@@ -65,7 +114,7 @@ pub fn transform_native_fn(
             });
         }
         ast::FunctionRetTy::Default(..) => String::from("public static native void"),
-        ast::FunctionRetTy::Ty(ref ty) => try_some!(rust_to_java(&*ty, "")),
+        ast::FunctionRetTy::Ty(ref ty) => rust_to_java(&*ty, "")?.unwrap_or_default(),
     };
 
     let func_decl = format!(
@@ -75,13 +124,16 @@ pub fn transform_native_fn(
         args_str.as_slice().join(", ")
     );
 
+    let mut buffer = String::new();
     buffer.push_str("/**\n");
     buffer.push_str(&docs.replace("///", " *"));
     buffer.push_str(" */\n");
     buffer.push_str(&func_decl);
     buffer.push_str(";\n\n");
 
-    Ok(Some(buffer))
+    let _ = outputs.insert(From::from("NativeBindings.java"), buffer);
+
+    Ok(outputs)
 }
 
 /// Turn a Rust callback function type into a Java interface.
@@ -89,7 +141,7 @@ pub fn transform_callback(ty: &ast::Ty, assoc: &str) -> Result<Option<String>, E
     match ty.node {
         ast::TyKind::BareFn(ref bare_fn) => Ok(Some(format!(
             "public interface {name} {{\n    public call({types});\n}}\n",
-            name = try_some!(callback_name(&*bare_fn.decl.inputs, assoc)),
+            name = callback_name(&*bare_fn.decl.inputs, assoc)?,
             types = try_some!(callback_to_java(bare_fn, ty.span)),
         ))),
         // All other types just have a name associated with them.
@@ -173,7 +225,7 @@ fn callback_arg_to_java(
 
     let cb_arg = format!(
         "{} {}",
-        try_some!(callback_name(&*fn_ty.decl.inputs, inner)),
+        callback_name(&*fn_ty.decl.inputs, inner)?,
         inner.to_camel_case()
     );
 

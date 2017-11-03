@@ -1,10 +1,8 @@
 //! Functions for actually parsing the source file.
 
+use common::{Lang, Outputs};
+use std::collections::HashMap;
 use syntax::ast;
-use syntax::print;
-
-use types;
-use types_java;
 use Error;
 use Level;
 
@@ -41,7 +39,7 @@ fn check_pub_use(item: &ast::Item, expected: &ast::Path) -> bool {
 ///
 /// Determines which module to parse, ensures it is `pub use`ed then hands off to
 /// `cheddar::parse::parse_mod`.
-pub fn parse_crate(krate: &ast::Crate, path: &ast::Path) -> Result<String, Vec<Error>> {
+pub fn parse_crate<L: Lang>(krate: &ast::Crate, path: &ast::Path) -> Result<Outputs, Vec<Error>> {
     // First look to see if the module has been `pub use`d.
     if !krate.module.items.iter().any(
         |item| check_pub_use(&item, &path),
@@ -86,16 +84,17 @@ pub fn parse_crate(krate: &ast::Crate, path: &ast::Path) -> Result<String, Vec<E
         }
     }
 
-    parse_mod(&current_module)
+    parse_mod::<L>(&current_module)
 }
 
 /// The manager of moz-cheddar and entry point when the crate is the module.
 ///
 /// Iterates through all items in the module and dispatches to correct methods, then pulls all
 /// the results together into a header.
-pub fn parse_mod(module: &ast::Mod) -> Result<String, Vec<Error>> {
-    let mut buffer = String::new();
+pub fn parse_mod<L: Lang>(module: &ast::Mod) -> Result<Outputs, Vec<Error>> {
+    let mut buffer = HashMap::new();
     let mut errors = vec![];
+
     for item in &module.items {
         // If it's not visible it can't be called from C.
         if let ast::Visibility::Inherited = item.vis {
@@ -107,17 +106,21 @@ pub fn parse_mod(module: &ast::Mod) -> Result<String, Vec<Error>> {
             // TODO: Check for ItemStatic and ItemConst as well.
             //     - How would this work?
             //     - Is it even possible?
-            ast::ItemKind::Ty(..) => parse_ty(item),
-            ast::ItemKind::Enum(..) => parse_enum(item),
-            ast::ItemKind::Struct(..) => parse_struct(item),
-            ast::ItemKind::Fn(..) => parse_fn(item),
+            ast::ItemKind::Ty(..) => L::parse_ty(item),
+            ast::ItemKind::Enum(..) => L::parse_enum(item),
+            ast::ItemKind::Struct(..) => L::parse_struct(item),
+            ast::ItemKind::Fn(..) => L::parse_fn(item),
             _ => Ok(None),
         };
 
         match res {
             // Display any non-fatal errors, fatal errors are handled at cause.
             Err(error) => errors.push(error),
-            Ok(Some(buf)) => buffer.push_str(&buf),
+            Ok(Some(buf)) => {
+                for (key, value) in buf.into_iter() {
+                    buffer.insert(key, value);
+                }
+            }
             // TODO: put span notes in these or would that just get annoying?
             Ok(None) => {}  // Item should not be written to header.
         };
@@ -127,294 +130,5 @@ pub fn parse_mod(module: &ast::Mod) -> Result<String, Vec<Error>> {
         Ok(buffer)
     } else {
         Err(errors)
-    }
-}
-
-/// Convert `pub type A = B;` into `typedef B A;`.
-///
-/// Aborts if A is generic.
-fn parse_ty(item: &ast::Item) -> Result<Option<String>, Error> {
-    let (_, docs) = parse_attr(&item.attrs, |_| true, |attr| retrieve_docstring(attr, ""));
-
-    let mut buffer = String::new();
-    buffer.push_str(&docs);
-
-    let name = item.ident.name.as_str();
-    let new_type = match item.node {
-        ast::ItemKind::Ty(ref ty, ref generics) => {
-            // Can not yet convert generics.
-            if generics.is_parameterized() {
-                return Ok(None);
-            }
-
-            try_some!(types::rust_to_c(&*ty, &name))
-        }
-        _ => {
-            return Err(Error {
-                level: Level::Bug,
-                span: Some(item.span),
-                message: "`parse_ty` called on wrong `Item_`".into(),
-            });
-        }
-    };
-
-    buffer.push_str(&format!("typedef {};\n\n", new_type));
-
-    Ok(Some(buffer))
-}
-
-/// Convert a Rust enum into a C enum.
-///
-/// The Rust enum must be marked with `#[repr(C)]` and must be public otherwise the function
-/// will abort.
-///
-/// Cheddar will error if the enum if generic or if it contains non-unit variants.
-fn parse_enum(item: &ast::Item) -> Result<Option<String>, Error> {
-    let (repr_c, docs) = parse_attr(
-        &item.attrs,
-        check_repr_c,
-        |attr| retrieve_docstring(attr, ""),
-    );
-    // If it's not #[repr(C)] then it can't be called from C.
-    if !repr_c {
-        return Ok(None);
-    }
-
-    let mut buffer = String::new();
-    buffer.push_str(&docs);
-
-    let name = item.ident.name.as_str();
-    buffer.push_str(&format!("typedef enum {} {{\n", name));
-    if let ast::ItemKind::Enum(ref definition, ref generics) = item.node {
-        if generics.is_parameterized() {
-            return Err(Error {
-                level: Level::Error,
-                span: Some(item.span),
-                message: "cheddar can not handle parameterized `#[repr(C)]` enums".into(),
-            });
-        }
-
-        for var in &definition.variants {
-            if !var.node.data.is_unit() {
-                return Err(Error {
-                    level: Level::Error,
-                    span: Some(var.span),
-                    message: "cheddar can not handle `#[repr(C)]` enums with non-unit variants"
-                        .into(),
-                });
-            }
-
-            let (_, docs) = parse_attr(
-                &var.node.attrs,
-                |_| true,
-                |attr| retrieve_docstring(attr, "\t"),
-            );
-            buffer.push_str(&docs);
-
-            buffer.push_str(&format!(
-                "\t{}_{},\n",
-                name,
-                print::pprust::variant_to_string(var)
-            ));
-        }
-    } else {
-        return Err(Error {
-            level: Level::Bug,
-            span: Some(item.span),
-            message: "`parse_enum` called on wrong `Item_`".into(),
-        });
-    }
-
-    buffer.push_str(&format!("}} {};\n\n", name));
-
-    Ok(Some(buffer))
-}
-
-/// Convert a Rust struct into a C struct.
-///
-/// The rust struct must be marked `#[repr(C)]` and must be public otherwise the function will
-/// abort.
-///
-/// Cheddar will error if the struct is generic or if the struct is a unit or tuple struct.
-fn parse_struct(item: &ast::Item) -> Result<Option<String>, Error> {
-    let (repr_c, docs) = parse_attr(
-        &item.attrs,
-        check_repr_c,
-        |attr| retrieve_docstring(attr, ""),
-    );
-    // If it's not #[repr(C)] then it can't be called from C.
-    if !repr_c {
-        return Ok(None);
-    }
-
-    let mut buffer = String::new();
-    buffer.push_str(&docs);
-
-    let name = item.ident.name.as_str();
-    buffer.push_str(&format!("typedef struct {}", name));
-
-    if let ast::ItemKind::Struct(ref variants, ref generics) = item.node {
-        if generics.is_parameterized() {
-            return Err(Error {
-                level: Level::Error,
-                span: Some(item.span),
-                message: "cheddar can not handle parameterized `#[repr(C)]` structs".into(),
-            });
-        }
-
-        if variants.is_struct() {
-            buffer.push_str(" {\n");
-
-            for field in variants.fields() {
-                let (_, docs) = parse_attr(
-                    &field.attrs,
-                    |_| true,
-                    |attr| retrieve_docstring(attr, "\t"),
-                );
-                buffer.push_str(&docs);
-
-                let name = match field.ident {
-                    Some(name) => name.name.as_str(),
-                    None => unreachable!("a tuple struct snuck through"),
-                };
-                let ty = try_some!(types::rust_to_c(&*field.ty, &name));
-                buffer.push_str(&format!("\t{};\n", ty));
-            }
-
-            buffer.push_str("}");
-        } else if variants.is_tuple() && variants.fields().len() == 1 {
-            // #[repr(C)] pub struct Foo(Bar);  =>  typedef struct Foo Foo;
-        } else {
-            return Err(Error {
-                level: Level::Error,
-                span: Some(item.span),
-                message: "cheddar can not handle unit or tuple `#[repr(C)]` structs with >1 members"
-                    .into(),
-            });
-        }
-    } else {
-        return Err(Error {
-            level: Level::Bug,
-            span: Some(item.span),
-            message: "`parse_struct` called on wrong `Item_`".into(),
-        });
-    }
-
-    buffer.push_str(&format!(" {};\n\n", name));
-
-    Ok(Some(buffer))
-}
-
-/// Convert a Rust function declaration into a C function declaration.
-///
-/// The function declaration must be marked `#[no_mangle]` and have a C ABI otherwise the
-/// function will abort.
-///
-/// If the declaration is generic or diverges then cheddar will error.
-fn parse_fn(item: &ast::Item) -> Result<Option<String>, Error> {
-    let (no_mangle, docs) = parse_attr(&item.attrs, check_no_mangle, |attr| {
-        retrieve_docstring(attr, "")
-    });
-    // If it's not #[no_mangle] then it can't be called from C.
-    if !no_mangle {
-        return Ok(None);
-    }
-
-    let name = item.ident.name.as_str();
-
-    if let ast::ItemKind::Fn(ref fn_decl, _, _, abi, ref generics, _) = item.node {
-        use syntax::abi::Abi;
-        match abi {
-            // If it doesn't have a C ABI it can't be called from C.
-            Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
-            _ => return Ok(None),
-        }
-
-        if generics.is_parameterized() {
-            return Err(Error {
-                level: Level::Error,
-                span: Some(item.span),
-                message: "cheddar can not handle parameterized extern functions".into(),
-            });
-        }
-        Ok(Some(try_some!(types_java::transform_native_fn(
-            &*fn_decl,
-            &docs,
-            &format!("{}", name),
-        ))))
-    } else {
-        Err(Error {
-            level: Level::Bug,
-            span: Some(item.span),
-            message: "`parse_fn` called on wrong `Item_`".into(),
-        })
-    }
-}
-
-
-// TODO: Maybe it would be wise to use syntax::attr here.
-/// Loop through a list of attributes.
-///
-/// Check that at least one attribute matches some criteria (usually #[repr(C)] or #[no_mangle])
-/// and optionally retrieve a String from it (usually a docstring).
-fn parse_attr<C, R>(attrs: &[ast::Attribute], check: C, retrieve: R) -> (bool, String)
-where
-    C: Fn(&ast::Attribute) -> bool,
-    R: Fn(&ast::Attribute) -> Option<String>,
-{
-    let mut check_passed = false;
-    let mut retrieved_str = String::new();
-    for attr in attrs {
-        // Don't want to accidently set it to false after it's been set to true.
-        if !check_passed {
-            check_passed = check(attr);
-        }
-        // If this attribute has any strings to retrieve, retrieve them.
-        if let Some(string) = retrieve(attr) {
-            retrieved_str.push_str(&string);
-        }
-    }
-
-    (check_passed, retrieved_str)
-}
-
-/// Check the attribute is #[repr(C)].
-fn check_repr_c(attr: &ast::Attribute) -> bool {
-    match attr.value.node {
-        ast::MetaItemKind::List(ref word) if attr.name() == "repr" => {
-            match word.first() {
-                Some(word) => {
-                    match word.node {
-                        // Return true only if attribute is #[repr(C)].
-                        ast::NestedMetaItemKind::MetaItem(ref item) if item.name == "C" => true,
-                        _ => false,
-                    }
-                }
-                _ => false,
-            }
-        }
-        _ => false,
-    }
-}
-
-/// Check the attribute is #[no_mangle].
-fn check_no_mangle(attr: &ast::Attribute) -> bool {
-    match attr.value.node {
-        ast::MetaItemKind::Word if attr.name() == "no_mangle" => true,
-        _ => false,
-    }
-}
-
-/// If the attribute is  a docstring, indent it the required amount and return it.
-fn retrieve_docstring(attr: &ast::Attribute, prepend: &str) -> Option<String> {
-    match attr.value.node {
-        ast::MetaItemKind::NameValue(ref val) if attr.name() == "doc" => {
-            match val.node {
-                // Docstring attributes omit the trailing newline.
-                ast::LitKind::Str(ref docs, _) => Some(format!("{}{}\n", prepend, docs)),
-                _ => unreachable!("docs must be literal strings"),
-            }
-        }
-        _ => None,
     }
 }

@@ -298,7 +298,7 @@ use std::convert;
 use std::io::Read;
 use std::io::Write;
 use std::path;
-
+use std::fs;
 
 /// Unwraps Result<Option<..>> if it is Ok(Some(..)) else returns.
 macro_rules! try_some {
@@ -310,10 +310,15 @@ macro_rules! try_some {
 
 
 mod common;
-mod types;
-mod types_java;
+// mod lang_c;
+mod lang_java;
 mod parse;
 
+
+use common::Outputs;
+use std::path::Path;
+use std::fmt::Display;
+use std::io::Error as IoError;
 
 pub use errors::Level;
 
@@ -327,7 +332,7 @@ pub struct Error {
     pub message: String,
 }
 
-impl std::fmt::Display for Error {
+impl Display for Error {
     fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(formatter, "{}: {}", self.level, self.message)
     }
@@ -342,6 +347,16 @@ impl std::error::Error for Error {
             Level::Note => "note",
             Level::Help => "help",
             _ => unreachable!(),
+        }
+    }
+}
+
+impl From<IoError> for Error {
+    fn from(e: IoError) -> Self {
+        Error {
+            level: Level::Fatal,
+            span: None,
+            message: format!("I/O Error: {}", e),
         }
     }
 }
@@ -555,8 +570,9 @@ impl Cheddar {
     /// This does not add any include-guards, includes, or extern declarations. It is mainly
     /// intended for internal use, but may be of interest to people who wish to embed
     /// moz-cheddar's generated code in another file.
-    pub fn compile_code(&self) -> Result<String, Vec<Error>> {
+    pub fn compile_code(&self) -> Result<Outputs, Vec<Error>> {
         let sess = &self.session;
+
         let krate = match self.input {
             Source::File(ref path) => syntax::parse::parse_crate_from_file(path, sess),
             Source::String(ref source) => {
@@ -571,10 +587,12 @@ impl Cheddar {
         }.unwrap();
 
         if let Some(ref module) = self.module {
-            parse::parse_crate(&krate, module)
+            parse::parse_crate::<lang_java::LangJava>(&krate, module)
         } else {
-            parse::parse_mod(&krate.module)
-        }.map(|source| format!("{}\n\n{}", self.custom_code, source))
+            parse::parse_mod::<lang_java::LangJava>(&krate.module)
+        }
+        // TODO: insert custom_code to each module?
+        // .map(|source| format!("{}\n\n{}", self.custom_code, source))
     }
 
     /// Compile the header declarations then add the needed `#include`s.
@@ -583,82 +601,40 @@ impl Cheddar {
     ///
     /// - `stdint.h`
     /// - `stdbool.h`
-    fn compile_with_includes(&self) -> Result<String, Vec<Error>> {
-        let code = try!(self.compile_code());
+    fn compile_with_includes(&self) -> Result<Outputs, Vec<Error>> {
+        Ok(self.compile_code()?)
 
-        Ok(format!(
-            "#include <stdint.h>\n#include <stdbool.h>\n\n{}",
-            code
-        ))
-    }
-
-    /// Compile a header while conforming to C89 (or ANSI C).
-    ///
-    /// This does not include `stdint.h` or `stdbool.h` and also wraps single line comments with
-    /// `/*` and `*/`.
-    ///
-    /// `id` is used to help generate the include guard and may be empty.
-    ///
-    /// # TODO
-    ///
-    /// This is intended to be a public API, but currently comments are not handled correctly so it
-    /// is being kept private.
-    ///
-    /// The parser should warn on uses of `bool` or fixed-width integers (`i16`, `u32`, etc.).
-    #[allow(dead_code)]
-    fn compile_c89(&self, id: &str) -> Result<String, Vec<Error>> {
-        let code = try!(self.compile_code());
-
-        Ok(wrap_guard(&wrap_extern(&code), id))
+        // TODO: insert custom code into each module
+        // Ok(format!(
+        //     "#include <stdint.h>\n#include <stdbool.h>\n\n{}",
+        //     code
+        // ))
     }
 
     /// Compile a header.
-    ///
-    /// `id` is used to help generate the include guard and may be empty.
-    pub fn compile(&self, id: &str) -> Result<String, Vec<Error>> {
-        let code = try!(self.compile_with_includes());
+    pub fn compile(&self) -> Result<Outputs, Vec<Error>> {
+        Ok(self.compile_with_includes()?)
 
-        Ok(wrap_guard(&wrap_extern(&code), id))
+        // TODO: wrap_guard and wrap_extern - move to lang_c
+        // Ok(wrap_guard(&wrap_extern(&code), id))
     }
 
-    /// Write the header to a file.
-    pub fn write<P: AsRef<path::Path>>(&self, file: P) -> Result<(), Vec<Error>> {
-        let file = file.as_ref();
+    fn write_outputs<P: AsRef<Path>>(&self, root: P, outputs: &Outputs) -> Result<(), IoError> {
+        let root = root.as_ref();
 
-        if let Some(dir) = file.parent() {
-            if let Err(error) = std::fs::create_dir_all(dir) {
-                return Err(vec![
-                    Error {
-                        level: Level::Fatal,
-                        span: None,
-                        message: format!(
-                            "could not create directories in '{}': {}",
-                            dir.display(),
-                            error
-                        ),
-                    },
-                ]);
+        for (path, contents) in outputs {
+            let full_path = root.join(path);
+
+            if let Some(parent_dirs) = full_path.parent() {
+                fs::create_dir_all(parent_dirs)?;
             }
+
+            let mut f = fs::File::create(full_path)?;
+            f.write_all(contents.as_bytes())?;
+            f.sync_all()?;
         }
 
-        let file_name = file.file_stem().map_or(
-            "default".into(),
-            |os| os.to_string_lossy(),
-        );
-        let header = try!(self.compile(&file_name));
-
-        let bytes_buf = header.into_bytes();
-        if let Err(error) = std::fs::File::create(&file).and_then(|mut f| f.write_all(&bytes_buf)) {
-            Err(vec![
-                Error {
-                    level: Level::Fatal,
-                    span: None,
-                    message: format!("could not write to '{}': {}", file.display(), error),
-                },
-            ])
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     /// Write the header to a file, panicking on error.
@@ -669,13 +645,20 @@ impl Cheddar {
     /// # Panics
     ///
     /// Panics on any compilation error so that the build script exits and prints output.
-    pub fn run_build<P: AsRef<path::Path>>(&self, file: P) {
-        if let Err(errors) = self.write(file) {
-            for error in &errors {
-                self.print_error(error);
+    pub fn run_build<P: AsRef<path::Path>>(&self, output_dir: P) {
+        match self.compile() {
+            Err(errors) => {
+                for error in &errors {
+                    self.print_error(error);
+                }
+                panic!("errors compiling header file");
             }
-
-            panic!("errors compiling header file");
+            Ok(outputs) => {
+                if let Err(err) = self.write_outputs(output_dir, &outputs) {
+                    self.print_error(&From::from(err));
+                    panic!("errors writing output");
+                }
+            }
         }
     }
 
@@ -730,61 +713,4 @@ fn source_file_from_cargo() -> std::result::Result<String, Error> {
             .unwrap_or(default)
             .into(),
     )
-}
-
-/// Wrap a block of code with an extern declaration.
-fn wrap_extern(code: &str) -> String {
-    format!(
-        r#"
-#ifdef __cplusplus
-extern "C" {{
-#endif
-
-{}
-
-#ifdef __cplusplus
-}}
-#endif
-"#,
-        code
-    )
-}
-
-/// Wrap a block of code with an include-guard.
-fn wrap_guard(code: &str, id: &str) -> String {
-    format!(
-        r"
-#ifndef cheddar_generated_{0}_h
-#define cheddar_generated_{0}_h
-
-{1}
-
-#endif
-",
-        sanitise_id(id),
-        code
-    )
-}
-
-/// Remove illegal characters from the identifier.
-///
-/// This is because macros names must be valid C identifiers. Note that the identifier will always
-/// be concatenated onto `cheddar_generated_` so can start with a digit.
-fn sanitise_id(id: &str) -> String {
-    // `char.is_digit(36)` ensures `char` is in `[A-Za-z0-9]`
-    id.chars()
-        .filter(|ch| ch.is_digit(36) || *ch == '_')
-        .collect()
-}
-
-
-#[cfg(test)]
-mod test {
-    #[test]
-    fn sanitise_id() {
-        assert!(super::sanitise_id("") == "");
-        assert!(super::sanitise_id("!@£$%^&*()_+") == "_");
-        // https://github.com/Sean1708/rusty-cheddar/issues/29
-        assert!(super::sanitise_id("filename.h") == "filenameh");
-    }
 }
