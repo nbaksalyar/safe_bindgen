@@ -315,11 +315,11 @@ mod lang_java;
 mod parse;
 
 
-use common::Outputs;
+use common::{Outputs, Lang};
 use std::path::Path;
 use std::fmt::Display;
 use std::io::Error as IoError;
-
+pub use lang_java::LangJava;
 pub use errors::Level;
 
 /// Describes an error encountered by the compiler.
@@ -570,7 +570,7 @@ impl Cheddar {
     /// This does not add any include-guards, includes, or extern declarations. It is mainly
     /// intended for internal use, but may be of interest to people who wish to embed
     /// moz-cheddar's generated code in another file.
-    pub fn compile_code(&self) -> Result<Outputs, Vec<Error>> {
+    pub fn compile_code<L: Lang>(&self) -> Result<Outputs, Vec<Error>> {
         let sess = &self.session;
 
         let krate = match self.input {
@@ -587,9 +587,9 @@ impl Cheddar {
         }.unwrap();
 
         if let Some(ref module) = self.module {
-            parse::parse_crate::<lang_java::LangJava>(&krate, module)
+            parse::parse_crate::<L>(&krate, module)
         } else {
-            parse::parse_mod::<lang_java::LangJava>(&krate.module)
+            parse::parse_mod::<L>(&krate.module)
         }
         // TODO: insert custom_code to each module?
         // .map(|source| format!("{}\n\n{}", self.custom_code, source))
@@ -601,8 +601,8 @@ impl Cheddar {
     ///
     /// - `stdint.h`
     /// - `stdbool.h`
-    fn compile_with_includes(&self) -> Result<Outputs, Vec<Error>> {
-        Ok(self.compile_code()?)
+    fn compile_with_includes<L: Lang>(&self) -> Result<Outputs, Vec<Error>> {
+        Ok(self.compile_code::<L>()?)
 
         // TODO: insert custom code into each module
         // Ok(format!(
@@ -612,8 +612,8 @@ impl Cheddar {
     }
 
     /// Compile a header.
-    pub fn compile(&self) -> Result<Outputs, Vec<Error>> {
-        Ok(self.compile_with_includes()?)
+    pub fn compile<L: Lang>(&self) -> Result<Outputs, Vec<Error>> {
+        Ok(self.compile_with_includes::<L>()?)
 
         // TODO: wrap_guard and wrap_extern - move to lang_c
         // Ok(wrap_guard(&wrap_extern(&code), id))
@@ -645,8 +645,8 @@ impl Cheddar {
     /// # Panics
     ///
     /// Panics on any compilation error so that the build script exits and prints output.
-    pub fn run_build<P: AsRef<path::Path>>(&self, output_dir: P) {
-        match self.compile() {
+    pub fn run_build<P: AsRef<path::Path>, L: Lang>(&self, output_dir: P) {
+        match self.compile::<L>() {
             Err(errors) => {
                 for error in &errors {
                     self.print_error(error);

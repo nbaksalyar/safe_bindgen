@@ -1,12 +1,16 @@
-extern crate cheddar;
+extern crate safe_bindgen;
 #[macro_use]
 extern crate clap;
 
+use safe_bindgen::{Cheddar, LangJava};
+
 fn main() {
-    let matches = clap::App::new("cheddar")
+    let matches = clap::App::new("bindgen")
         .version(crate_version!())
-        .author("Sean Marshallsay <srm.1708@gmail.com>")
-        .about("create a C header file using a Rust source file")
+        .author(
+            "Sean Marshallsay <srm.1708@gmail.com>, MaidSafe Developers <dev@maidsafe.net>",
+        )
+        .about("create binding files using a Rust source file")
         .arg(
             clap::Arg::with_name("FILE")
                 .short("-f")
@@ -24,6 +28,13 @@ fn main() {
                 .help("use a string as the source code"),
         )
         .arg(
+            clap::Arg::with_name("LANG")
+                .short("-l")
+                .long("--lang")
+                .takes_value(true)
+                .help("target language: java, c"),
+        )
+        .arg(
             clap::Arg::with_name("MODULE")
                 .short("-m")
                 .long("--module")
@@ -31,22 +42,22 @@ fn main() {
                 .help("the module containing the C API"),
         )
         .arg(clap::Arg::with_name("OUTPUT").index(1).help(
-            "set the output file name and path",
+            "set the output directory",
         ))
         .get_matches();
 
-    let mut cheddar = cheddar::Cheddar::new().expect("cargo manifest could not be read");
+    let mut bindgen = Cheddar::new().expect("cargo manifest could not be read");
 
     if let Some(file) = matches.value_of("FILE") {
-        cheddar.source_file(&file);
+        bindgen.source_file(&file);
     } else if let Some(string) = matches.value_of("STRING") {
-        cheddar.source_string(&string);
+        bindgen.source_string(&string);
     }
 
     if let Some(module) = matches.value_of("MODULE") {
-        if let Err(errs) = cheddar.module(&module) {
+        if let Err(errs) = bindgen.module(&module) {
             for err in errs {
-                cheddar.print_error(&err);
+                bindgen.print_error(&err);
             }
 
             panic!("errors setting module");
@@ -54,8 +65,8 @@ fn main() {
     }
 
     if let Some(output) = matches.value_of("OUTPUT") {
-        cheddar.run_build(&output);
+        bindgen.run_build::<&str, LangJava>(&output);
     } else {
-        cheddar.run_build("bind-gen");
+        bindgen.run_build::<&str, LangJava>("bind-gen");
     };
 }

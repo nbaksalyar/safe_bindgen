@@ -89,7 +89,7 @@ pub fn transform_native_fn(
     for &(ref cb_name, ref cb_ty) in &fn_args {
         if let ast::TyKind::BareFn(ref bare_fn) = cb_ty.node {
             let cb_class = callback_name(&*bare_fn.decl.inputs, cb_name)?;
-            let cb_output = transform_callback(&*cb_ty, cb_name)?.unwrap_or_default();
+            let cb_output = transform_callback(&*cb_ty, &cb_class)?.unwrap_or_default();
 
             let _ = outputs.insert(From::from(format!("{}.java", cb_class)), cb_output);
         }
@@ -142,11 +142,14 @@ pub fn transform_native_fn(
 }
 
 /// Turn a Rust callback function type into a Java interface.
-pub fn transform_callback(ty: &ast::Ty, assoc: &str) -> Result<Option<String>, Error> {
+pub fn transform_callback<S: AsRef<str>>(
+    ty: &ast::Ty,
+    class_name: S,
+) -> Result<Option<String>, Error> {
     match ty.node {
         ast::TyKind::BareFn(ref bare_fn) => Ok(Some(format!(
             "public interface {name} {{\n    public call({types});\n}}\n",
-            name = callback_name(&*bare_fn.decl.inputs, assoc)?,
+            name = class_name.as_ref(),
             types = try_some!(callback_to_java(bare_fn, ty.span)),
         ))),
         // All other types just have a name associated with them.
@@ -221,7 +224,6 @@ fn callback_arg_to_java(
 
     Ok(Some(cb_arg))
 }
-
 
 /// Turn a Rust type with an associated name or type into a C type.
 pub fn rust_to_java(ty: &ast::Ty, assoc: &str) -> Result<Option<String>, Error> {

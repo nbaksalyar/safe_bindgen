@@ -14,7 +14,7 @@ impl Lang for LangC {
     /// Convert `pub type A = B;` into `typedef B A;`.
     ///
     /// Aborts if A is generic.
-    fn parse_ty(item: &ast::Item) -> Result<Option<Outputs>, Error> {
+    fn parse_ty(item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
         let (_, docs) = parse_attr(&item.attrs, |_| true, |attr| retrieve_docstring(attr, ""));
 
         let mut buffer = String::new();
@@ -50,7 +50,7 @@ impl Lang for LangC {
     /// will abort.
     ///
     /// Cheddar will error if the enum if generic or if it contains non-unit variants.
-    fn parse_enum(item: &ast::Item) -> Result<Option<Outputs>, Error> {
+    fn parse_enum(item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
         let (repr_c, docs) = parse_attr(
             &item.attrs,
             check_repr_c,
@@ -117,7 +117,7 @@ impl Lang for LangC {
     /// abort.
     ///
     /// Cheddar will error if the struct is generic or if the struct is a unit or tuple struct.
-    fn parse_struct(item: &ast::Item) -> Result<Option<Outputs>, Error> {
+    fn parse_struct(item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
         let (repr_c, docs) = parse_attr(
             &item.attrs,
             check_repr_c,
@@ -192,7 +192,7 @@ impl Lang for LangC {
     /// function will abort.
     ///
     /// If the declaration is generic or diverges then cheddar will error.
-    fn parse_fn(item: &ast::Item) -> Result<Option<Outputs>, Error> {
+    fn parse_fn(item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
         let (no_mangle, docs) = parse_attr(&item.attrs, check_no_mangle, |attr| {
             retrieve_docstring(attr, "")
         });
@@ -534,9 +534,9 @@ fn rust_ty_to_c(ty: &str) -> &str {
         "u32" => "uint32_t",
         "u64" => "uint64_t",
         "usize" => "uintptr_t",
-        // This is why we write out structs and enums as `typedef ...`.
-        // We `#include <stdbool.h>` so bool is handled.
-        ty => ty,
+        // Fallback to libc because these types could be not fully-qualified ones:
+        // https://github.com/mozilla/moz-cheddar/issues/7
+        ty => libc_ty_to_c(ty),
     }
 }
 

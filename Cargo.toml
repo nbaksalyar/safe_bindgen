@@ -1,10 +1,11 @@
 [package]
-name = "moz-cheddar"
-version = "0.4.1"
+name = "safe_bindgen"
+version = "0.5.0"
 authors = ["Sean Marshallsay <srm.1708@gmail.com>",
-           "Matthew Gregan <kinetik@flim.org>"]
+           "Matthew Gregan <kinetik@flim.org>",
+           "MaidSafe Developers <dev@maidsafe.net>"]
 
-description = "A library to automatically generate C header files from Rust source files."
+description = "A library to automatically generate C and Java files from Rust source files."
 readme = "README.md"
 keywords = ["c", "header", "ffi"]
 
@@ -22,13 +23,13 @@ with-syntex = [
 ]
 
 [lib]
-name = "cheddar"
+name = "safe_bindgen"
 path = "src/lib.rs"
 
 [[bin]]
-name = "cheddar"
+name = "bindgen"
 doc = false
-path = "src/bin/cheddar.rs"
+path = "src/bin/bindgen.rs"
 
 [dependencies]
 syntex_errors = {version = "0.58.1", optional = true}
