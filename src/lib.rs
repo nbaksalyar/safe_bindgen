@@ -42,34 +42,6 @@
 //! Note that moz-cheddar emits very few warnings, it is up to the
 //! programmer to write a library which can be correctly called from C.
 //!
-//! ### API In a Module
-//!
-//! You can also place your API in a module to help keep your source code neat.
-//! To do this you must supply the name of the module to Cheddar, then ensure
-//! that the items are available in the top-level scope:
-//!
-//! ```no_run
-//! // build.rs
-//!
-//! extern crate cheddar;
-//!
-//! fn main() {
-//!     cheddar::Cheddar::new().expect("could not read manifest")
-//!         .module("c_api").expect("malformed module path")
-//!         .run_build("target/include/rusty.h");
-//! }
-//! ```
-//!
-//! ```ignore
-//! // src/lib.rs
-//!
-//! pub use c_api::*;
-//!
-//! mod c_api {
-//!     // api goes here ...
-//! }
-//! ```
-//!
 //! There are also `.compile()` and `.compile_code()` methods for finer control.
 //!
 //! # Conversions
@@ -295,10 +267,15 @@ extern crate inflector;
 extern crate toml;
 
 use std::convert;
-use std::io::Read;
-use std::io::Write;
-use std::path;
+use std::fmt::Display;
 use std::fs;
+use std::io::{Read, Write};
+use std::io::Error as IoError;
+use std::path::{self, Path};
+use std::collections::HashMap;
+use common::{Outputs, Lang};
+pub use lang_java::LangJava;
+pub use errors::Level;
 
 /// Unwraps Result<Option<..>> if it is Ok(Some(..)) else returns.
 macro_rules! try_some {
@@ -308,19 +285,10 @@ macro_rules! try_some {
     }}};
 }
 
-
 mod common;
 // mod lang_c;
 mod lang_java;
 mod parse;
-
-
-use common::{Outputs, Lang};
-use std::path::Path;
-use std::fmt::Display;
-use std::io::Error as IoError;
-pub use lang_java::LangJava;
-pub use errors::Level;
 
 /// Describes an error encountered by the compiler.
 ///
@@ -421,13 +389,6 @@ impl Error {
     }
 }
 
-
-/// Store the source code.
-enum Source {
-    String(String),
-    File(path::PathBuf),
-}
-
 /// Stores configuration for the Cheddar compiler.
 ///
 /// # Examples
@@ -456,30 +417,9 @@ enum Source {
 ///     .source_file("src/root.rs")
 ///     .run_build("include/my_header.h");
 /// ```
-///
-/// You can also supply the Rust source as a string.
-///
-/// ```no_run
-/// let rust = "pub type Float32 = f32;";
-/// cheddar::Cheddar::new().expect("unable to read cargo manifest")
-///     .source_string(rust)
-///     .run_build("target/include/header.h");
-/// ```
-///
-/// If you wish to hide your C API behind a module you must specify the module with `.module()`
-/// (don't forget to `pub use` the items in the module!).
-///
-/// ```no_run
-/// cheddar::Cheddar::new().expect("unable to read cargo manifest")
-///     .module("c_api").expect("malformed header path")
-///     .run_build("header.h");
-/// ```
 pub struct Cheddar {
     /// The root source file of the crate.
-    input: Source,
-    // TODO: this should be part of a ParseOpts struct
-    /// The module which contains the C API.
-    module: Option<syntax::ast::Path>,
+    input: path::PathBuf,
     /// Custom C code which is placed after the `#include`s.
     custom_code: String,
     /// The current parser session.
@@ -495,11 +435,10 @@ impl Cheddar {
     /// manifest available then the source file defaults to `src/lib.rs`.
     pub fn new() -> std::result::Result<Cheddar, Error> {
         let source_path = try!(source_file_from_cargo());
-        let input = Source::File(path::PathBuf::from(source_path));
+        let input = path::PathBuf::from(source_path);
 
         Ok(Cheddar {
             input: input,
-            module: None,
             custom_code: String::new(),
             session: syntax::parse::ParseSess::new(),
         })
@@ -512,47 +451,8 @@ impl Cheddar {
     where
         path::PathBuf: convert::From<T>,
     {
-        self.input = Source::File(path::PathBuf::from(path));
+        self.input = path::PathBuf::from(path);
         self
-    }
-
-    /// Set a string to be used as source code.
-    ///
-    /// Currently this should only be used with small strings as it requires at least one `.clone()`.
-    pub fn source_string(&mut self, source: &str) -> &mut Cheddar {
-        self.input = Source::String(source.to_owned());
-        self
-    }
-
-    /// Set the module which contains the header file.
-    ///
-    /// The module should be described using Rust's path syntax, i.e. in the same way that you
-    /// would `use` the module (`"path::to::api"`).
-    ///
-    /// # Fails
-    ///
-    /// If the path is malformed (e.g. `path::to:module`).
-    pub fn module(&mut self, module: &str) -> Result<&mut Cheddar, Vec<Error>> {
-        // TODO: `parse_item_from_source_str` doesn't work. Why?
-        let sess = syntax::parse::ParseSess::new();
-        let result = {
-            let mut parser =
-                ::syntax::parse::new_parser_from_source_str(&sess, "".into(), module.into());
-            parser.parse_path(syntax::parse::parser::PathStyle::Mod)
-        };
-
-        if let Ok(path) = result {
-            self.module = Some(path);
-            Ok(self)
-        } else {
-            Err(vec![
-                Error {
-                    level: Level::Fatal,
-                    span: None,
-                    message: format!("malformed module path `{}`", module),
-                },
-            ])
-        }
     }
 
     /// Insert custom code before the declarations which are parsed from the Rust source.
@@ -565,58 +465,57 @@ impl Cheddar {
         self
     }
 
+    fn compile_top_level_mod(&self) -> Result<Vec<Vec<String>>, Vec<Error>> {
+        let sess = &self.session;
+        let krate = syntax::parse::parse_crate_from_file(&self.input, sess).unwrap();
+        let mods = parse::imported_mods(&krate.module);
+
+        if mods.is_empty() {
+            return Err(vec![
+                Error {
+                    level: Level::Fatal,
+                    span: None,
+                    message: "no public-level FFI modules available".to_owned(),
+                },
+            ]);
+        }
+
+        Ok(mods)
+    }
+
     /// Compile just the code into header declarations.
     ///
     /// This does not add any include-guards, includes, or extern declarations. It is mainly
     /// intended for internal use, but may be of interest to people who wish to embed
     /// moz-cheddar's generated code in another file.
-    pub fn compile_code<L: Lang>(&self) -> Result<Outputs, Vec<Error>> {
-        let sess = &self.session;
-
-        let krate = match self.input {
-            Source::File(ref path) => syntax::parse::parse_crate_from_file(path, sess),
-            Source::String(ref source) => {
-                syntax::parse::parse_crate_from_source_str(
-                    "cheddar_source".to_owned(),
-                    // TODO: this clone could be quite costly, maybe rethink this design?
-                    //     or just use a slice.
-                    source.clone(),
-                    sess,
-                )
-            }
-        }.unwrap();
-
-        if let Some(ref module) = self.module {
-            parse::parse_crate::<L>(&krate, module)
-        } else {
-            parse::parse_mod::<L>(&krate.module)
-        }
-        // TODO: insert custom_code to each module?
-        // .map(|source| format!("{}\n\n{}", self.custom_code, source))
-    }
-
-    /// Compile the header declarations then add the needed `#include`s.
-    ///
-    /// Currently includes:
-    ///
-    /// - `stdint.h`
-    /// - `stdbool.h`
-    fn compile_with_includes<L: Lang>(&self) -> Result<Outputs, Vec<Error>> {
-        Ok(self.compile_code::<L>()?)
-
-        // TODO: insert custom code into each module
-        // Ok(format!(
-        //     "#include <stdint.h>\n#include <stdbool.h>\n\n{}",
-        //     code
-        // ))
-    }
-
-    /// Compile a header.
     pub fn compile<L: Lang>(&self) -> Result<Outputs, Vec<Error>> {
-        Ok(self.compile_with_includes::<L>()?)
+        let base_path = self.input.parent().unwrap();
+        let mods = self.compile_top_level_mod()?;
+        let mut outputs = HashMap::new();
 
-        // TODO: wrap_guard and wrap_extern - move to lang_c
-        // Ok(wrap_guard(&wrap_extern(&code), id))
+        for module in mods {
+            let mut mod_path = base_path.join(&format!(
+                "{}.rs",
+                module.join(&path::MAIN_SEPARATOR.to_string())
+            ));
+
+            if !mod_path.exists() {
+                mod_path = base_path.join(&format!(
+                    "{}/mod.rs",
+                    module.join(&path::MAIN_SEPARATOR.to_string())
+                ));
+            }
+
+            println!("Parsing {:?}", mod_path);
+
+            let krate = syntax::parse::parse_crate_from_file(&mod_path, &self.session).unwrap();
+            parse::parse_mod::<L>(&krate.module, &mut outputs)?;
+
+            // TODO: insert custom_code to each module?
+            // .map(|source| format!("{}\n\n{}", self.custom_code, source))
+        }
+
+        Ok(outputs)
     }
 
     fn write_outputs<P: AsRef<Path>>(&self, root: P, outputs: &Outputs) -> Result<(), IoError> {

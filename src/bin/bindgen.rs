@@ -20,26 +20,11 @@ fn main() {
                 .help("the root source file"),
         )
         .arg(
-            clap::Arg::with_name("STRING")
-                .short("-s")
-                .long("--string")
-                .conflicts_with("FILE")
-                .takes_value(true)
-                .help("use a string as the source code"),
-        )
-        .arg(
             clap::Arg::with_name("LANG")
                 .short("-l")
                 .long("--lang")
                 .takes_value(true)
                 .help("target language: java, c"),
-        )
-        .arg(
-            clap::Arg::with_name("MODULE")
-                .short("-m")
-                .long("--module")
-                .takes_value(true)
-                .help("the module containing the C API"),
         )
         .arg(clap::Arg::with_name("OUTPUT").index(1).help(
             "set the output directory",
@@ -50,23 +35,13 @@ fn main() {
 
     if let Some(file) = matches.value_of("FILE") {
         bindgen.source_file(&file);
-    } else if let Some(string) = matches.value_of("STRING") {
-        bindgen.source_string(&string);
     }
 
-    if let Some(module) = matches.value_of("MODULE") {
-        if let Err(errs) = bindgen.module(&module) {
-            for err in errs {
-                bindgen.print_error(&err);
-            }
-
-            panic!("errors setting module");
-        }
-    }
-
-    if let Some(output) = matches.value_of("OUTPUT") {
-        bindgen.run_build::<&str, LangJava>(&output);
+    let output_dir = if let Some(output) = matches.value_of("OUTPUT") {
+        output
     } else {
-        bindgen.run_build::<&str, LangJava>("bind-gen");
+        "bind-gen"
     };
+
+    bindgen.run_build::<&str, LangJava>(&output_dir);
 }

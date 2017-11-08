@@ -10,6 +10,20 @@ use Level;
 
 pub struct LangC;
 
+/// Compile the header declarations then add the needed `#include`s.
+///
+/// Currently includes:
+///
+/// - `stdint.h`
+/// - `stdbool.h`
+
+// TODO: insert custom code into each module
+// Ok(format!(
+//     "#include <stdint.h>\n#include <stdbool.h>\n\n{}",
+//     code
+// ))
+
+
 impl Lang for LangC {
     /// Convert `pub type A = B;` into `typedef B A;`.
     ///
