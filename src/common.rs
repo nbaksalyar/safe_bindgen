@@ -65,6 +65,17 @@ pub fn is_ptr_len_arg(arg: &ast::Arg) -> bool {
         (arg_name.ends_with("_len") || arg_name == "size" || arg_name == "len")
 }
 
+
+/// Detect array ptrs and skip the length args - e.g. for a case of
+/// `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
+pub fn is_array_arg(arg: &ast::Arg, next_arg: Option<&ast::Arg>) -> bool {
+    if let ast::TyKind::Ptr(ref ptr) = arg.ty.node {
+        pprust::ty_to_string(&ptr.ty) == "u8" && next_arg.map(is_ptr_len_arg).unwrap_or(false)
+    } else {
+        false
+    }
+}
+
 // TODO: Maybe it would be wise to use syntax::attr here.
 /// Loop through a list of attributes.
 ///

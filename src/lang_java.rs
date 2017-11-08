@@ -1,10 +1,9 @@
 //! Functions for converting Rust types to C types.
 
-use common::{self, Outputs, is_user_data_arg, is_result_arg, parse_attr, check_no_mangle,
-             retrieve_docstring};
+use common::{self, Outputs, is_user_data_arg, is_result_arg, is_array_arg, parse_attr,
+             check_no_mangle, retrieve_docstring};
 use inflector::Inflector;
 use std::collections::hash_map::Entry;
-use std::iter::Peekable;
 use std::path::PathBuf;
 use syntax::ast;
 use syntax::codemap;
@@ -81,7 +80,7 @@ pub fn callback_name(inputs: &[ast::Arg], _name: &str) -> Result<String, Error> 
             continue;
         }
 
-        let arg_type = anon_rust_to_java(&*arg.ty)?
+        let arg_type = anon_for_class_name(&*arg.ty)?
             .map(|s| s.to_class_case())
             .unwrap_or_default();
 
@@ -89,12 +88,6 @@ pub fn callback_name(inputs: &[ast::Arg], _name: &str) -> Result<String, Error> 
     }
 
     Ok(basename)
-}
-
-fn is_next_len_arg<'a, I: Iterator<Item = &'a ast::Arg>>(iter: &mut Peekable<I>) -> bool {
-    iter.peek()
-        .map(|arg| common::is_ptr_len_arg(&arg))
-        .unwrap_or(false)
 }
 
 /// Transform a Rust FFI function into a Java native function
@@ -112,12 +105,10 @@ pub fn transform_native_fn(
         .peekable();
 
     while let Some(arg) = fn_args.next() {
-        if let ast::TyKind::Ptr(ref ptr) = arg.ty.node {
+        if is_array_arg(&arg, fn_args.peek().cloned()) {
             // Detect array ptrs and skip the length args - e.g. for a case of
             // `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
-            if pprust::ty_to_string(&ptr.ty) == "u8" && is_next_len_arg(&mut fn_args) {
-                fn_args.next();
-            }
+            fn_args.next();
         }
 
         let arg_name = pprust::pat_to_string(&*arg.pat);
@@ -220,11 +211,9 @@ fn callback_to_java(
         .peekable();
 
     while let Some(arg) = args_iter.next() {
-        if let ast::TyKind::Ptr(ref ptr) = arg.ty.node {
+        if is_array_arg(&arg, args_iter.peek().cloned()) {
             // Detect array ptrs and skip the length args
-            if pprust::ty_to_string(&ptr.ty) == "u8" && is_next_len_arg(&mut args_iter) {
-                args_iter.next();
-            }
+            args_iter.next();
         }
         let arg_name = pprust::pat_to_string(&*arg.pat);
         args.push(try_some!(rust_to_java(&*arg.ty, &arg_name)));
@@ -303,6 +292,50 @@ fn anon_rust_to_java(ty: &ast::Ty) -> Result<Option<String>, Error> {
 
         // Plain old types.
         ast::TyKind::Path(None, ref path) => path_to_java(path),
+
+        // Possibly void, likely not.
+        _ => {
+            let new_type = pprust::ty_to_string(ty);
+            if new_type == "()" {
+                Ok(Some("void".into()))
+            } else {
+                Err(Error {
+                    level: Level::Error,
+                    span: Some(ty.span),
+                    message: format!("cheddar can not handle the type `{}`", new_type),
+                })
+            }
+        }
+    }
+}
+
+/// Turn a Rust type into a Java type signature for the callback class name.
+fn anon_for_class_name(ty: &ast::Ty) -> Result<Option<String>, Error> {
+    match ty.node {
+        // Function pointers should not be in this function.
+        ast::TyKind::BareFn(..) => Err(Error {
+            level: Level::Error,
+            span: Some(ty.span),
+            message: "C function pointers must have a name or function declaration associated with them"
+                .into(),
+        }),
+
+        // Standard pointers.
+        ast::TyKind::Ptr(ref ptr) => {
+            // Detect strings, which are *const c_char or *mut c_char
+            if pprust::ty_to_string(&ptr.ty) == "c_char" {
+                return Ok(Some("String".into()));
+            }
+            // Detect array ptrs
+            if pprust::ty_to_string(&ptr.ty) == "u8" {
+                return Ok(Some("ByteArray".into()));
+            }
+            anon_for_class_name(&ptr.ty)
+        }
+
+        // Plain old types.
+        ast::TyKind::Path(None, ref path) => path_to_java(path),
+
         // Possibly void, likely not.
         _ => {
             let new_type = pprust::ty_to_string(ty);
