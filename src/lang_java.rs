@@ -71,7 +71,7 @@ impl common::Lang for LangJava {
 }
 
 /// Get the Java interface name for the callback based on its types
-pub fn callback_name(inputs: &[ast::Arg], _name: &str) -> Result<String, Error> {
+pub fn callback_name(inputs: &[ast::Arg]) -> Result<String, Error> {
     let mut basename = String::from("Callback");
 
     let mut inputs = inputs.iter().peekable();
@@ -81,13 +81,15 @@ pub fn callback_name(inputs: &[ast::Arg], _name: &str) -> Result<String, Error> 
             // Skip user_data args
             continue;
         }
-        if is_array_arg(&arg, inputs.peek().cloned()) {
-            inputs.next();
-        }
 
-        let arg_type = anon_for_class_name(&*arg.ty)?
+        let mut arg_type = anon_rust_to_java(&*arg.ty)?
             .map(|s| s.to_class_case())
             .unwrap_or_default();
+
+        if is_array_arg(&arg, inputs.peek().cloned()) {
+            inputs.next();
+            arg_type.push_str("Array");
+        }
 
         basename.push_str(&arg_type);
     }
@@ -110,20 +112,24 @@ pub fn transform_native_fn(
         .peekable();
 
     while let Some(arg) = fn_args.next() {
-        if is_array_arg(&arg, fn_args.peek().cloned()) {
-            // Detect array ptrs and skip the length args - e.g. for a case of
-            // `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
-            fn_args.next();
-        }
-
         let arg_name = pprust::pat_to_string(&*arg.pat);
 
         // Generate function arguments
-        args_str.push(rust_to_java(&arg.ty, &arg_name)?.unwrap_or_default());
+        let mut java_type = rust_to_java(&arg.ty)?.unwrap_or_default();
+
+        if is_array_arg(&arg, fn_args.peek().cloned()) {
+            // This is an array, so add it to the type description
+            java_type.push_str("[]");
+
+            // Skip the length args - e.g. for a case of `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
+            fn_args.next();
+        }
+
+        args_str.push(format!("{} {}", java_type, arg_name.to_camel_case()));
 
         // Generate callback classes
         if let ast::TyKind::BareFn(ref bare_fn) = arg.ty.node {
-            let cb_class = callback_name(&*bare_fn.decl.inputs, &arg_name)?;
+            let cb_class = callback_name(&*bare_fn.decl.inputs)?;
             let cb_output = transform_callback(&*arg.ty, &cb_class)?.unwrap_or_default();
 
             let _ = outputs.insert(From::from(format!("{}.java", cb_class)), cb_output);
@@ -140,7 +146,7 @@ pub fn transform_native_fn(
             });
         }
         ast::FunctionRetTy::Default(..) => String::from("public static native void"),
-        ast::FunctionRetTy::Ty(ref ty) => rust_to_java(&*ty, "")?.unwrap_or_default(),
+        ast::FunctionRetTy::Ty(ref ty) => rust_to_java(&*ty)?.unwrap_or_default(),
     };
 
     let func_decl = format!(
@@ -216,12 +222,16 @@ fn callback_to_java(
         .peekable();
 
     while let Some(arg) = args_iter.next() {
+        let arg_name = pprust::pat_to_string(&*arg.pat);
+        let mut java_type = try_some!(rust_to_java(&*arg.ty));
+
         if is_array_arg(&arg, args_iter.peek().cloned()) {
-            // Detect array ptrs and skip the length args
+            // Detect array ptrs: skip the length args and add array to the type sig
+            java_type.push_str("[]");
             args_iter.next();
         }
-        let arg_name = pprust::pat_to_string(&*arg.pat);
-        args.push(try_some!(rust_to_java(&*arg.ty, &arg_name)));
+
+        args.push(format!("{} {}", java_type, arg_name.to_camel_case()));
     }
 
     Ok(Some(args.join(", ")))
@@ -231,7 +241,6 @@ fn callback_to_java(
 fn callback_arg_to_java(
     fn_ty: &ast::BareFnTy,
     fn_span: codemap::Span,
-    inner: &str,
 ) -> Result<Option<String>, Error> {
     match fn_ty.abi {
         // If it doesn't have a C ABI it can't be called from C.
@@ -247,27 +256,17 @@ fn callback_arg_to_java(
         });
     }
 
-    let cb_arg = format!(
-        "{} {}",
-        callback_name(&*fn_ty.decl.inputs, inner)?,
-        inner.to_camel_case()
-    );
-
-    Ok(Some(cb_arg))
+    Ok(Some(callback_name(&*fn_ty.decl.inputs)?))
 }
 
 /// Turn a Rust type with an associated name or type into a C type.
-pub fn rust_to_java(ty: &ast::Ty, assoc: &str) -> Result<Option<String>, Error> {
+pub fn rust_to_java(ty: &ast::Ty) -> Result<Option<String>, Error> {
     match ty.node {
-        // Function pointers make life an absolute pain here.
-        ast::TyKind::BareFn(ref bare_fn) => callback_arg_to_java(bare_fn, ty.span, assoc),
+        // This is a callback ref taken as a function argument
+        ast::TyKind::BareFn(ref bare_fn) => callback_arg_to_java(bare_fn, ty.span),
 
         // All other types just have a name associated with them.
-        _ => Ok(Some(format!(
-            "{} {}",
-            try_some!(anon_rust_to_java(ty)),
-            assoc.to_camel_case()
-        ))),
+        _ => anon_rust_to_java(ty),
     }
 }
 
@@ -288,54 +287,7 @@ fn anon_rust_to_java(ty: &ast::Ty) -> Result<Option<String>, Error> {
             if pprust::ty_to_string(&ptr.ty) == "c_char" {
                 return Ok(Some("String".into()));
             }
-            // Detect array ptrs
-            if pprust::ty_to_string(&ptr.ty) == "u8" {
-                return Ok(Some("byte[]".into()));
-            }
             anon_rust_to_java(&ptr.ty)
-        }
-
-        // Plain old types.
-        ast::TyKind::Path(None, ref path) => path_to_java(path),
-
-        // Possibly void, likely not.
-        _ => {
-            let new_type = pprust::ty_to_string(ty);
-            if new_type == "()" {
-                Ok(Some("void".into()))
-            } else {
-                Err(Error {
-                    level: Level::Error,
-                    span: Some(ty.span),
-                    message: format!("cheddar can not handle the type `{}`", new_type),
-                })
-            }
-        }
-    }
-}
-
-/// Turn a Rust type into a Java type signature for the callback class name.
-fn anon_for_class_name(ty: &ast::Ty) -> Result<Option<String>, Error> {
-    match ty.node {
-        // Function pointers should not be in this function.
-        ast::TyKind::BareFn(..) => Err(Error {
-            level: Level::Error,
-            span: Some(ty.span),
-            message: "C function pointers must have a name or function declaration associated with them"
-                .into(),
-        }),
-
-        // Standard pointers.
-        ast::TyKind::Ptr(ref ptr) => {
-            // Detect strings, which are *const c_char or *mut c_char
-            if pprust::ty_to_string(&ptr.ty) == "c_char" {
-                return Ok(Some("String".into()));
-            }
-            // Detect array ptrs
-            if pprust::ty_to_string(&ptr.ty) == "u8" {
-                return Ok(Some("ByteArray".into()));
-            }
-            anon_for_class_name(&ptr.ty)
         }
 
         // Plain old types.
