@@ -4,6 +4,7 @@ use common::{self, Outputs, is_user_data_arg, is_result_arg, parse_attr, check_n
              retrieve_docstring};
 use inflector::Inflector;
 use std::collections::hash_map::Entry;
+use std::iter::Peekable;
 use std::path::PathBuf;
 use syntax::ast;
 use syntax::codemap;
@@ -90,6 +91,12 @@ pub fn callback_name(inputs: &[ast::Arg], _name: &str) -> Result<String, Error> 
     Ok(basename)
 }
 
+fn is_next_len_arg<'a, I: Iterator<Item = &'a ast::Arg>>(iter: &mut Peekable<I>) -> bool {
+    iter.peek()
+        .map(|arg| common::is_ptr_len_arg(&arg))
+        .unwrap_or(false)
+}
+
 /// Transform a Rust FFI function into a Java native function
 pub fn transform_native_fn(
     fn_decl: &ast::FnDecl,
@@ -98,25 +105,33 @@ pub fn transform_native_fn(
     outputs: &mut Outputs,
 ) -> Result<(), Error> {
     let mut args_str = Vec::new();
-    let fn_args = common::fn_args(&fn_decl.inputs, name)?;
+    let mut fn_args = fn_decl
+        .inputs
+        .iter()
+        .filter(|arg| !is_user_data_arg(arg))
+        .peekable();
 
-    // Generate callback classes
-    for &(ref cb_name, ref cb_ty) in &fn_args {
-        if let ast::TyKind::BareFn(ref bare_fn) = cb_ty.node {
-            let cb_class = callback_name(&*bare_fn.decl.inputs, cb_name)?;
-            let cb_output = transform_callback(&*cb_ty, &cb_class)?.unwrap_or_default();
+    while let Some(arg) = fn_args.next() {
+        if let ast::TyKind::Ptr(ref ptr) = arg.ty.node {
+            // Detect array ptrs and skip the length args - e.g. for a case of
+            // `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
+            if pprust::ty_to_string(&ptr.ty) == "u8" && is_next_len_arg(&mut fn_args) {
+                fn_args.next();
+            }
+        }
+
+        let arg_name = pprust::pat_to_string(&*arg.pat);
+
+        // Generate function arguments
+        args_str.push(rust_to_java(&arg.ty, &arg_name)?.unwrap_or_default());
+
+        // Generate callback classes
+        if let ast::TyKind::BareFn(ref bare_fn) = arg.ty.node {
+            let cb_class = callback_name(&*bare_fn.decl.inputs, &arg_name)?;
+            let cb_output = transform_callback(&*arg.ty, &cb_class)?.unwrap_or_default();
 
             let _ = outputs.insert(From::from(format!("{}.java", cb_class)), cb_output);
         }
-    }
-
-    // Generate function arguments
-    for &(ref arg_name, ref arg_ty) in &fn_args {
-        if arg_name == "user_data" && pprust::ty_to_string(arg_ty) == "*mut c_void" {
-            // Skip user_data args
-            continue;
-        }
-        args_str.push(rust_to_java(&arg_ty, &arg_name)?.unwrap_or_default());
     }
 
     let output_type = &fn_decl.output;
@@ -198,12 +213,19 @@ fn callback_to_java(
     let fn_decl: &ast::FnDecl = &*fn_ty.decl;
     let mut args = Vec::new();
 
-    for arg in &fn_decl.inputs {
-        if is_user_data_arg(arg) {
-            // Skip user_data arguments
-            continue;
-        }
+    let mut args_iter = fn_decl
+        .inputs
+        .iter()
+        .filter(|arg| !is_user_data_arg(arg))
+        .peekable();
 
+    while let Some(arg) = args_iter.next() {
+        if let ast::TyKind::Ptr(ref ptr) = arg.ty.node {
+            // Detect array ptrs and skip the length args
+            if pprust::ty_to_string(&ptr.ty) == "u8" && is_next_len_arg(&mut args_iter) {
+                args_iter.next();
+            }
+        }
         let arg_name = pprust::pat_to_string(&*arg.pat);
         args.push(try_some!(rust_to_java(&*arg.ty, &arg_name)));
     }
@@ -271,6 +293,10 @@ fn anon_rust_to_java(ty: &ast::Ty) -> Result<Option<String>, Error> {
             // Detect strings, which are *const c_char or *mut c_char
             if pprust::ty_to_string(&ptr.ty) == "c_char" {
                 return Ok(Some("String".into()));
+            }
+            // Detect array ptrs
+            if pprust::ty_to_string(&ptr.ty) == "u8" {
+                return Ok(Some("byte[]".into()));
             }
             anon_rust_to_java(&ptr.ty)
         }
