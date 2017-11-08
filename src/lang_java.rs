@@ -267,7 +267,13 @@ fn anon_rust_to_java(ty: &ast::Ty) -> Result<Option<String>, Error> {
         }),
 
         // Standard pointers.
-        ast::TyKind::Ptr(ref ptr) => anon_rust_to_java(&ptr.ty),
+        ast::TyKind::Ptr(ref ptr) => {
+            // Detect strings, which are *const c_char or *mut c_char
+            if pprust::ty_to_string(&ptr.ty) == "c_char" {
+                return Ok(Some("String".into()));
+            }
+            anon_rust_to_java(&ptr.ty)
+        }
 
         // Plain old types.
         ast::TyKind::Path(None, ref path) => path_to_java(path),
@@ -393,6 +399,6 @@ fn rust_ty_to_java(ty: &str) -> &str {
         "usize" => "long",
         // This is why we write out structs and enums as `typedef ...`.
         // We `#include <stdbool.h>` so bool is handled.
-        ty => ty,
+        ty => libc_ty_to_java(ty),
     }
 }
