@@ -74,10 +74,15 @@ impl common::Lang for LangJava {
 pub fn callback_name(inputs: &[ast::Arg], _name: &str) -> Result<String, Error> {
     let mut basename = String::from("Callback");
 
-    for ref arg in inputs {
+    let mut inputs = inputs.iter().peekable();
+
+    while let Some(arg) = inputs.next() {
         if is_user_data_arg(arg) || is_result_arg(arg) {
             // Skip user_data args
             continue;
+        }
+        if is_array_arg(&arg, inputs.peek().cloned()) {
+            inputs.next();
         }
 
         let arg_type = anon_for_class_name(&*arg.ty)?
