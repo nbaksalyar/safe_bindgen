@@ -4,6 +4,7 @@ use common::{self, Outputs, is_user_data_arg, is_result_arg, parse_attr, check_n
              retrieve_docstring};
 use inflector::Inflector;
 use std::collections::hash_map::Entry;
+use std::path::PathBuf;
 use syntax::ast;
 use syntax::codemap;
 use syntax::abi::Abi;
@@ -51,6 +52,20 @@ impl common::Lang for LangJava {
                 span: Some(item.span),
                 message: "`parse_fn` called on wrong `Item_`".into(),
             })
+        }
+    }
+
+    fn finalise_output(outputs: &mut Outputs) -> Result<(), Error> {
+        match outputs.get_mut(&PathBuf::from("NativeBindings.java")) {
+            Some(funcs) => {
+                *funcs = format!("public class NativeBindings {{\n{}\n}}", funcs);
+                Ok(())
+            }
+            None => Err(Error {
+                level: Level::Error,
+                span: None,
+                message: "no native bindings generated?".to_owned(),
+            }),
         }
     }
 }

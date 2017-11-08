@@ -329,6 +329,12 @@ impl From<IoError> for Error {
     }
 }
 
+impl From<Error> for Vec<Error> {
+    fn from(e: Error) -> Self {
+        vec![e]
+    }
+}
+
 impl Error {
     /// Use a ParseSess to print the error in the correct format.
     #[allow(unused_must_use)]
@@ -471,13 +477,11 @@ impl Cheddar {
         let mods = parse::imported_mods(&krate.module);
 
         if mods.is_empty() {
-            return Err(vec![
-                Error {
-                    level: Level::Fatal,
-                    span: None,
-                    message: "no public-level FFI modules available".to_owned(),
-                },
-            ]);
+            return Err(From::from(Error {
+                level: Level::Fatal,
+                span: None,
+                message: "no public-level FFI modules available".to_owned(),
+            }));
         }
 
         Ok(mods)
@@ -514,6 +518,8 @@ impl Cheddar {
             // TODO: insert custom_code to each module?
             // .map(|source| format!("{}\n\n{}", self.custom_code, source))
         }
+
+        L::finalise_output(&mut outputs)?;
 
         Ok(outputs)
     }

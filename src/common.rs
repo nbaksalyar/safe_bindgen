@@ -32,6 +32,11 @@ pub trait Lang {
     fn parse_fn(_item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         Ok(())
     }
+
+    /// Add extra and custom code after the code generation part is done.
+    fn finalise_output(_outputs: &mut Outputs) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 /// Check the attribute is #[no_mangle].
