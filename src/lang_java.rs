@@ -55,6 +55,76 @@ impl common::Lang for LangJava {
         }
     }
 
+    /// Convert a Rust struct into a Java class.
+    fn parse_struct(item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
+        let (repr_c, docs) = parse_attr(&item.attrs, common::check_repr_c, |attr| {
+            retrieve_docstring(attr, "")
+        });
+        // If it's not #[repr(C)] then it can't be called from C.
+        if !repr_c {
+            return Ok(());
+        }
+
+        let mut buffer = String::new();
+        buffer.push_str(&docs);
+
+        let name = item.ident.name.as_str().to_class_case();
+        buffer.push_str(&format!("public class {}", name));
+
+        if let ast::ItemKind::Struct(ref variants, ref generics) = item.node {
+            if generics.is_parameterized() {
+                return Err(Error {
+                    level: Level::Error,
+                    span: Some(item.span),
+                    message: "cheddar can not handle parameterized `#[repr(C)]` structs".into(),
+                });
+            }
+
+            if variants.is_struct() {
+                buffer.push_str(" {\n");
+
+                for field in variants.fields() {
+                    let (_, docs) = parse_attr(
+                        &field.attrs,
+                        |_| true,
+                        |attr| retrieve_docstring(attr, "\t"),
+                    );
+                    buffer.push_str(&docs);
+
+                    let name = match field.ident {
+                        Some(name) => name.name.as_str().to_camel_case(),
+                        None => unreachable!("a tuple struct snuck through"),
+                    };
+                    let ty = rust_to_java(&*field.ty)?.unwrap_or_default();
+                    buffer.push_str(&format!("\tpublic {} {};\n", ty, name));
+                }
+
+                buffer.push_str("}");
+            } else if variants.is_tuple() && variants.fields().len() == 1 {
+                // #[repr(C)] pub struct Foo(Bar);  =>  typedef struct Foo Foo;
+            } else {
+                return Err(Error {
+                    level: Level::Error,
+                    span: Some(item.span),
+                    message: "cheddar can not handle unit or tuple `#[repr(C)]` structs with >1 members"
+                        .into(),
+                });
+            }
+        } else {
+            return Err(Error {
+                level: Level::Bug,
+                span: Some(item.span),
+                message: "`parse_struct` called on wrong `Item_`".into(),
+            });
+        }
+
+        buffer.push_str(";\n\n");
+
+        outputs.insert(From::from(format!("{}.java", name)), buffer);
+
+        Ok(())
+    }
+
     fn finalise_output(outputs: &mut Outputs) -> Result<(), Error> {
         match outputs.get_mut(&PathBuf::from("NativeBindings.java")) {
             Some(funcs) => {
