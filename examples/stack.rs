@@ -1,3 +1,5 @@
+/* TODO: fix this example
+
 //! Demonstrates a C API based on the stack.
 extern crate cheddar;
 
@@ -22,7 +24,8 @@ pub enum Eye {
 
 #[no_mangle]
 pub extern fn Student_print(student: Student, alt_colour: Eye) {
-    println!("Student {} has {:?} eyes but I prefer {:?}.", student.id, student.eye_colour, alt_colour);
+    println!("Student {} has {:?} eyes but I prefer {:?}.",
+    student.id, student.eye_colour, alt_colour);
 }
 
 #[no_mangle]
@@ -40,3 +43,6 @@ fn main() {
     println!("RUST SOURCE FILE:\n{}\n", RUST);
     println!("GENERATED HEADER:\n\n{}", header);
 }
+
+*/
+fn main() {}

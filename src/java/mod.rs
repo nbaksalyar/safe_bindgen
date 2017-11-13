@@ -1,17 +1,17 @@
 //! Functions for converting Rust types to Java types.
 
-use common::{self, Outputs, is_user_data_arg, is_result_arg, is_array_arg, parse_attr,
-             check_no_mangle, retrieve_docstring};
-use inflector::Inflector;
-use std::collections::hash_map::{HashMap, Entry};
-use std::path::PathBuf;
-use syntax::ast;
-use syntax::abi::Abi;
-use syntax::print::pprust;
-use syntax::codemap;
 
 use Error;
 use Level;
+use common::{self, Outputs, check_no_mangle, is_array_arg, is_result_arg, is_user_data_arg,
+             parse_attr, retrieve_docstring};
+use inflector::Inflector;
+use std::collections::hash_map::{HashMap, Entry};
+use std::path::PathBuf;
+use syntax::abi::Abi;
+use syntax::ast;
+use syntax::codemap;
+use syntax::print::pprust;
 
 mod jni;
 
@@ -40,10 +40,9 @@ impl common::Lang for LangJava {
         let name = item.ident.name.as_str();
 
         if let ast::ItemKind::Fn(ref fn_decl, _, _, abi, ref generics, _) = item.node {
-            match abi {
+            if !common::is_extern(abi) {
                 // If it doesn't have a C ABI it can't be called from C.
-                Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
-                _ => return Ok(()),
+                return Ok(());
             }
 
             if generics.is_parameterized() {
@@ -124,7 +123,8 @@ impl common::Lang for LangJava {
                 return Err(Error {
                     level: Level::Error,
                     span: Some(item.span),
-                    message: "cheddar can not handle unit or tuple `#[repr(C)]` structs with >1 members"
+                    message: "cheddar can not handle unit or tuple `#[repr(C)]` \
+                              structs with >1 members"
                         .into(),
                 });
             }
@@ -223,7 +223,8 @@ pub fn transform_native_fn(
             // This is an array, so add it to the type description
             java_type.push_str("[]");
 
-            // Skip the length args - e.g. for a case of `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
+            // Skip the length args - e.g. for a case of `ptr: *const u8, ptr_len: usize`
+            // we're going to skip the `len` part.
             fn_args.next();
         }
 
@@ -422,7 +423,8 @@ fn anon_rust_to_java(
         ast::TyKind::BareFn(..) => Err(Error {
             level: Level::Error,
             span: Some(ty.span),
-            message: "C function pointers must have a name or function declaration associated with them"
+            message: "C function pointers must have a name or function declaration \
+                      associated with them"
                 .into(),
         }),
 
@@ -486,7 +488,8 @@ fn path_to_java(
             _ => Err(Error {
                 level: Level::Error,
                 span: Some(path.span),
-                message: "cheddar can not handle types in other modules (except `libc` and `std::os::raw`)"
+                message: "cheddar can not handle types in other modules \
+                          (except `libc` and `std::os::raw`)"
                     .into(),
             }),
         }

@@ -1,10 +1,11 @@
 //! Functions common for all target languages.
 
-use std::path::PathBuf;
+use Error;
 use std::collections::HashMap;
+use std::path::PathBuf;
+use syntax::abi::Abi;
 use syntax::ast;
 use syntax::print::pprust;
-use Error;
 
 /// Outputs several files as a result of an AST transformation.
 pub type Outputs = HashMap<PathBuf, String>;
@@ -131,5 +132,14 @@ pub fn retrieve_docstring(attr: &ast::Attribute, prepend: &str) -> Option<String
             }
         }
         _ => None,
+    }
+}
+
+/// Returns whether the calling convention of the function is compatible with
+/// C (i.e. `extern "C"`).
+pub fn is_extern(abi: Abi) -> bool {
+    match abi {
+        Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => true,
+        _ => false,
     }
 }

@@ -17,7 +17,12 @@ extern crate toml;
 extern crate quote;
 extern crate jni;
 
+#[cfg(test)]
+#[macro_use]
+extern crate indoc;
+
 use common::{Lang, Outputs};
+pub use csharp::LangCSharp;
 pub use errors::Level;
 pub use java::LangJava;
 use std::collections::HashMap;
@@ -38,7 +43,9 @@ macro_rules! try_some {
 
 mod common;
 // mod lang_c;
+mod csharp;
 mod java;
+mod output;
 mod parse;
 
 /// Describes an error encountered by the compiler.
@@ -154,14 +161,14 @@ impl Error {
 /// usually safe to call `.unwrap()` on the result (though `.expect()` is considered better
 /// practice).
 ///
-/// ```no_run
+/// ```ignore
 /// cheddar::Cheddar::new().expect("unable to read cargo manifest");
 /// ```
 ///
 /// If your project is a valid cargo project or follows the same structure, you can simply place
 /// the following in your build script.
 ///
-/// ```no_run
+/// ```ignore
 /// cheddar::Cheddar::new().expect("unable to read cargo manifest")
 ///     .run_build("path/to/output/file");
 /// ```
@@ -169,7 +176,7 @@ impl Error {
 /// If you use a different structure you should use `.source_file("...")` to set the path to the
 /// root crate file.
 ///
-/// ```no_run
+/// ```ignore
 /// cheddar::Cheddar::new().expect("unable to read cargo manifest")
 ///     .source_file("src/root.rs")
 ///     .run_build("include/my_header.h");

@@ -1,3 +1,5 @@
+/* TODO: fix this example
+
 //! Demonstrates a C API based around passing pointers.
 extern crate cheddar;
 
@@ -56,3 +58,6 @@ fn main() {
     println!("RUST SOURCE FILE:\n{}\n", RUST);
     println!("GENERATED HEADER:\n\n{}", header);
 }
+*/
+
+fn main() {}
