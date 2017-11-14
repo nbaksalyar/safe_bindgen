@@ -77,6 +77,35 @@ trait JniAstBuilder: AstBuilder {
             ],
         )
     }
+
+    /// `env.<method>(<args>).unwrap()`
+    fn env_method_call(&self, method: &str, args: Vec<P<ast::Expr>>) -> P<ast::Expr> {
+        let exp = self.expr_method_call(
+            DUMMY_SP,
+            self.expr_ident(DUMMY_SP, Ident::from_str("env")),
+            Ident::from_str(method),
+            args,
+        );
+
+        // unwrap
+        self.expr_method_call(DUMMY_SP, exp, Ident::from_str("unwrap"), vec![])
+    }
+
+    /// Generates `env.new_global_ref(<arg_name>).unwrap()` expr
+    fn new_global_ref(&self, arg_name: &str) -> P<ast::Expr> {
+        self.env_method_call(
+            "new_global_ref",
+            vec![self.expr_ident(DUMMY_SP, Ident::from_str(arg_name))],
+        )
+    }
+
+    /// Generates `env.delete_global_ref(<arg_name>).unwrap()` expr
+    fn delete_local_ref(&self, arg_name: &str) -> P<ast::Expr> {
+        self.env_method_call(
+            "delete_local_ref",
+            vec![self.expr_ident(DUMMY_SP, Ident::from_str(arg_name))],
+        )
+    }
 }
 
 impl<'a> JniAstBuilder for ExtCtxt<'a> {}
@@ -195,10 +224,42 @@ fn transform_array_arg<Ast: AstBuilder + JniAstBuilder>(ast: &Ast, arg_name: &st
 
 fn transform_callbacks_arg<Ast: AstBuilder + JniAstBuilder>(
     ast: &Ast,
-    cb_args: Vec<ast::BareFnTy>,
+    cb_args: Vec<P<ast::BareFnTy>>,
 ) -> JniArgResult {
-    let stmts = vec![];
-    let call_args = vec![];
+    let mut stmts = Vec::new();
+    let mut call_args = vec![ast.expr_ident(DUMMY_SP, Ident::from_str("ctx"))];
+
+    if cb_args.len() > 1 {
+        // Handle more than one cb
+
+        // let cbs_slice = ast.expr_vec(DUMMY_SP, exprs);
+        // ast.stmt_let(DUMMY_SP, false, Ident::from_str("ctx"), cbs_slice);
+    } else {
+        let cb_name = "o_cb";
+
+        // let ctx = env.new_global_ref(...).unwrap().into_raw_pointer();
+        stmts.push(ast.stmt_let(
+            DUMMY_SP,
+            false,
+            Ident::from_str("ctx"),
+            ast.expr_method_call(
+                DUMMY_SP,
+                ast.new_global_ref(cb_name),
+                Ident::from_str("into_raw_pointer"),
+                vec![],
+            ),
+        ));
+
+        // env.delete_local_ref(...).unwrap()
+        stmts.push(ast.stmt_expr(ast.delete_local_ref(cb_name)));
+
+        // Some(callback_name)
+        call_args.push(ast.expr_some(
+            DUMMY_SP,
+            ast.expr_ident(DUMMY_SP, Ident::from_str("callback_fn")),
+        ));
+    }
+
     JniArgResult { stmts, call_args }
 }
 
@@ -256,6 +317,10 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
         stmts.extend(jni_arg_res.stmts);
         jni_fn_args.push(transform_jni_arg(&ast, &arg));
     }
+
+    let cb_arg_res = transform_callbacks_arg(&ast, callbacks);
+    call_args.extend(cb_arg_res.call_args);
+    stmts.extend(cb_arg_res.stmts);
 
     // Call the native backend function
     let fn_call = ast.expr_call_ident(
