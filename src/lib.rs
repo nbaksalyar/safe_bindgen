@@ -274,7 +274,7 @@ use std::io::Error as IoError;
 use std::path::{self, Path};
 use std::collections::HashMap;
 use common::{Outputs, Lang};
-pub use lang_java::LangJava;
+pub use java::LangJava;
 pub use errors::Level;
 
 /// Unwraps Result<Option<..>> if it is Ok(Some(..)) else returns.
@@ -287,7 +287,7 @@ macro_rules! try_some {
 
 mod common;
 // mod lang_c;
-mod lang_java;
+mod java;
 mod parse;
 
 /// Describes an error encountered by the compiler.

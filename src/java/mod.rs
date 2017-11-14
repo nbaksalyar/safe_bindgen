@@ -1,4 +1,4 @@
-//! Functions for converting Rust types to C types.
+//! Functions for converting Rust types to Java types.
 
 use common::{self, Outputs, is_user_data_arg, is_result_arg, is_array_arg, parse_attr,
              check_no_mangle, retrieve_docstring};
@@ -6,12 +6,14 @@ use inflector::Inflector;
 use std::collections::hash_map::Entry;
 use std::path::PathBuf;
 use syntax::ast;
-use syntax::codemap;
 use syntax::abi::Abi;
 use syntax::print::pprust;
+use syntax::codemap;
 
 use Error;
 use Level;
+
+mod jni;
 
 pub struct LangJava;
 
@@ -175,11 +177,11 @@ pub fn transform_native_fn(
     outputs: &mut Outputs,
 ) -> Result<(), Error> {
     let mut args_str = Vec::new();
-    let mut fn_args = fn_decl
-        .inputs
-        .iter()
-        .filter(|arg| !is_user_data_arg(arg))
-        .peekable();
+
+    let mut fn_args = fn_decl.inputs.iter().filter(|arg| !is_user_data_arg(arg));
+    let filtered_fn_args: Vec<_> = fn_args.by_ref().cloned().collect();
+
+    let mut fn_args = fn_args.peekable();
 
     while let Some(arg) = fn_args.next() {
         let arg_name = pprust::pat_to_string(&*arg.pat);
@@ -219,10 +221,11 @@ pub fn transform_native_fn(
         ast::FunctionRetTy::Ty(ref ty) => rust_to_java(&*ty)?.unwrap_or_default(),
     };
 
+    let java_name = name.to_camel_case();
     let func_decl = format!(
         "{} {}({})",
         return_type,
-        name.to_camel_case(),
+        &java_name,
         args_str.as_slice().join(", ")
     );
 
@@ -239,6 +242,11 @@ pub fn transform_native_fn(
             let _ = v.insert(buffer);
         }
     }
+
+    println!(
+        "{}\n",
+        jni::generate_jni_function(filtered_fn_args, name, &java_name)
+    );
 
     Ok(())
 }
