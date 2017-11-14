@@ -12,6 +12,8 @@ use syntax::ext::quote::rt::{Span, DUMMY_SP};
 use syntax::ext::base::{DummyResolver, ExtCtxt};
 use syntax::ext::build::AstBuilder;
 use syntax::ext::expand::ExpansionConfig;
+use syntax::tokenstream::TokenTree;
+use syntax::parse::token::Token;
 
 trait JniAstBuilder: AstBuilder {
     fn no_mangle_attr(&self, span: Span) -> ast::Attribute {
@@ -89,22 +91,6 @@ trait JniAstBuilder: AstBuilder {
 
         // unwrap
         self.expr_method_call(DUMMY_SP, exp, Ident::from_str("unwrap"), vec![])
-    }
-
-    /// Generates `env.new_global_ref(<arg_name>).unwrap()` expr
-    fn new_global_ref(&self, arg_name: &str) -> P<ast::Expr> {
-        self.env_method_call(
-            "new_global_ref",
-            vec![self.expr_ident(DUMMY_SP, Ident::from_str(arg_name))],
-        )
-    }
-
-    /// Generates `env.delete_global_ref(<arg_name>).unwrap()` expr
-    fn delete_local_ref(&self, arg_name: &str) -> P<ast::Expr> {
-        self.env_method_call(
-            "delete_local_ref",
-            vec![self.expr_ident(DUMMY_SP, Ident::from_str(arg_name))],
-        )
     }
 }
 
@@ -226,39 +212,46 @@ fn transform_callbacks_arg<Ast: AstBuilder + JniAstBuilder>(
     ast: &Ast,
     cb_args: Vec<P<ast::BareFnTy>>,
 ) -> JniArgResult {
+    let cb_name = "o_cb";
+
     let mut stmts = Vec::new();
     let mut call_args = vec![ast.expr_ident(DUMMY_SP, Ident::from_str("ctx"))];
 
-    if cb_args.len() > 1 {
+    let tok_tree = if cb_args.len() > 1 {
         // Handle more than one cb
-
-        // let cbs_slice = ast.expr_vec(DUMMY_SP, exprs);
-        // ast.stmt_let(DUMMY_SP, false, Ident::from_str("ctx"), cbs_slice);
-    } else {
-        let cb_name = "o_cb";
-
-        // let ctx = env.new_global_ref(...).unwrap().into_raw_pointer();
-        stmts.push(ast.stmt_let(
-            DUMMY_SP,
-            false,
-            Ident::from_str("ctx"),
-            ast.expr_method_call(
+        cb_args.iter().fold(Vec::new(), |mut tt, arg| {
+            if !tt.is_empty() {
+                tt.push(TokenTree::Token(DUMMY_SP, Token::Comma));
+            }
+            tt.push(TokenTree::Token(
                 DUMMY_SP,
-                ast.new_global_ref(cb_name),
-                Ident::from_str("into_raw_pointer"),
-                vec![],
-            ),
-        ));
-
-        // env.delete_local_ref(...).unwrap()
-        stmts.push(ast.stmt_expr(ast.delete_local_ref(cb_name)));
-
+                Token::Ident(Ident::from_str(cb_name)),
+            ));
+            tt
+        })
+    } else {
         // Some(callback_name)
         call_args.push(ast.expr_some(
             DUMMY_SP,
             ast.expr_ident(DUMMY_SP, Ident::from_str("callback_fn")),
         ));
-    }
+        vec![
+            TokenTree::Token(DUMMY_SP, Token::Ident(Ident::from_str(cb_name))),
+        ]
+    };
+
+    stmts.push(ast.stmt_let(
+        DUMMY_SP,
+        false,
+        Ident::from_str("ctx"),
+        ast.expr(
+            DUMMY_SP,
+            ast::ExprKind::Mac(dummy_spanned(ast::Mac_ {
+                path: ast.path_ident(DUMMY_SP, Ident::from_str("gen_ctx")),
+                tts: tok_tree,
+            })),
+        ),
+    ));
 
     JniArgResult { stmts, call_args }
 }
