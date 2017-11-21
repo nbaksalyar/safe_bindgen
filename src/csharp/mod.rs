@@ -54,19 +54,20 @@ impl LangCSharp {
         }
     }
 
+    /// Set the name of the static class containing all transformed functions and
+    /// constants. By default this is derived from the linked library name.
+    pub fn set_class_name<T: Into<String>>(&mut self, name: T) {
+        self.context.class_name = name.into();
+    }
+
     /// Add additional `using` declaration.
     pub fn add_using_decl<T: Into<String>>(&mut self, decl: T) {
         let _ = self.using_decls.insert(decl.into());
     }
 
-    /// Add additional const definition.
-    pub fn add_const(&mut self, name: &str, ty: &str, value: &str) {
-        self.custom_decls.push(format!(
-            "public const {} {} = {};\n",
-            ty,
-            name,
-            value
-        ));
+    /// Add additional declaration.
+    pub fn add_custom_decl<T: Into<String>>(&mut self, decl: T) {
+        self.custom_decls.push(decl.into());
     }
 
     /// Ignore the function with the given name when transforming to the target language.

@@ -13,6 +13,8 @@ macro_rules! emit {
     }
 }
 
+/// Emits public function to wrap the native function, performing any necessary
+/// transformations.
 pub fn emit_function_wrapper(
     output: &mut IndentedOutput,
     context: &Context,
@@ -50,6 +52,11 @@ pub fn emit_function_wrapper(
         emit!(output, ";\n");
     }
 
+    match fun.output {
+        Type::Unit => (),
+        _ => emit!(output, "return "),
+    }
+
     emit!(output, "{}(", name);
 
     let mut first = true;
@@ -69,6 +76,9 @@ pub fn emit_function_wrapper(
             emit!(output, ")");
 
             callback_index += 1;
+        } else if let Type::Array(_, ArraySize::Dynamic) = *ty {
+            let name = name.to_camel_case();
+            emit!(output, "{}, (ulong) {}.Length", name, name);
         } else {
             emit!(output, "{}", name.to_camel_case());
         }
@@ -80,6 +90,7 @@ pub fn emit_function_wrapper(
     emit!(output, "}}\n\n");
 }
 
+/// Emit the declaration of the native function.
 pub fn emit_function_extern_decl(
     output: &mut IndentedOutput,
     context: &Context,
@@ -88,15 +99,7 @@ pub fn emit_function_extern_decl(
     lib_name: &str,
 ) {
     emit!(output, "[DllImport(\"{}\")]\n", lib_name);
-    emit_function_decl(
-        output,
-        context,
-        "private static extern",
-        name,
-        fun,
-        true,
-        false,
-    );
+    emit_function_decl(output, context, "private static", name, fun, true, false);
     emit!(output, ";\n\n");
 }
 
@@ -107,7 +110,7 @@ pub fn emit_struct_field(
     ty: &Type,
     name: &str,
 ) {
-    emit_marshal_as(output, context, ty, "\n");
+    emit_marshal_as(output, context, ty, None, "\n");
     emit!(output, "{} ", access);
     emit_managed_type(output, ty);
     emit!(output, " {};\n", name);
@@ -138,15 +141,20 @@ fn emit_function_decl(
     modifiers: &str,
     name: &str,
     fun: &Function,
-    marshal_params: bool,
+    native: bool,
     skip_user_data: bool,
 ) {
     emit!(output, "{} ", modifiers);
+
+    if native {
+        emit!(output, "extern ");
+    }
+
     emit_managed_type(output, &fun.output);
     emit!(output, " {}(", name);
 
     let mut first = true;
-    for &(ref name, ref ty) in &fun.inputs {
+    for (index, &(ref name, ref ty)) in fun.inputs.iter().enumerate() {
         // Skip the user data pointer.
         if skip_user_data && is_user_data(name, ty) {
             continue;
@@ -158,8 +166,8 @@ fn emit_function_decl(
             emit!(output, ", ");
         }
 
-        if marshal_params {
-            emit_marshal_as(output, context, ty, " ");
+        if native {
+            emit_marshal_as(output, context, ty, Some(index), " ");
         }
 
         if let Some(fun) = extract_callback(ty) {
@@ -169,13 +177,25 @@ fn emit_function_decl(
         }
 
         emit!(output, " {}", name.to_camel_case());
+
+        if native {
+            if let Type::Array(_, ArraySize::Dynamic) = *ty {
+                emit!(output, ", ulong {}Len", name);
+            }
+        }
     }
 
     emit!(output, ")");
 
 }
 
-fn emit_marshal_as(output: &mut IndentedOutput, context: &Context, ty: &Type, append: &str) {
+fn emit_marshal_as(
+    output: &mut IndentedOutput,
+    context: &Context,
+    ty: &Type,
+    index: Option<usize>,
+    append: &str,
+) {
     if let Some(unmanaged) = unmanaged_type(ty) {
         emit!(output, "[MarshalAs(UnmanagedType.{}", unmanaged);
 
@@ -184,10 +204,16 @@ fn emit_marshal_as(output: &mut IndentedOutput, context: &Context, ty: &Type, ap
                 emit!(output, ", ArraySubType = UnmanagedType.{}", unmanaged);
             }
 
-            emit!(output, ", SizeConst = ");
             match *size {
-                ArraySize::Lit(value) => emit!(output, "{}", value),
-                ArraySize::Const(ref name) => emit!(output, "{}.{}", context.class_name, name),
+                ArraySize::Lit(value) => emit!(output, ", SizeConst = {}", value),
+                ArraySize::Const(ref name) => {
+                    emit!(output, ", SizeConst = {}.{}", context.class_name, name)
+                }
+                ArraySize::Dynamic => {
+                    if let Some(index) = index {
+                        emit!(output, ", SizeParamIndex = {}", index + 1)
+                    }
+                }
             }
         }
 
@@ -200,7 +226,8 @@ fn unmanaged_type(ty: &Type) -> Option<&str> {
         Type::Bool => Some("Bool"),
         // TODO: consider marshaling as "LPUTF8Str", is possible and useful.
         Type::String => Some("LPStr"),
-        Type::Array(..) => Some("ByValArray"),
+        Type::Array(_, ArraySize::Dynamic) => Some("LPArray"),
+        Type::Array(_, _) => Some("ByValArray"),
         _ => None,
     }
 }
@@ -223,7 +250,13 @@ fn emit_managed_type(output: &mut IndentedOutput, ty: &Type) {
         Type::U64 => emit!(output, "ulong"),
         Type::USize => emit!(output, "ulong"),
         Type::String => emit!(output, "String"),
-        Type::Pointer(..) => emit!(output, "IntPtr"),
+        Type::Pointer(ref ty) => {
+            match **ty {
+                // Pointer to an user type => object reference
+                Type::User(ref name) => emit!(output, "{}", name),
+                _ => emit!(output, "IntPtr"),
+            }
+        }
         Type::Array(ref ty, ..) => {
             emit_managed_type(output, ty);
             emit!(output, "[]")

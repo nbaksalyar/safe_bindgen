@@ -333,8 +333,6 @@ fn functions_with_array_params() {
     let actual = compile!(None, {
         #[no_mangle]
         pub extern "C" fn fun0(ids: *const u8, ids_len: usize) {}
-        #[no_mangle]
-        pub extern "C" fn fun1(records: *const Record, record_len: usize) {}
     });
 
     let expected = indoc!(
@@ -343,14 +341,41 @@ fn functions_with_array_params() {
 
          public static class Backend {
              public static void Fun0(byte[] ids) {
-                 fun0(ids, ids.Length);
+                 fun0(ids, (ulong) ids.Length);
              }
 
              [DllImport(\"backend\")]
-             private static void fun0(\
+             private static extern void fun0(\
                 [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] ids, \
                 ulong idsLen\
              );
+
+         }
+        "
+    );
+
+    assert_multiline_eq!(actual, expected);
+}
+
+#[test]
+fn functions_with_return_values() {
+    let actual = compile!(None, {
+        #[no_mangle]
+        pub extern "C" fn fun0(arg: i32) -> bool {}
+    });
+
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+
+         public static class Backend {
+             public static bool Fun0(int arg) {
+                 return fun0(arg);
+             }
+
+             [DllImport(\"backend\")]
+             private static extern bool fun0(int arg);
+
          }
         "
     );
@@ -361,7 +386,7 @@ fn functions_with_array_params() {
 #[test]
 fn constants() {
     let mut lang = LangCSharp::new("backend");
-    lang.add_const("CONST_CUSTOM", "byte", "45");
+    lang.add_custom_decl("public const byte CONST_CUSTOM = 45;");
 
     let actual = compile!(lang, {
         /// Comment for `CONST_NUMBER`.
@@ -377,7 +402,6 @@ fn constants() {
          public static class Backend {
              #region custom declarations
              public const byte CONST_CUSTOM = 45;
-
              #endregion
 
              /// Comment for `CONST_NUMBER`.

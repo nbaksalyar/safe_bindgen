@@ -5,6 +5,7 @@ use common;
 use syntax::ast;
 use syntax::print::pprust;
 
+#[derive(Clone)]
 pub enum Type {
     Unit,
     Bool,
@@ -28,11 +29,14 @@ pub enum Type {
     User(String),
 }
 
+#[derive(Clone)]
 pub enum ArraySize {
     Lit(usize),
     Const(String),
+    Dynamic,
 }
 
+#[derive(Clone)]
 pub struct Function {
     pub inputs: Vec<(String, Type)>,
     pub output: Type,
@@ -64,25 +68,58 @@ pub fn transform_function(decl: &ast::FnDecl) -> Option<Function> {
         }
     };
 
-    let inputs: Option<_> = decl.inputs
-        .iter()
-        .map(|arg| {
-            let ty = match transform_type(&*arg.ty) {
-                Some(ty) => ty,
-                None => return None,
-            };
+    let mut inputs = Vec::with_capacity(decl.inputs.len());
 
-            let name = pprust::pat_to_string(&*arg.pat);
+    let mut iter = decl.inputs.iter();
+    let mut param = None;
 
-            Some((name, ty))
-        })
-        .collect();
-    let inputs = match inputs {
-        Some(inputs) => inputs,
-        None => return None,
-    };
+    loop {
+        if let Some(param) = param.take() {
+            inputs.push(param);
+        } else {
+            if let Some(arg) = iter.next() {
+                let (name, ty) = match transform_function_param(arg) {
+                    Some(param) => param,
+                    None => return None,
+                };
+
+                if let Some(next_arg) = iter.next() {
+                    let (next_name, next_ty) = match transform_function_param(next_arg) {
+                        Some(param) => param,
+                        None => return None,
+                    };
+
+                    if let Some(new_param) = transform_ptr_and_len_to_array(
+                        &name,
+                        &ty,
+                        &next_name,
+                        &next_ty,
+                    )
+                    {
+                        param = Some(new_param);
+                    } else {
+                        inputs.push((name, ty));
+                        param = Some((next_name, next_ty));
+                    }
+                } else {
+                    param = Some((name, ty));
+                }
+            } else {
+                break;
+            }
+        }
+    }
 
     Some(Function { inputs, output })
+}
+
+pub fn transform_function_param(arg: &ast::Arg) -> Option<(String, Type)> {
+    if let Some(ty) = transform_type(&*arg.ty) {
+        let name = pprust::pat_to_string(&*arg.pat);
+        Some((name, ty))
+    } else {
+        None
+    }
 }
 
 pub fn transform_const_value(expr: &ast::Expr) -> Option<String> {
@@ -145,6 +182,36 @@ fn extract_array_size(expr: &ast::Expr) -> Option<ArraySize> {
     }
 }
 
+fn transform_ptr_and_len_to_array(
+    base_name: &str,
+    base_ty: &Type,
+    len_name: &str,
+    len_ty: &Type,
+) -> Option<(String, Type)> {
+    let elem_ty = if let Type::Pointer(ref ty) = *base_ty {
+        &**ty
+    } else {
+        return None;
+    };
+
+    if let Type::USize = *len_ty {
+    } else {
+        return None;
+    }
+
+    // Matches "foo_ptr"/"foo_len" or "foo"/"foo_len"
+
+    let index = base_name.rfind("_ptr").unwrap_or(base_name.len());
+    if &len_name[0..index] == &base_name[0..index] && &len_name[index..] == "_len" {
+        Some((
+            base_name[0..index].to_string(),
+            Type::Array(Box::new(elem_ty.clone()), ArraySize::Dynamic),
+        ))
+    } else {
+        None
+    }
+}
+
 fn transform_path(input: &ast::Ty) -> Option<Type> {
     let full = pprust::ty_to_string(input);
     let output = match full.as_str() {
@@ -176,7 +243,6 @@ fn transform_path(input: &ast::Ty) -> Option<Type> {
 fn transform_pointer(ptr: &ast::MutTy) -> Option<Type> {
     match transform_type(&ptr.ty) {
         Some(Type::CChar) => Some(Type::String),
-        Some(Type::User(name)) => Some(Type::User(name)),
         Some(ty) => Some(Type::Pointer(Box::new(ty))),
         _ => None,
     }
