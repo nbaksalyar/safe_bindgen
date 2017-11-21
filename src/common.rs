@@ -12,6 +12,12 @@ pub type Outputs = HashMap<PathBuf, String>;
 
 /// Target language support
 pub trait Lang {
+    /// Convert a Rust constant (`pub const NAME: Type = value;`) into a target
+    /// language constant.
+    fn parse_const(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        Ok(())
+    }
+
     /// Convert `pub type A = B;` into `typedef B A;`.
     fn parse_ty(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         Ok(())

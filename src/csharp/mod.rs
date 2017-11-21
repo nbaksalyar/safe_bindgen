@@ -20,12 +20,19 @@ use syntax::print::pprust;
 const INDENT_WIDTH: usize = 4;
 const TYPES: &'static str = "_types";
 const FUNCTIONS: &'static str = "_functions";
+const CONSTANTS: &'static str = "_constants";
 
 pub struct LangCSharp {
     lib_name: String,
     using_decls: BTreeSet<String>,
+    custom_decls: Vec<String>,
     ignored_functions: HashSet<String>,
     callback_arities: BTreeSet<Vec<usize>>,
+    context: Context,
+}
+
+pub struct Context {
+    class_name: String,
 }
 
 impl LangCSharp {
@@ -34,24 +41,66 @@ impl LangCSharp {
         let _ = using_decls.insert("System".to_string());
         let _ = using_decls.insert("System.Runtime.InteropServices".to_string());
 
+        let lib_name = lib_name.into();
+        let class_name = lib_name.to_pascal_case();
+
         LangCSharp {
-            lib_name: lib_name.into(),
+            lib_name,
             using_decls,
+            custom_decls: Vec::new(),
             ignored_functions: Default::default(),
             callback_arities: Default::default(),
+            context: Context { class_name },
         }
     }
 
+    /// Add additional `using` declaration.
     pub fn add_using_decl<T: Into<String>>(&mut self, decl: T) {
         let _ = self.using_decls.insert(decl.into());
     }
 
+    /// Add additional const definition.
+    pub fn add_const(&mut self, name: &str, ty: &str, value: &str) {
+        self.custom_decls.push(format!(
+            "public const {} {} = {};\n",
+            ty,
+            name,
+            value
+        ));
+    }
+
+    /// Ignore the function with the given name when transforming to the target language.
     pub fn ignore_function<T: Into<String>>(&mut self, name: T) {
         let _ = self.ignored_functions.insert(name.into());
     }
 }
 
 impl Lang for LangCSharp {
+    fn parse_const(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
+        let (_, docs) = common::parse_attr(&item.attrs, |_| true, retrieve_docstring);
+
+        if let ast::ItemKind::Const(ref ty, ref expr) = item.node {
+            let name = &*item.ident.name.as_str();
+            let ty = transform_type(ty).ok_or_else(|| unknown_type_error(ty))?;
+            let value = transform_const_value(expr).ok_or_else(|| {
+                let value = pprust::expr_to_string(expr);
+
+                Error {
+                    level: Level::Error,
+                    span: Some(expr.span),
+                    message: format!("bindgen can not handle constant value {}", value),
+                }
+            })?;
+
+            let mut output = output(outputs, CONSTANTS);
+
+            emit!(output, "{}", docs);
+            emit_const(&mut output, name, &ty, &value)
+        }
+
+        Ok(())
+    }
+
     fn parse_ty(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
         let (_, docs) = common::parse_attr(&item.attrs, |_| true, retrieve_docstring);
         let name = &*item.ident.name.as_str();
@@ -70,7 +119,7 @@ impl Lang for LangCSharp {
             emit!(output, "public struct {} {{\n", name);
             output.indent();
 
-            emit_struct_field(&mut output, "private", &ty, "value");
+            emit_struct_field(&mut output, &self.context, "private", &ty, "value");
 
             output.unindent();
             emit!(output, "}}\n\n");
@@ -176,7 +225,7 @@ impl Lang for LangCSharp {
                 )?;
 
                 emit!(output, "{}", doc);
-                emit_struct_field(&mut output, "public", &ty, &name);
+                emit_struct_field(&mut output, &self.context, "public", &ty, &name);
             }
 
             output.unindent();
@@ -227,17 +276,17 @@ impl Lang for LangCSharp {
             })?;
 
             let callbacks = extract_callbacks(&function.inputs);
-            let arities: Vec<_> = callbacks
+            let callback_arities: Vec<_> = callbacks
                 .into_iter()
                 .map(|(_, ref fun)| callback_arity(fun))
                 .collect();
-            if !arities.is_empty() {
-                let _ = self.callback_arities.insert(arities);
+            if !callback_arities.is_empty() {
+                let _ = self.callback_arities.insert(callback_arities);
             }
 
             emit!(output, "{}", docs);
-            emit_function_wrapper(&mut output, &name, &function);
-            emit_function_extern_decl(&mut output, &name, &function, &self.lib_name);
+            emit_function_wrapper(&mut output, &self.context, &name, &function);
+            emit_function_extern_decl(&mut output, &self.context, &name, &function, &self.lib_name);
         }
 
         Ok(())
@@ -254,8 +303,11 @@ impl Lang for LangCSharp {
             let functions = outputs.remove(Path::new(FUNCTIONS)).unwrap_or(
                 String::new(),
             );
+            let constants = outputs.remove(Path::new(CONSTANTS)).unwrap_or(
+                String::new(),
+            );
 
-            if !types.is_empty() || !functions.is_empty() {
+            if !types.is_empty() || !functions.is_empty() || !constants.is_empty() {
                 for decl in &self.using_decls {
                     emit!(output, "using {};\n", decl);
                 }
@@ -264,10 +316,19 @@ impl Lang for LangCSharp {
 
             emit!(output, "{}", types);
 
-            if !functions.is_empty() {
+            if !functions.is_empty() || !constants.is_empty() {
                 emit!(output, "public static class {} {{\n", class_name);
                 output.indent();
 
+                if !self.custom_decls.is_empty() {
+                    emit!(output, "#region custom declarations\n");
+                    for decl in &self.custom_decls {
+                        emit!(output, "{}\n", decl);
+                    }
+                    emit!(output, "#endregion\n\n");
+                }
+
+                emit!(output, "{}", constants);
                 emit!(output, "{}", functions);
                 emit_callback_wrappers(&mut output, &self.callback_arities);
 

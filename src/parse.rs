@@ -55,9 +55,7 @@ pub fn parse_mod<L: Lang>(
 
         // Dispatch to correct method.
         let res = match item.node {
-            // TODO: Check for ItemStatic and ItemConst as well.
-            //     - How would this work?
-            //     - Is it even possible?
+            ast::ItemKind::Const(..) => lang.parse_const(item, outputs),
             ast::ItemKind::Ty(..) => lang.parse_ty(item, outputs),
             ast::ItemKind::Enum(..) => lang.parse_enum(item, outputs),
             ast::ItemKind::Struct(..) => lang.parse_struct(item, outputs),

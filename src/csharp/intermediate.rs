@@ -23,9 +23,14 @@ pub enum Type {
     USize,
     String,
     Pointer(Box<Type>),
-    Array(Box<Type>, usize),
+    Array(Box<Type>, ArraySize),
     Function(Box<Function>),
     User(String),
+}
+
+pub enum ArraySize {
+    Lit(usize),
+    Const(String),
 }
 
 pub struct Function {
@@ -38,6 +43,9 @@ pub fn transform_type(input: &ast::Ty) -> Option<Type> {
         ast::TyKind::Array(ref ty, ref size) => transform_array(ty, size),
         ast::TyKind::Path(None, _) => transform_path(input),
         ast::TyKind::Ptr(ref ptr) => transform_pointer(ptr),
+        ast::TyKind::Rptr(ref lifetime, ast::MutTy { ref ty, .. }) => {
+            transform_reference(lifetime, ty)
+        }
         ast::TyKind::BareFn(ref bare_fn) => {
             transform_function(&*bare_fn.decl).map(|fun| Type::Function(Box::new(fun)))
         }
@@ -77,10 +85,36 @@ pub fn transform_function(decl: &ast::FnDecl) -> Option<Function> {
     Some(Function { inputs, output })
 }
 
+pub fn transform_const_value(expr: &ast::Expr) -> Option<String> {
+    // TODO: add support for arrays of literals.
+
+    if let ast::ExprKind::Lit(ref lit) = expr.node {
+        transform_literal(lit)
+    } else {
+        None
+    }
+}
+
+fn transform_literal(lit: &ast::Lit) -> Option<String> {
+    let result = match lit.node {
+        ast::LitKind::Str(ref value, ..) => format!("{:?}", value.as_str()),
+        ast::LitKind::Byte(value) => format!("{}", value),
+        ast::LitKind::Char(value) => format!("{:?}", value),
+        ast::LitKind::Int(value, ..) => format!("{}", value),
+        ast::LitKind::Float(ref value, ..) |
+        ast::LitKind::FloatUnsuffixed(ref value) => value.as_str().to_string(),
+        ast::LitKind::Bool(true) => "true".to_string(),
+        ast::LitKind::Bool(false) => "false".to_string(),
+        _ => return None,
+    };
+
+    Some(result)
+}
+
 fn transform_array(ty: &ast::Ty, size: &ast::Expr) -> Option<Type> {
-    let size = match extract_int_literal(size) {
+    let size = match extract_array_size(size) {
         None => return None,
-        Some(size) => size as usize,
+        Some(size) => size,
     };
 
     let ty = match transform_type(ty) {
@@ -90,6 +124,25 @@ fn transform_array(ty: &ast::Ty, size: &ast::Expr) -> Option<Type> {
     };
 
     Some(Type::Array(Box::new(ty), size))
+}
+
+fn extract_array_size(expr: &ast::Expr) -> Option<ArraySize> {
+    match expr.node {
+        ast::ExprKind::Lit(ref lit) => {
+            extract_int_literal(lit).map(|value| ArraySize::Lit(value as usize))
+        }
+        ast::ExprKind::Path(None, ref path) => {
+            // Currently supports only unqualified constants.
+            if path.segments.len() > 1 || path.segments[0].parameters.is_some() {
+                None
+            } else {
+                Some(ArraySize::Const(
+                    path.segments[0].identifier.name.as_str().to_string(),
+                ))
+            }
+        }
+        _ => None,
+    }
 }
 
 fn transform_path(input: &ast::Ty) -> Option<Type> {
@@ -129,6 +182,23 @@ fn transform_pointer(ptr: &ast::MutTy) -> Option<Type> {
     }
 }
 
+fn transform_reference(lifetime: &Option<ast::Lifetime>, ty: &ast::Ty) -> Option<Type> {
+    // We currently support only `&'static str`.
+
+    if let Some(ref lifetime) = *lifetime {
+        if &*lifetime.name.as_str() != "'static" {
+            return None;
+        }
+    } else {
+        return None;
+    }
+
+    if pprust::ty_to_string(ty) == "str" {
+        Some(Type::String)
+    } else {
+        None
+    }
+}
 
 pub fn is_user_data(name: &str, ty: &Type) -> bool {
     if let Type::Pointer(ref ty) = *ty {
@@ -168,21 +238,20 @@ pub fn callback_arity(fun: &Function) -> usize {
 
 pub fn extract_enum_variant_value(variant: &ast::Variant) -> Option<u64> {
     if let Some(ref expr) = variant.node.disr_expr {
-        extract_int_literal(expr)
-    } else {
-        None
-    }
-}
-
-fn extract_int_literal(expr: &ast::Expr) -> Option<u64> {
-    if let ast::ExprKind::Lit(ref lit) = expr.node {
-        let ast::Lit { ref node, .. } = *&**lit;
-        if let ast::LitKind::Int(val, ..) = *node {
-            return Some(val);
+        if let ast::ExprKind::Lit(ref lit) = expr.node {
+            return extract_int_literal(lit);
         }
     }
 
     None
+}
+
+fn extract_int_literal(lit: &ast::Lit) -> Option<u64> {
+    if let ast::LitKind::Int(val, ..) = lit.node {
+        Some(val)
+    } else {
+        None
+    }
 }
 
 pub fn retrieve_docstring(attr: &ast::Attribute) -> Option<String> {

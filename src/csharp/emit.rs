@@ -1,5 +1,6 @@
 //! Utilities for emiting fragments of the target language code.
 
+use super::Context;
 use super::intermediate::*;
 use inflector::Inflector;
 use output::IndentedOutput;
@@ -12,9 +13,15 @@ macro_rules! emit {
     }
 }
 
-pub fn emit_function_wrapper(output: &mut IndentedOutput, name: &str, fun: &Function) {
+pub fn emit_function_wrapper(
+    output: &mut IndentedOutput,
+    context: &Context,
+    name: &str,
+    fun: &Function,
+) {
     emit_function_decl(
         output,
+        context,
         "public static",
         &name.to_pascal_case(),
         fun,
@@ -75,17 +82,32 @@ pub fn emit_function_wrapper(output: &mut IndentedOutput, name: &str, fun: &Func
 
 pub fn emit_function_extern_decl(
     output: &mut IndentedOutput,
+    context: &Context,
     name: &str,
     fun: &Function,
     lib_name: &str,
 ) {
     emit!(output, "[DllImport(\"{}\")]\n", lib_name);
-    emit_function_decl(output, "private static extern", name, fun, true, false);
+    emit_function_decl(
+        output,
+        context,
+        "private static extern",
+        name,
+        fun,
+        true,
+        false,
+    );
     emit!(output, ";\n\n");
 }
 
-pub fn emit_struct_field(output: &mut IndentedOutput, access: &str, ty: &Type, name: &str) {
-    emit_marshal_as(output, ty, "\n");
+pub fn emit_struct_field(
+    output: &mut IndentedOutput,
+    context: &Context,
+    access: &str,
+    ty: &Type,
+    name: &str,
+) {
+    emit_marshal_as(output, context, ty, "\n");
     emit!(output, "{} ", access);
     emit_managed_type(output, ty);
     emit!(output, " {};\n", name);
@@ -99,8 +121,20 @@ pub fn emit_callback_wrappers(output: &mut IndentedOutput, all_arities: &BTreeSe
     }
 }
 
+pub fn emit_const(output: &mut IndentedOutput, name: &str, ty: &Type, value: &str) {
+    emit!(output, "public const ");
+    emit_managed_type(output, ty);
+    emit!(
+        output,
+        " {} = {};\n\n",
+        name.to_screaming_snake_case(),
+        value
+    );
+}
+
 fn emit_function_decl(
     output: &mut IndentedOutput,
+    context: &Context,
     modifiers: &str,
     name: &str,
     fun: &Function,
@@ -125,7 +159,7 @@ fn emit_function_decl(
         }
 
         if marshal_params {
-            emit_marshal_as(output, ty, " ");
+            emit_marshal_as(output, context, ty, " ");
         }
 
         if let Some(fun) = extract_callback(ty) {
@@ -141,16 +175,20 @@ fn emit_function_decl(
 
 }
 
-fn emit_marshal_as(output: &mut IndentedOutput, ty: &Type, append: &str) {
+fn emit_marshal_as(output: &mut IndentedOutput, context: &Context, ty: &Type, append: &str) {
     if let Some(unmanaged) = unmanaged_type(ty) {
         emit!(output, "[MarshalAs(UnmanagedType.{}", unmanaged);
 
-        if let Type::Array(ref ty, size) = *ty {
+        if let Type::Array(ref ty, ref size) = *ty {
             if let Some(unmanaged) = unmanaged_type(ty) {
                 emit!(output, ", ArraySubType = UnmanagedType.{}", unmanaged);
             }
 
-            emit!(output, ", SizeConst = {}", size);
+            emit!(output, ", SizeConst = ");
+            match *size {
+                ArraySize::Lit(value) => emit!(output, "{}", value),
+                ArraySize::Const(ref name) => emit!(output, "{}.{}", context.class_name, name),
+            }
         }
 
         emit!(output, ")]{}", append);

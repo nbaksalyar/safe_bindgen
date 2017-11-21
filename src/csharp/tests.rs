@@ -204,7 +204,7 @@ fn explicitly_ignored_functions() {
 }
 
 #[test]
-fn functions_with_no_callback() {
+fn functions_with_no_callback_params() {
     let actual = compile!(None, {
         #[no_mangle]
         pub extern "C" fn fun0(engine: *mut Engine) {}
@@ -230,7 +230,7 @@ fn functions_with_no_callback() {
 }
 
 #[test]
-fn functions_with_one_callback() {
+fn functions_with_one_callback_param() {
     let actual = compile!(None, {
         /// Comment for `fun1`.
         #[no_mangle]
@@ -276,7 +276,7 @@ fn functions_with_one_callback() {
 }
 
 #[test]
-fn functions_with_multiple_callbacks() {
+fn functions_with_multiple_callback_params() {
     let actual = compile!(None, {
         #[no_mangle]
         pub extern "C" fn fun2(
@@ -320,6 +320,106 @@ fn functions_with_multiple_callbacks() {
                  cbs.Item2(arg0);
                  handle.Free();
              }
+
+         }
+        "
+    );
+
+    assert_multiline_eq!(actual, expected);
+}
+
+#[test]
+fn functions_with_array_params() {
+    let actual = compile!(None, {
+        #[no_mangle]
+        pub extern "C" fn fun0(ids: *const u8, ids_len: usize) {}
+        #[no_mangle]
+        pub extern "C" fn fun1(records: *const Record, record_len: usize) {}
+    });
+
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+
+         public static class Backend {
+             public static void Fun0(byte[] ids) {
+                 fun0(ids, ids.Length);
+             }
+
+             [DllImport(\"backend\")]
+             private static void fun0(\
+                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] ids, \
+                ulong idsLen\
+             );
+         }
+        "
+    );
+
+    assert_multiline_eq!(actual, expected);
+}
+
+#[test]
+fn constants() {
+    let mut lang = LangCSharp::new("backend");
+    lang.add_const("CONST_CUSTOM", "byte", "45");
+
+    let actual = compile!(lang, {
+        /// Comment for `CONST_NUMBER`.
+        pub const CONST_NUMBER: i32 = 123;
+        /// Comment for `CONST_STRING`.
+        pub const CONST_STRING: &'static str = "hello world";
+    });
+
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+
+         public static class Backend {
+             #region custom declarations
+             public const byte CONST_CUSTOM = 45;
+
+             #endregion
+
+             /// Comment for `CONST_NUMBER`.
+             public const int CONST_NUMBER = 123;
+
+             /// Comment for `CONST_STRING`.
+             public const String CONST_STRING = \"hello world\";
+
+         }
+        "
+    );
+
+    assert_multiline_eq!(actual, expected);
+}
+
+#[test]
+fn arrays() {
+    let actual = compile!(None, {
+        pub type LitSizeArray = [u8; 10];
+        pub type ConstSizeArray = [u8; ARRAY_SIZE];
+
+        pub const ARRAY_SIZE: usize = 20;
+    });
+
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+
+         [StructLayout(LayoutKind.Sequential)]
+         public struct LitSizeArray {
+             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
+             private byte[] value;
+         }
+
+         [StructLayout(LayoutKind.Sequential)]
+         public struct ConstSizeArray {
+             [MarshalAs(UnmanagedType.ByValArray, SizeConst = Backend.ARRAY_SIZE)]
+             private byte[] value;
+         }
+
+         public static class Backend {
+             public const ulong ARRAY_SIZE = 20;
 
          }
         "
