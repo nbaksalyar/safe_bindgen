@@ -1,105 +1,21 @@
 //! Functions to generate JNI bindings
 
-use common::is_array_arg;
-use syntax::ast::{self, Ident, DUMMY_NODE_ID};
-use syntax::symbol::Symbol;
-use syntax::codemap::dummy_spanned;
-use syntax::abi::Abi;
-use syntax::parse::ParseSess;
+use common::{is_array_arg, is_user_data_arg};
+use syntax::ast;
 use syntax::print::pprust;
-use syntax::ptr::P;
-use syntax::ext::quote::rt::{Span, DUMMY_SP};
-use syntax::ext::base::{DummyResolver, ExtCtxt};
-use syntax::ext::build::AstBuilder;
-use syntax::ext::expand::ExpansionConfig;
-use syntax::tokenstream::TokenTree;
-use syntax::parse::token::Token;
+use jni::signature::{self, TypeSignature, JavaType};
+use quote;
 
-trait JniAstBuilder: AstBuilder {
-    fn no_mangle_attr(&self, span: Span) -> ast::Attribute {
-        self.attribute(span, self.meta_word(DUMMY_SP, Symbol::intern("no_mangle")))
-    }
-
-    fn jni_fn(
-        &self,
-        span: Span,
-        name: Ident,
-        inputs: Vec<ast::Arg>,
-        output: P<ast::Ty>,
-        body: P<ast::Block>,
-    ) -> P<ast::Item> {
-        // Generate first 2 arguments
-        let jni_env_arg = self.arg(
-            DUMMY_SP,
-            Ident::from_str("env"),
-            self.ty_path(self.path_ident(DUMMY_SP, Ident::from_str("JNIEnv"))),
-        );
-        let class_arg = self.arg(
-            DUMMY_SP,
-            Ident::from_str("_class"),
-            self.ty_path(self.path_ident(DUMMY_SP, Ident::from_str("JClass"))),
-        );
-
-        // Combine with the rest of args
-        let mut all_inputs = vec![jni_env_arg, class_arg];
-        all_inputs.extend_from_slice(&inputs);
-
-        // Return template JNI function
-        self.item(
-            span,
-            name,
-            vec![self.no_mangle_attr(span)],
-            ast::ItemKind::Fn(
-                self.fn_decl(all_inputs, output),
-                ast::Unsafety::Unsafe,
-                dummy_spanned(ast::Constness::NotConst),
-                Abi::System,
-                ast::Generics::default(),
-                body,
-            ),
-        )
-    }
-
-    fn to_jni_arg(&self, arg: &ast::Arg, ty_name: &str) -> ast::Arg {
-        ast::Arg {
-            id: DUMMY_NODE_ID,
-            pat: arg.pat.clone(),
-            ty: self.ty_path(self.path_ident(DUMMY_SP, Ident::from_str(ty_name))),
-        }
-    }
-
-    /// Creates a `from_java` call wrapper
-    fn jni_convert_type(&self, native_type: &str, arg_name: &str) -> P<ast::Expr> {
-        self.expr_call_ident(
-            DUMMY_SP,
-            Ident::from_str(&format!("{}::from_java", native_type)),
-            vec![
-                self.expr_addr_of(DUMMY_SP, self.expr_ident(DUMMY_SP, Ident::from_str("env"))),
-                self.expr_ident(DUMMY_SP, Ident::from_str(arg_name)),
-            ],
-        )
-    }
-
-    /// `env.<method>(<args>).unwrap()`
-    fn env_method_call(&self, method: &str, args: Vec<P<ast::Expr>>) -> P<ast::Expr> {
-        let exp = self.expr_method_call(
-            DUMMY_SP,
-            self.expr_ident(DUMMY_SP, Ident::from_str("env")),
-            Ident::from_str(method),
-            args,
-        );
-
-        // unwrap
-        self.expr_method_call(DUMMY_SP, exp, Ident::from_str("unwrap"), vec![])
-    }
+fn to_jni_arg(arg: &ast::Arg, ty_name: &str) -> quote::Tokens {
+    let pat = quote::Ident::new(pprust::pat_to_string(&*arg.pat));
+    let ty_name = quote::Ident::new(ty_name);
+    quote! { #pat: #ty_name }
 }
 
-impl<'a> JniAstBuilder for ExtCtxt<'a> {}
-
-fn transform_jni_arg<Ast: AstBuilder + JniAstBuilder>(ast: &Ast, arg: &ast::Arg) -> ast::Arg {
+fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
     match arg.ty.node {
         // Callback
-        ast::TyKind::BareFn(ref _bare_fn) => ast.to_jni_arg(arg, "JObject"),
+        ast::TyKind::BareFn(ref _bare_fn) => to_jni_arg(arg, "JObject"),
 
         // Plain old types.
         ast::TyKind::Path(None, ref path) => {
@@ -109,6 +25,7 @@ fn transform_jni_arg<Ast: AstBuilder + JniAstBuilder>(ast: &Ast, arg: &ast::Arg)
             let ty: &str = &ty.identifier.name.as_str();
 
             let jni_type = match ty {
+                "c_char" | "u8" => "jbyte",
                 "c_short" | "u16" => "jshort",
                 "c_int" | "u32" => "jint",
                 "c_long" | "u64" => "jlong",
@@ -116,225 +33,273 @@ fn transform_jni_arg<Ast: AstBuilder + JniAstBuilder>(ast: &Ast, arg: &ast::Arg)
                 _ => ty,
             };
 
-            ast.to_jni_arg(arg, jni_type)
+            to_jni_arg(arg, jni_type)
         }
 
         // Standard pointers.
         ast::TyKind::Ptr(ref ptr) => {
             // Detect strings, which are *const c_char or *mut c_char
             if pprust::ty_to_string(&ptr.ty) == "c_char" {
-                return ast.to_jni_arg(arg, "JString");
+                to_jni_arg(arg, "JString")
+            } else {
+                to_jni_arg(arg, "JObject")
             }
-            ast.to_jni_arg(arg, "JObject")
         }
 
-        _ => arg.clone(),
+        _ => to_jni_arg(arg, &pprust::ty_to_string(&arg.ty)),
+
+    }
+}
+
+fn rust_ty_to_signature(ty: &ast::Ty) -> Option<JavaType> {
+    match ty.node {
+        // Callback
+        ast::TyKind::BareFn(ref _bare_fn) => Some(JavaType::Object(From::from("java/lang/Object"))),
+
+        // Plain old types.
+        ast::TyKind::Path(None, ref path) => {
+            let (ty, _module) = path.segments.split_last().expect(
+                "already checked that there were at least two elements",
+            );
+            let ty: &str = &ty.identifier.name.as_str();
+
+            match ty {
+                "c_byte" | "u8" => Some(JavaType::Primitive(signature::Primitive::Byte)),
+                "c_short" | "u16" => Some(JavaType::Primitive(signature::Primitive::Short)),
+                "c_int" | "u32" => Some(JavaType::Primitive(signature::Primitive::Int)),
+                "c_long" | "u64" => Some(JavaType::Primitive(signature::Primitive::Long)),
+                "c_usize" | "usize" => Some(JavaType::Primitive(signature::Primitive::Long)),
+                "c_bool" | "bool" => Some(JavaType::Object(From::from("java/lang/Boolean"))),
+                _ => Some(JavaType::Object(From::from(ty))),
+            }
+        }
+
+        // Standard pointers.
+        ast::TyKind::Ptr(ref ptr) => {
+            // Detect strings, which are *const c_char or *mut c_char
+            if pprust::ty_to_string(&ptr.ty) == "c_char" {
+                Some(JavaType::Object(From::from("java/lang/String")))
+            } else {
+                rust_ty_to_signature(&ptr.ty)
+            }
+        }
+
+        _ => None,
 
     }
 }
 
 struct JniArgResult {
-    stmts: Vec<ast::Stmt>,
-    call_args: Vec<P<ast::Expr>>,
+    stmt: quote::Tokens,
+    call_args: Vec<quote::Tokens>,
 }
 
-fn transform_string_arg<Ast: AstBuilder + JniAstBuilder>(
-    ast: &Ast,
-    arg_name: &str,
-) -> JniArgResult {
+fn transform_string_arg(arg_name: &str) -> JniArgResult {
     // statements
-    let cstr_from_java = ast.jni_convert_type("CString", arg_name);
-    let stmts = vec![
-        ast.stmt_let(DUMMY_SP, false, Ident::from_str(arg_name), cstr_from_java),
-    ];
+    let arg_name = quote::Ident::new(arg_name);
+    let stmt =
+        quote! {
+            let #arg_name = CString::from_java(&arg, #arg_name);
+        };
 
     // call arg value(s)
-    let call_args = vec![
-        ast.expr_method_call(
-            DUMMY_SP,
-            ast.expr_ident(DUMMY_SP, Ident::from_str(arg_name)),
-            Ident::from_str("as_ptr"),
-            vec![]
-        ),
-    ];
+    let call_args = vec![quote! { #arg_name.as_ptr() }];
 
-    JniArgResult { stmts, call_args }
+    JniArgResult { stmt, call_args }
 }
 
-fn transform_struct_arg<Ast: AstBuilder + JniAstBuilder>(
-    ast: &Ast,
-    arg_name: &str,
-) -> JniArgResult {
+fn transform_struct_arg(arg_name: &str, arg_ty: &ast::Ty) -> JniArgResult {
     // statements
-    let cstr_from_java = ast.jni_convert_type("NativeStruct", arg_name);
-    let stmts = vec![
-        ast.stmt_let(DUMMY_SP, false, Ident::from_str(arg_name), cstr_from_java),
-    ];
+    let arg_name = quote::Ident::new(arg_name);
+    let struct_ty = quote::Ident::new(pprust::ty_to_string(arg_ty));
+    let stmt =
+        quote! {
+            let #arg_name = #struct_ty::from_java(&arg, #arg_name);
+        };
 
     // call arg value(s)
-    let call_args = vec![
-        ast.expr_addr_of(
-            DUMMY_SP,
-            ast.expr_ident(DUMMY_SP, Ident::from_str(arg_name))
-        ),
-    ];
+    let call_args = vec![quote! { &#arg_name }];
 
-    JniArgResult { stmts, call_args }
+    JniArgResult { stmt, call_args }
 }
 
-fn transform_array_arg<Ast: AstBuilder + JniAstBuilder>(ast: &Ast, arg_name: &str) -> JniArgResult {
+fn transform_array_arg(arg_name: &str) -> JniArgResult {
     // statements
-    let cstr_from_java = ast.jni_convert_type("Vec", arg_name);
-    let stmts = vec![
-        ast.stmt_let(DUMMY_SP, false, Ident::from_str(arg_name), cstr_from_java),
-    ];
+    let arg_name = quote::Ident::new(arg_name);
+    let stmt =
+        quote! {
+            let #arg_name = Vec::from_java(&arg, #arg_name);
+        };
 
     // call arg value(s)
-    let call_args = vec![
-        ast.expr_method_call(
-            DUMMY_SP,
-            ast.expr_ident(DUMMY_SP, Ident::from_str(arg_name)),
-            Ident::from_str("as_ptr"),
-            vec![]
-        ),
-        ast.expr_method_call(
-            DUMMY_SP,
-            ast.expr_ident(DUMMY_SP, Ident::from_str(arg_name)),
-            Ident::from_str("as_len"),
-            vec![]
-        ),
-    ];
+    let call_args = vec![quote! { #arg_name.as_ptr() }, quote! { #arg_name.as_len() }];
 
-    JniArgResult { stmts, call_args }
+    JniArgResult { stmt, call_args }
 }
 
-fn transform_callbacks_arg<Ast: AstBuilder + JniAstBuilder>(
-    ast: &Ast,
-    cb_args: Vec<P<ast::BareFnTy>>,
-) -> JniArgResult {
-    let cb_name = "o_cb";
+fn transform_callbacks_arg(cb_idents: Vec<quote::Ident>) -> JniArgResult {
+    let call_args = cb_idents
+        .iter()
+        .map(|ident| quote!{ Some(#ident) })
+        .collect();
 
-    let mut stmts = Vec::new();
-    let mut call_args = vec![ast.expr_ident(DUMMY_SP, Ident::from_str("ctx"))];
-
-    let tok_tree = if cb_args.len() > 1 {
-        // Handle more than one cb
-        cb_args.iter().fold(Vec::new(), |mut tt, arg| {
-            if !tt.is_empty() {
-                tt.push(TokenTree::Token(DUMMY_SP, Token::Comma));
-            }
-            tt.push(TokenTree::Token(
-                DUMMY_SP,
-                Token::Ident(Ident::from_str(cb_name)),
-            ));
-            tt
-        })
-    } else {
-        // Some(callback_name)
-        call_args.push(ast.expr_some(
-            DUMMY_SP,
-            ast.expr_ident(DUMMY_SP, Ident::from_str("callback_fn")),
-        ));
-        vec![
-            TokenTree::Token(DUMMY_SP, Token::Ident(Ident::from_str(cb_name))),
-        ]
+    let stmt =
+        quote! {
+        let ctx = gen_ctx!(#(#cb_idents),*);
     };
 
-    stmts.push(ast.stmt_let(
-        DUMMY_SP,
-        false,
-        Ident::from_str("ctx"),
-        ast.expr(
-            DUMMY_SP,
-            ast::ExprKind::Mac(dummy_spanned(ast::Mac_ {
-                path: ast.path_ident(DUMMY_SP, Ident::from_str("gen_ctx")),
-                tts: tok_tree,
-            })),
-        ),
-    ));
-
-    JniArgResult { stmts, call_args }
+    JniArgResult { stmt, call_args }
 }
 
 pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: &str) -> String {
-    let full_name = &format!("Java_NativeBindings_{}", func_name);
+    let func_name = quote::Ident::new(format!("Java_NativeBindings_{}", func_name));
+    let native_name = quote::Ident::new(native_name);
 
-    let parse_sess = ParseSess::new();
-    let mut resolver = DummyResolver {};
-    let ast = ExtCtxt::new(
-        &parse_sess,
-        ExpansionConfig::default(String::from("jni")),
-        &mut resolver,
-    );
-
-    let mut args_iter = args.iter().peekable();
+    // Generate inputs
     let mut call_args = Vec::new();
     let mut stmts = Vec::new();
     let mut callbacks = Vec::new();
-    let mut jni_fn_args = Vec::new();
+    let mut jni_fn_inputs = Vec::new();
+
+    let mut args_iter = args.iter().filter(|arg| !is_user_data_arg(arg)).peekable();
 
     while let Some(arg) = args_iter.next() {
         let arg_name = pprust::pat_to_string(&*arg.pat);
 
-        let jni_arg_res = if is_array_arg(&arg, args_iter.peek().cloned()) {
+        let res = if is_array_arg(&arg, args_iter.peek().cloned()) {
             args_iter.next();
-            transform_array_arg(&ast, &arg_name)
+            Some(transform_array_arg(&arg_name))
         } else {
             match arg.ty.node {
                 // Callback
-                ast::TyKind::BareFn(ref bare_fn) => {
-                    callbacks.push(bare_fn.clone());
-                    JniArgResult {
-                        call_args: vec![],
-                        stmts: vec![],
-                    }
+                ast::TyKind::BareFn(ref _bare_fn) => {
+                    callbacks.push(quote::Ident::new(arg_name));
+                    None
                 }
 
                 // Standard pointers.
                 ast::TyKind::Ptr(ref ptr) => {
                     // Detect strings, which are *const c_char or *mut c_char
                     if pprust::ty_to_string(&ptr.ty) == "c_char" {
-                        transform_string_arg(&ast, &arg_name)
+                        Some(transform_string_arg(&arg_name))
                     } else {
-                        transform_struct_arg(&ast, &arg_name)
+                        Some(transform_struct_arg(&arg_name, &ptr.ty))
                     }
                 }
-                _ => JniArgResult {
-                    call_args: vec![],
-                    stmts: vec![],
-                },
+
+                _ => None,
             }
         };
 
-        call_args.extend(jni_arg_res.call_args);
-        stmts.extend(jni_arg_res.stmts);
-        jni_fn_args.push(transform_jni_arg(&ast, &arg));
+        if let Some(jni_arg_res) = res {
+            call_args.extend(jni_arg_res.call_args);
+            stmts.push(jni_arg_res.stmt);
+        }
+        jni_fn_inputs.push(transform_jni_arg(&arg));
     }
 
-    let cb_arg_res = transform_callbacks_arg(&ast, callbacks);
+    let cb_arg_res = transform_callbacks_arg(callbacks);
     call_args.extend(cb_arg_res.call_args);
-    stmts.extend(cb_arg_res.stmts);
+    stmts.push(cb_arg_res.stmt);
 
-    // Call the native backend function
-    let fn_call = ast.expr_call_ident(
-        DUMMY_SP,
-        Ident::from_str(&format!("ffi::{}", native_name)),
-        call_args,
-    );
+    let tokens =
+        quote! {
+            #[no_mangle]
+            pub unsafe extern "system" fn #func_name(env: JNIEnv, _class: JClass, #(#jni_fn_inputs),*) {
+                #(#stmts)*;
+                ffi::#native_name(#(#call_args),*);
+            }
+        };
 
-    stmts.push(ast.stmt_expr(fn_call));
-
-    let fn_block = ast.block(DUMMY_SP, stmts);
-
-    let item = ast.jni_fn(
-        DUMMY_SP,
-        Ident::from_str(full_name),
-        jni_fn_args,
-        ast.ty(DUMMY_SP, ast::TyKind::Tup(vec![])),
-        fn_block,
-    );
-
-    pprust::item_to_string(&item)
+    tokens.to_string()
 }
 
-pub fn generate_jni_callback() {}
+pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
+    let cb_name = quote::Ident::new(format!("call_{}", cb_class));
+
+    let mut args: Vec<quote::Tokens> = Vec::new();
+    let mut stmts: Vec<quote::Tokens> = Vec::new();
+    let mut jni_cb_inputs = Vec::new();
+    let mut arg_java_ty = Vec::new();
+
+    let mut args_iter = (&*cb.decl)
+        .inputs
+        .iter()
+        .filter(|arg| !is_user_data_arg(arg))
+        .peekable();
+
+    while let Some(arg) = args_iter.next() {
+        let arg_name = quote::Ident::new(pprust::pat_to_string(&*arg.pat));
+        let arg_ty = quote::Ident::new(pprust::ty_to_string(&*arg.ty));
+
+        jni_cb_inputs.push(quote! { #arg_name: #arg_ty });
+        args.push(quote! { #arg_name.into() });
+
+        if is_array_arg(&arg, args_iter.peek().cloned()) {
+            let val_java_type = rust_ty_to_signature(&arg.ty).unwrap();
+            arg_java_ty.push(JavaType::Array(Box::new(val_java_type)));
+
+            if let Some(len_arg) = args_iter.next() {
+                let len_arg_name = quote::Ident::new(pprust::pat_to_string(&*len_arg.pat));
+                let len_arg_ty = quote::Ident::new(pprust::ty_to_string(&*len_arg.ty));
+                jni_cb_inputs.push(quote! { #len_arg_name: #len_arg_ty });
+
+                stmts.push(quote! {
+                    let #arg_name = slice::from_raw_parts(#arg_name, #len_arg_name).to_java(&env);
+                });
+            } else {
+                // error: no length arg?
+            }
+        } else {
+            arg_java_ty.push(rust_ty_to_signature(&arg.ty).unwrap());
+
+            match arg.ty.node {
+                // Standard pointers.
+                ast::TyKind::Ptr(ref ptr) => {
+                    // Detect strings, which are *const c_char or *mut c_char
+                    if pprust::ty_to_string(&ptr.ty) == "c_char" {
+                        stmts.push(quote! {
+                            let #arg_name: JObject = (*#arg_name).to_java(&env).into();
+                        });
+                    } else {
+                        stmts.push(quote! {
+                            let #arg_name = (*#arg_name).to_java(&env);
+                        });
+                    }
+                }
+                _ => {
+                    stmts.push(quote! {
+                        let #arg_name = (*#arg_name).to_java(&env);
+                    });
+                }
+            }
+        }
+    }
+
+    let arg_ty_str = format!(
+        "{}",
+        TypeSignature {
+            args: arg_java_ty,
+            ret: JavaType::Primitive(signature::Primitive::Void),
+        }
+    );
+
+    let tokens =
+        quote! {
+        unsafe extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
+            let env = JVM.attach_current_thread_as_daemon().unwrap();
+            let cb = GlobalRef::from_raw_ptr(&env, ctx);
+
+            #(#stmts)*;
+
+            env.call_method(
+                cb.as_obj(),
+                "call",
+                #arg_ty_str,
+                &[ #(#args),* ],
+            ).unwrap();
+        }
+    };
+
+    tokens.to_string()
+}

@@ -37,3 +37,5 @@ syntex_syntax = {version = "0.58.1", optional = true}
 toml = "0.3.2"
 clap = "2"
 Inflector = "0.10.1"
+jni = "0.7.2"
+quote = "0.3.15"

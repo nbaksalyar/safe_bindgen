@@ -178,10 +178,11 @@ pub fn transform_native_fn(
 ) -> Result<(), Error> {
     let mut args_str = Vec::new();
 
-    let mut fn_args = fn_decl.inputs.iter().filter(|arg| !is_user_data_arg(arg));
-    let filtered_fn_args: Vec<_> = fn_args.by_ref().cloned().collect();
-
-    let mut fn_args = fn_args.peekable();
+    let mut fn_args = fn_decl
+        .inputs
+        .iter()
+        .filter(|arg| !is_user_data_arg(arg))
+        .peekable();
 
     while let Some(arg) = fn_args.next() {
         let arg_name = pprust::pat_to_string(&*arg.pat);
@@ -199,12 +200,19 @@ pub fn transform_native_fn(
 
         args_str.push(format!("{} {}", java_type, arg_name.to_camel_case()));
 
-        // Generate callback classes
+        // Generate a callback class - if it wasn't generated already
         if let ast::TyKind::BareFn(ref bare_fn) = arg.ty.node {
             let cb_class = callback_name(&*bare_fn.decl.inputs)?;
-            let cb_output = transform_callback(&*arg.ty, &cb_class)?.unwrap_or_default();
+            let cb_file = PathBuf::from(format!("{}.java", cb_class));
 
-            let _ = outputs.insert(From::from(format!("{}.java", cb_class)), cb_output);
+            if let None = outputs.get(&cb_file) {
+                eprintln!("Generating CB {}", cb_class);
+
+                println!("{}\n", jni::generate_jni_callback(bare_fn, &cb_class));
+
+                let cb_output = transform_callback(&*arg.ty, &cb_class)?.unwrap_or_default();
+                let _ = outputs.insert(cb_file, cb_output);
+            }
         }
     }
 
@@ -245,7 +253,7 @@ pub fn transform_native_fn(
 
     println!(
         "{}\n",
-        jni::generate_jni_function(filtered_fn_args, name, &java_name)
+        jni::generate_jni_function(fn_decl.inputs.clone(), name, &java_name)
     );
 
     Ok(())

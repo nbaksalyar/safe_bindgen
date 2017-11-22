@@ -265,17 +265,20 @@ extern crate syntex_syntax as syntax;
 extern crate syntax;
 extern crate inflector;
 extern crate toml;
+#[macro_use]
+extern crate quote;
+extern crate jni;
 
+use common::{Lang, Outputs};
+pub use errors::Level;
+pub use java::LangJava;
+use std::collections::HashMap;
 use std::convert;
 use std::fmt::Display;
 use std::fs;
 use std::io::{Read, Write};
 use std::io::Error as IoError;
 use std::path::{self, Path};
-use std::collections::HashMap;
-use common::{Outputs, Lang};
-pub use java::LangJava;
-pub use errors::Level;
 
 /// Unwraps Result<Option<..>> if it is Ok(Some(..)) else returns.
 macro_rules! try_some {
@@ -440,7 +443,7 @@ impl Cheddar {
     /// This can only fail if there are issues reading the cargo manifest. If there is no cargo
     /// manifest available then the source file defaults to `src/lib.rs`.
     pub fn new() -> std::result::Result<Cheddar, Error> {
-        let source_path = try!(source_file_from_cargo());
+        let source_path = source_file_from_cargo()?;
         let input = path::PathBuf::from(source_path);
 
         Ok(Cheddar {
@@ -510,7 +513,7 @@ impl Cheddar {
                 ));
             }
 
-            println!("Parsing {:?}", mod_path);
+            eprintln!("Parsing {:?}", mod_path);
 
             let krate = syntax::parse::parse_crate_from_file(&mod_path, &self.session).unwrap();
             parse::parse_mod::<L>(&krate.module, &mut outputs)?;
