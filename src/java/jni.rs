@@ -40,10 +40,10 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
         // Standard pointers.
         ast::TyKind::Ptr(ref ptr) => {
             // Detect strings, which are *const c_char or *mut c_char
-            if pprust::ty_to_string(&ptr.ty) == "c_char" {
-                to_jni_arg(arg, "JString")
-            } else {
-                to_jni_arg(arg, "JObject")
+            match pprust::ty_to_string(&ptr.ty).as_str() {
+                "c_char" => to_jni_arg(arg, "JString"),
+                "App" | "Authenticator" => to_jni_arg(arg, "jlong"), // Opaque ptr,
+                _ => to_jni_arg(arg, "JObject"),
             }
         }
 
@@ -159,6 +159,21 @@ fn transform_callbacks_arg(cb_idents: Vec<(quote::Ident, quote::Ident)>) -> JniA
     JniArgResult { stmt, call_args }
 }
 
+fn transform_opaque_ptr(arg_name: &str, ty: &str) -> JniArgResult {
+    // statements
+    let arg_name = quote::Ident::new(arg_name);
+    let ty = quote::Ident::new(ty);
+    let stmt =
+        quote! {
+            let #arg_name = #arg_name as *const #ty;
+        };
+
+    // call arg value(s)
+    let call_args = vec![quote! { #arg_name }];
+
+    JniArgResult { stmt, call_args }
+}
+
 pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: &str) -> String {
     let func_name = quote::Ident::new(format!("Java_NativeBindings_{}", func_name));
     let native_name = quote::Ident::new(native_name);
@@ -189,13 +204,15 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
                     None
                 }
 
-                // Standard pointers.
+                // Pointers
                 ast::TyKind::Ptr(ref ptr) => {
-                    // Detect strings, which are *const c_char or *mut c_char
-                    if pprust::ty_to_string(&ptr.ty) == "c_char" {
-                        Some(transform_string_arg(&arg_name))
-                    } else {
-                        Some(transform_struct_arg(&arg_name, &ptr.ty))
+                    match pprust::ty_to_string(&ptr.ty).as_str() {
+                        // Opaque pointer that should be passed as a long value
+                        opaque @ "App" |
+                        opaque @ "Authenticator" => Some(transform_opaque_ptr(&arg_name, opaque)),
+                        // Detect strings, which are *const c_char or *mut c_char
+                        "c_char" => Some(transform_string_arg(&arg_name)),
+                        _ => Some(transform_struct_arg(&arg_name, &ptr.ty)),
                     }
                 }
 
@@ -280,16 +297,26 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
             }
         } else {
             let stmt = match arg.ty.node {
-                // Standard pointers.
+                // Pointers
                 ast::TyKind::Ptr(ref ptr) => {
-                    // Detect strings, which are *const c_char or *mut c_char
-                    if pprust::ty_to_string(&ptr.ty) == "c_char" {
-                        quote! {
+                    match pprust::ty_to_string(&ptr.ty).as_str() {
+                        // Opaque ptrs passed as long values
+                        "App" | "Authenticator" => {
+                            quote! {
+                                let #arg_name = #arg_name as jlong;
+                            }
+                        }
+                        // Strings
+                        "c_char" => {
+                            quote! {
                             let #arg_name: JObject = (*#arg_name).to_java(&env).into();
                         }
-                    } else {
-                        quote! {
+                        }
+                        // Other ptrs
+                        _ => {
+                            quote! {
                             let #arg_name = (*#arg_name).to_java(&env);
+                        }
                         }
                     }
                 }
