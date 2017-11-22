@@ -26,10 +26,10 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
             let ty: &str = &ty.identifier.name.as_str();
 
             let jni_type = match ty {
-                "c_char" | "u8" => "jbyte",
-                "c_short" | "u16" => "jshort",
-                "c_int" | "u32" => "jint",
-                "c_long" | "u64" => "jlong",
+                "c_char" | "u8" | "i8" => "jbyte",
+                "c_short" | "u16" | "i16" => "jshort",
+                "c_int" | "u32" | "i32" => "jint",
+                "c_long" | "u64" | "i64" => "jlong",
                 "c_usize" | "usize" => "jlong",
                 _ => ty,
             };
@@ -100,7 +100,7 @@ fn transform_string_arg(arg_name: &str) -> JniArgResult {
     let arg_name = quote::Ident::new(arg_name);
     let stmt =
         quote! {
-            let #arg_name = CString::from_java(&arg, #arg_name);
+            let #arg_name = CString::from_java(&env, #arg_name);
         };
 
     // call arg value(s)
@@ -115,7 +115,7 @@ fn transform_struct_arg(arg_name: &str, arg_ty: &ast::Ty) -> JniArgResult {
     let struct_ty = quote::Ident::new(pprust::ty_to_string(arg_ty));
     let stmt =
         quote! {
-            let #arg_name = #struct_ty::from_java(&arg, #arg_name);
+            let #arg_name = #struct_ty::from_java(&env, #arg_name);
         };
 
     // call arg value(s)
@@ -129,11 +129,11 @@ fn transform_array_arg(arg_name: &str) -> JniArgResult {
     let arg_name = quote::Ident::new(arg_name);
     let stmt =
         quote! {
-            let #arg_name = Vec::from_java(&arg, #arg_name);
+            let #arg_name = Vec::from_java(&env, #arg_name);
         };
 
     // call arg value(s)
-    let call_args = vec![quote! { #arg_name.as_ptr() }, quote! { #arg_name.as_len() }];
+    let call_args = vec![quote! { #arg_name.as_ptr() }, quote! { #arg_name.len() }];
 
     JniArgResult { stmt, call_args }
 }
@@ -147,7 +147,7 @@ fn transform_callbacks_arg(cb_idents: Vec<(quote::Ident, quote::Ident)>) -> JniA
 
     let stmt =
         quote! {
-            let ctx = gen_ctx!(#(#cb_ids),*);
+            let ctx = gen_ctx!(env, #(#cb_ids),*);
         };
 
     // call arg value(s)
@@ -282,7 +282,7 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
                 }
                 _ => {
                     stmts.push(quote! {
-                        let #arg_name = (*#arg_name).to_java(&env);
+                        let #arg_name = #arg_name.to_java(&env);
                     });
                 }
             }
