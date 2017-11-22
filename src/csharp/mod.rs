@@ -25,14 +25,11 @@ const CONSTANTS: &'static str = "_constants";
 pub struct LangCSharp {
     lib_name: String,
     using_decls: BTreeSet<String>,
+    opaque_types: HashSet<String>,
     custom_decls: Vec<String>,
     ignored_functions: HashSet<String>,
     callback_arities: BTreeSet<Vec<usize>>,
     context: Context,
-}
-
-pub struct Context {
-    class_name: String,
 }
 
 impl LangCSharp {
@@ -47,6 +44,7 @@ impl LangCSharp {
         LangCSharp {
             lib_name,
             using_decls,
+            opaque_types: Default::default(),
             custom_decls: Vec::new(),
             ignored_functions: Default::default(),
             callback_arities: Default::default(),
@@ -63,6 +61,11 @@ impl LangCSharp {
     /// Add additional `using` declaration.
     pub fn add_using_decl<T: Into<String>>(&mut self, decl: T) {
         let _ = self.using_decls.insert(decl.into());
+    }
+
+    /// Add definition of opaque type (type represented by an opaque pointer).
+    pub fn add_opaque_type<T: Into<String>>(&mut self, name: T) {
+        let _ = self.opaque_types.insert(name.into());
     }
 
     /// Add additional declaration.
@@ -116,14 +119,7 @@ impl Lang for LangCSharp {
             let mut output = output(outputs, TYPES);
 
             emit!(output, "{}", docs);
-            emit!(output, "[StructLayout(LayoutKind.Sequential)]\n");
-            emit!(output, "public struct {} {{\n", name);
-            output.indent();
-
-            emit_struct_field(&mut output, &self.context, "private", &ty, "value");
-
-            output.unindent();
-            emit!(output, "}}\n\n");
+            emit_type_alias(&mut output, &self.context, &ty, &name);
         }
 
         Ok(())
@@ -317,10 +313,17 @@ impl Lang for LangCSharp {
 
             emit!(output, "{}", types);
 
+            // Inject opaque types.
+            let opaque_ty = Type::Pointer(Box::new(Type::Unit));
+            for name in &self.opaque_types {
+                emit_type_alias(&mut output, &self.context, &opaque_ty, name);
+            }
+
             if !functions.is_empty() || !constants.is_empty() {
                 emit!(output, "public static class {} {{\n", class_name);
                 output.indent();
 
+                // Inject custom declarations.
                 if !self.custom_decls.is_empty() {
                     emit!(output, "#region custom declarations\n");
                     for decl in &self.custom_decls {
@@ -344,6 +347,11 @@ impl Lang for LangCSharp {
     }
 }
 
+pub struct Context {
+    class_name: String,
+}
+
+impl Context {}
 
 fn output<'a>(outputs: &'a mut Outputs, name: &str) -> IndentedOutput<'a> {
     IndentedOutput::new(

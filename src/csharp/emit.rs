@@ -124,15 +124,74 @@ pub fn emit_callback_wrappers(output: &mut IndentedOutput, all_arities: &BTreeSe
     }
 }
 
-pub fn emit_const(output: &mut IndentedOutput, name: &str, ty: &Type, value: &str) {
-    emit!(output, "public const ");
+pub fn emit_const(output: &mut IndentedOutput, name: &str, ty: &Type, value: &ConstValue) {
+    emit!(output, "public ");
+
+    match *value {
+        ConstValue::Array(..) |
+        ConstValue::Struct(..) => emit!(output, "static readonly "),
+        _ => emit!(output, "const "),
+    }
+
     emit_managed_type(output, ty);
-    emit!(
-        output,
-        " {} = {};\n\n",
-        name.to_screaming_snake_case(),
-        value
-    );
+    emit!(output, " {} = ", name.to_screaming_snake_case());
+    emit_const_value(output, Some(&ty), value);
+    emit!(output, ";\n\n");
+}
+
+pub fn emit_type_alias(output: &mut IndentedOutput, context: &Context, ty: &Type, name: &str) {
+    emit!(output, "[StructLayout(LayoutKind.Sequential)]\n");
+    emit!(output, "public struct {} {{\n", name);
+    output.indent();
+
+    emit_struct_field(output, context, "private", &ty, "value");
+
+    output.unindent();
+    emit!(output, "}}\n\n");
+}
+
+fn emit_const_value(output: &mut IndentedOutput, ty: Option<&Type>, value: &ConstValue) {
+    match *value {
+        ConstValue::Bool(true) => emit!(output, "true"),
+        ConstValue::Bool(false) => emit!(output, "false"),
+        ConstValue::Char(value) => emit!(output, "{:?}", value),
+        ConstValue::Int(value) => emit!(output, "{}", value),
+        ConstValue::Float(ref value) => emit!(output, "{}", value),
+        ConstValue::String(ref value) => emit!(output, "{:?}", value),
+        ConstValue::Array(ref elements) => {
+            if let Some(&Type::Array(ref ty, ..)) = ty {
+                emit!(output, "new ");
+                emit_managed_type(output, ty);
+                emit!(output, "[] ");
+            }
+
+            emit!(output, "{{ ");
+
+            for (index, element) in elements.iter().enumerate() {
+                if index > 0 {
+                    emit!(output, ", ");
+                }
+
+                emit_const_value(output, None, element);
+            }
+
+            emit!(output, " }}");
+        }
+        ConstValue::Struct(ref name, ref fields) => {
+            emit!(output, "new {} {{ ", name);
+
+            for (index, (name, value)) in fields.into_iter().enumerate() {
+                if index > 0 {
+                    emit!(output, ", ");
+                }
+
+                emit!(output, "{} = ", name.to_camel_case());
+                emit_const_value(output, None, value);
+            }
+
+            emit!(output, " }}");
+        }
+    }
 }
 
 fn emit_function_decl(
@@ -237,6 +296,7 @@ fn emit_managed_type(output: &mut IndentedOutput, ty: &Type) {
         Type::Unit => emit!(output, "void"),
         Type::Bool => emit!(output, "bool"),
         Type::CChar => emit!(output, "sbyte"),
+        Type::Char => emit!(output, "char"),
         Type::F32 => emit!(output, "float"),
         Type::F64 => emit!(output, "double"),
         Type::I8 => emit!(output, "sbyte"),

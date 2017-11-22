@@ -358,6 +358,40 @@ fn functions_with_array_params() {
 }
 
 #[test]
+fn function_with_opaque_params() {
+    let mut lang = LangCSharp::new("backend");
+    lang.add_opaque_type("Handle");
+
+    let actual = compile!(lang, {
+        #[no_mangle]
+        pub extern "C" fn fun0(handle: Handle) {}
+    });
+
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+
+         [StructLayout(LayoutKind.Sequential)]
+         public struct Handle {
+             private IntPtr value;
+         }
+
+         public static class Backend {
+             public static void Fun0(Handle handle) {
+                 fun0(handle);
+             }
+
+             [DllImport(\"backend\")]
+             private static extern void fun0(Handle handle);
+
+         }
+        "
+    );
+
+    assert_multiline_eq!(actual, expected);
+}
+
+#[test]
 fn functions_with_return_values() {
     let actual = compile!(None, {
         #[no_mangle]
@@ -386,13 +420,26 @@ fn functions_with_return_values() {
 #[test]
 fn constants() {
     let mut lang = LangCSharp::new("backend");
-    lang.add_custom_decl("public const byte CONST_CUSTOM = 45;");
+    lang.add_custom_decl("public const byte CUSTOM = 45;");
 
     let actual = compile!(lang, {
-        /// Comment for `CONST_NUMBER`.
-        pub const CONST_NUMBER: i32 = 123;
-        /// Comment for `CONST_STRING`.
-        pub const CONST_STRING: &'static str = "hello world";
+        /// Comment for `NUMBER`.
+        pub const NUMBER: i32 = 123;
+        /// Comment for `STRING`.
+        pub const STRING: &'static str = "hello world";
+        pub const ARRAY: [u8; 4] = [0, 1, 2, 3];
+
+        pub const STRUCT_VALUE: Record = Record {
+            id: 0,
+            secret_code: "xyz",
+        };
+
+        pub const STRUCT_REF: &'static Record = &Record {
+            id: 1,
+            secret_code: "xyz",
+        };
+
+        pub const EMPTY_STR: *const c_char = 0 as *const c_char;
     });
 
     let expected = indoc!(
@@ -401,14 +448,24 @@ fn constants() {
 
          public static class Backend {
              #region custom declarations
-             public const byte CONST_CUSTOM = 45;
+             public const byte CUSTOM = 45;
              #endregion
 
-             /// Comment for `CONST_NUMBER`.
-             public const int CONST_NUMBER = 123;
+             /// Comment for `NUMBER`.
+             public const int NUMBER = 123;
 
-             /// Comment for `CONST_STRING`.
-             public const String CONST_STRING = \"hello world\";
+             /// Comment for `STRING`.
+             public const String STRING = \"hello world\";
+
+             public static readonly byte[] ARRAY = new byte[] { 0, 1, 2, 3 };
+
+             public static readonly Record STRUCT_VALUE = new Record { \
+                 id = 0, secretCode = \"xyz\" };
+
+             public static readonly Record STRUCT_REF = new Record { \
+                 id = 1, secretCode = \"xyz\" };
+
+             public const String EMPTY_STR = \"\";
 
          }
         "

@@ -229,22 +229,6 @@ impl Cheddar {
         self
     }
 
-    fn compile_top_level_mod(&self) -> Result<Vec<Vec<String>>, Vec<Error>> {
-        let sess = &self.session;
-        let krate = syntax::parse::parse_crate_from_file(&self.input, sess).unwrap();
-        let mods = parse::imported_mods(&krate.module);
-
-        if mods.is_empty() {
-            return Err(From::from(Error {
-                level: Level::Fatal,
-                span: None,
-                message: "no public-level FFI modules available".to_owned(),
-            }));
-        }
-
-        Ok(mods)
-    }
-
     /// Compile just the code into header declarations.
     ///
     /// This does not add any include-guards, includes, or extern declarations. It is mainly
@@ -252,10 +236,15 @@ impl Cheddar {
     /// moz-cheddar's generated code in another file.
     pub fn compile<L: Lang>(&self, lang: &mut L) -> Result<Outputs, Vec<Error>> {
         let base_path = self.input.parent().unwrap();
-        let mods = self.compile_top_level_mod()?;
         let mut outputs = HashMap::new();
 
-        for module in mods {
+        // Parse the top level mod.
+        let krate = syntax::parse::parse_crate_from_file(&self.input, &self.session).unwrap();
+        parse::parse_mod(lang, &krate.module, &mut outputs)?;
+
+        // Parse other mods.
+        let modules = parse::imported_mods(&krate.module);
+        for module in modules {
             let mut mod_path = base_path.join(&format!(
                 "{}.rs",
                 module.join(&path::MAIN_SEPARATOR.to_string())

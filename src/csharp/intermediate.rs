@@ -2,13 +2,17 @@
 //! and the target language code.
 
 use common;
+use std::cmp;
+use std::collections::BTreeMap;
 use syntax::ast;
 use syntax::print::pprust;
+use syntax::ptr;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Type {
     Unit,
     Bool,
+    Char,
     CChar,
     F32,
     F64,
@@ -29,17 +33,27 @@ pub enum Type {
     User(String),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ArraySize {
     Lit(usize),
     Const(String),
     Dynamic,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Function {
     pub inputs: Vec<(String, Type)>,
     pub output: Type,
+}
+
+pub enum ConstValue {
+    Bool(bool),
+    Char(char),
+    Float(String),
+    Int(i64),
+    String(String),
+    Array(Vec<ConstValue>),
+    Struct(String, BTreeMap<String, ConstValue>),
 }
 
 pub fn transform_type(input: &ast::Ty) -> Option<Type> {
@@ -122,30 +136,70 @@ pub fn transform_function_param(arg: &ast::Arg) -> Option<(String, Type)> {
     }
 }
 
-pub fn transform_const_value(expr: &ast::Expr) -> Option<String> {
-    // TODO: add support for arrays of literals.
-
-    if let ast::ExprKind::Lit(ref lit) = expr.node {
-        transform_literal(lit)
-    } else {
-        None
+pub fn transform_const_value(expr: &ast::Expr) -> Option<ConstValue> {
+    match expr.node {
+        ast::ExprKind::Lit(ref lit) => transform_const_literal(lit),
+        ast::ExprKind::Array(ref elements) => transform_const_array(elements),
+        ast::ExprKind::Struct(ref path, ref fields, None) => transform_const_struct(path, fields),
+        ast::ExprKind::AddrOf(_, ref expr) => transform_const_value(expr),
+        ast::ExprKind::Cast(ref expr, ref ty) => transform_const_cast(expr, ty),
+        _ => None,
     }
 }
 
-fn transform_literal(lit: &ast::Lit) -> Option<String> {
+fn transform_const_literal(lit: &ast::Lit) -> Option<ConstValue> {
     let result = match lit.node {
-        ast::LitKind::Str(ref value, ..) => format!("{:?}", value.as_str()),
-        ast::LitKind::Byte(value) => format!("{}", value),
-        ast::LitKind::Char(value) => format!("{:?}", value),
-        ast::LitKind::Int(value, ..) => format!("{}", value),
-        ast::LitKind::Float(ref value, ..) |
-        ast::LitKind::FloatUnsuffixed(ref value) => value.as_str().to_string(),
-        ast::LitKind::Bool(true) => "true".to_string(),
-        ast::LitKind::Bool(false) => "false".to_string(),
+        ast::LitKind::Bool(value) => ConstValue::Bool(value),
+        ast::LitKind::Byte(value) => ConstValue::Int(value as i64),
+        ast::LitKind::Char(value) => ConstValue::Char(value),
+        ast::LitKind::Int(value, _) => ConstValue::Int(value as i64),
+        ast::LitKind::Float(ref value, _) |
+        ast::LitKind::FloatUnsuffixed(ref value) => ConstValue::Float(value.as_str().to_string()),
+        ast::LitKind::Str(ref value, ..) => ConstValue::String(value.as_str().to_string()),
+        // TODO: LitKind::ByteStr
         _ => return None,
     };
 
     Some(result)
+}
+
+fn transform_const_array(array: &[ptr::P<ast::Expr>]) -> Option<ConstValue> {
+    let elements: Option<Vec<_>> = array
+        .into_iter()
+        .map(|expr| transform_const_value(expr))
+        .collect();
+
+    elements.map(ConstValue::Array)
+}
+
+fn transform_const_struct(path: &ast::Path, fields: &[ast::Field]) -> Option<ConstValue> {
+    let name = pprust::path_to_string(path);
+    let fields: Option<BTreeMap<_, _>> = fields
+        .into_iter()
+        .map(|field| if let Some(value) = transform_const_value(
+            &*field.expr,
+        )
+        {
+            let name = field.ident.node.name.as_str().to_string();
+            Some((name, value))
+        } else {
+            None
+        })
+        .collect();
+
+    fields.map(|fields| ConstValue::Struct(name, fields))
+}
+
+fn transform_const_cast(expr: &ast::Expr, ty: &ast::Ty) -> Option<ConstValue> {
+    // Currently only supports null strings, e.g.: `0 as *const c_char`
+
+    if let Some(Type::String) = transform_type(ty) {
+        if &pprust::expr_to_string(expr) == "0" {
+            return Some(ConstValue::String(String::new()));
+        }
+    }
+
+    None
 }
 
 fn transform_array(ty: &ast::Ty, size: &ast::Expr) -> Option<Type> {
@@ -183,12 +237,12 @@ fn extract_array_size(expr: &ast::Expr) -> Option<ArraySize> {
 }
 
 fn transform_ptr_and_len_to_array(
-    base_name: &str,
-    base_ty: &Type,
+    ptr_name: &str,
+    ptr_ty: &Type,
     len_name: &str,
     len_ty: &Type,
 ) -> Option<(String, Type)> {
-    let elem_ty = if let Type::Pointer(ref ty) = *base_ty {
+    let elem_ty = if let Type::Pointer(ref ty) = *ptr_ty {
         &**ty
     } else {
         return None;
@@ -200,11 +254,21 @@ fn transform_ptr_and_len_to_array(
     }
 
     // Matches "foo_ptr"/"foo_len" or "foo"/"foo_len"
+    const PTR_SUFFIX: &'static str = "_ptr";
+    const LEN_SUFFIX: &'static str = "_len";
 
-    let index = base_name.rfind("_ptr").unwrap_or(base_name.len());
-    if &len_name[0..index] == &base_name[0..index] && &len_name[index..] == "_len" {
+    let index = if ptr_name.ends_with(PTR_SUFFIX) {
+        ptr_name.len() - PTR_SUFFIX.len()
+    } else {
+        ptr_name.len()
+    };
+
+    let base_name = &ptr_name[0..index];
+    let (len_name_0, len_name_1) = len_name.split_at(cmp::min(index, len_name.len()));
+
+    if len_name_0 == base_name && len_name_1 == LEN_SUFFIX {
         Some((
-            base_name[0..index].to_string(),
+            base_name.to_string(),
             Type::Array(Box::new(elem_ty.clone()), ArraySize::Dynamic),
         ))
     } else {
@@ -216,6 +280,7 @@ fn transform_path(input: &ast::Ty) -> Option<Type> {
     let full = pprust::ty_to_string(input);
     let output = match full.as_str() {
         "bool" => Type::Bool,
+        "char" => Type::Char,
         "c_char" |
         "libc::c_char" |
         "std::os::raw::c_char" => Type::CChar,
@@ -234,6 +299,7 @@ fn transform_path(input: &ast::Ty) -> Option<Type> {
         "c_void" |
         "libc::c_void" |
         "std::os::raw::c_void" => Type::Unit,
+        "str" => Type::String,
         name => Type::User(name.to_string()),
     };
 
@@ -249,27 +315,25 @@ fn transform_pointer(ptr: &ast::MutTy) -> Option<Type> {
 }
 
 fn transform_reference(lifetime: &Option<ast::Lifetime>, ty: &ast::Ty) -> Option<Type> {
-    // We currently support only `&'static str`.
-
-    if let Some(ref lifetime) = *lifetime {
-        if &*lifetime.name.as_str() != "'static" {
-            return None;
-        }
-    } else {
+    if lifetime
+        .map(|lifetime| &*lifetime.name.as_str() != "'static")
+        .unwrap_or(false)
+    {
         return None;
     }
 
-    if pprust::ty_to_string(ty) == "str" {
-        Some(Type::String)
-    } else {
-        None
+    match transform_type(ty) {
+        Some(Type::String) => Some(Type::String),
+        Some(Type::User(name)) => Some(Type::User(name)),
+        _ => None,
     }
 }
 
+/// Is the given parameter an `user_data` for a callback?
 pub fn is_user_data(name: &str, ty: &Type) -> bool {
     if let Type::Pointer(ref ty) = *ty {
         if let Type::Unit = **ty {
-            return name == "user_data";
+            return name == "" || name == "user_data";
         }
     }
 
