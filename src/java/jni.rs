@@ -3,6 +3,7 @@
 use common::{is_array_arg, is_user_data_arg};
 use syntax::ast;
 use syntax::print::pprust;
+use java::callback_name;
 use jni::signature::{self, TypeSignature, JavaType};
 use quote;
 
@@ -137,16 +138,23 @@ fn transform_array_arg(arg_name: &str) -> JniArgResult {
     JniArgResult { stmt, call_args }
 }
 
-fn transform_callbacks_arg(cb_idents: Vec<quote::Ident>) -> JniArgResult {
-    let call_args = cb_idents
+fn transform_callbacks_arg(cb_idents: Vec<(quote::Ident, quote::Ident)>) -> JniArgResult {
+    // statements
+    let cb_ids: Vec<quote::Ident> = cb_idents
         .iter()
-        .map(|ident| quote!{ Some(#ident) })
+        .map(|&(ref ident, _)| ident.clone())
         .collect();
 
     let stmt =
         quote! {
-        let ctx = gen_ctx!(#(#cb_idents),*);
-    };
+            let ctx = gen_ctx!(#(#cb_ids),*);
+        };
+
+    // call arg value(s)
+    let call_args = cb_idents
+        .iter()
+        .map(|&(_, ref cb_fn)| quote!{ Some(#cb_fn) })
+        .collect();
 
     JniArgResult { stmt, call_args }
 }
@@ -172,8 +180,12 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
         } else {
             match arg.ty.node {
                 // Callback
-                ast::TyKind::BareFn(ref _bare_fn) => {
-                    callbacks.push(quote::Ident::new(arg_name));
+                ast::TyKind::BareFn(ref bare_fn) => {
+                    let cb_class =
+                        format!("call_{}", callback_name(&*bare_fn.decl.inputs).unwrap());
+
+                    callbacks.push((quote::Ident::new(arg_name), quote::Ident::new(cb_class)));
+
                     None
                 }
 
@@ -195,6 +207,7 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
             call_args.extend(jni_arg_res.call_args);
             stmts.push(jni_arg_res.stmt);
         }
+
         jni_fn_inputs.push(transform_jni_arg(&arg));
     }
 
