@@ -30,7 +30,7 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
                 "c_short" | "u16" | "i16" => "jshort",
                 "c_int" | "u32" | "i32" => "jint",
                 "c_long" | "u64" | "i64" => "jlong",
-                "c_usize" | "usize" => "jlong",
+                "c_usize" | "usize" | "isize" => "jlong",
                 _ => ty,
             };
 
@@ -65,11 +65,13 @@ fn rust_ty_to_signature(ty: &ast::Ty) -> Option<JavaType> {
             let ty: &str = &ty.identifier.name.as_str();
 
             match ty {
-                "c_byte" | "u8" => Some(JavaType::Primitive(signature::Primitive::Byte)),
-                "c_short" | "u16" => Some(JavaType::Primitive(signature::Primitive::Short)),
-                "c_int" | "u32" => Some(JavaType::Primitive(signature::Primitive::Int)),
-                "c_long" | "u64" => Some(JavaType::Primitive(signature::Primitive::Long)),
-                "c_usize" | "usize" => Some(JavaType::Primitive(signature::Primitive::Long)),
+                "c_byte" | "u8" | "i8" => Some(JavaType::Primitive(signature::Primitive::Byte)),
+                "c_short" | "u16" | "i16" => Some(JavaType::Primitive(signature::Primitive::Short)),
+                "c_int" | "u32" | "i32" => Some(JavaType::Primitive(signature::Primitive::Int)),
+                "c_long" | "u64" | "i64" => Some(JavaType::Primitive(signature::Primitive::Long)),
+                "c_usize" | "usize" | "isize" => Some(
+                    JavaType::Primitive(signature::Primitive::Long),
+                ),
                 "c_bool" | "bool" => Some(JavaType::Object(From::from("java/lang/Boolean"))),
                 _ => Some(JavaType::Object(From::from(ty))),
             }
@@ -165,7 +167,7 @@ fn transform_opaque_ptr(arg_name: &str, ty: &str) -> JniArgResult {
     let ty = quote::Ident::new(ty);
     let stmt =
         quote! {
-            let #arg_name = #arg_name as *const #ty;
+            let #arg_name = #arg_name as *mut #ty;
         };
 
     // call arg value(s)

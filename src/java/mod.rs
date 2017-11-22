@@ -144,13 +144,18 @@ impl common::Lang for LangJava {
 
 /// Get the Java interface name for the callback based on its types
 pub fn callback_name(inputs: &[ast::Arg]) -> Result<String, Error> {
-    let mut basename = String::from("Callback");
-
+    let mut components = Vec::new();
     let mut inputs = inputs.iter().peekable();
 
     while let Some(arg) = inputs.next() {
-        if is_user_data_arg(arg) || is_result_arg(arg) {
+        if is_user_data_arg(arg) {
             // Skip user_data args
+            continue;
+        }
+        if is_result_arg(arg) {
+            // Make sure that a CB taking a single "result: *const FfiResult" param
+            // won't end up being called "CallbackVoid"
+            components.push(From::from(""));
             continue;
         }
 
@@ -163,10 +168,14 @@ pub fn callback_name(inputs: &[ast::Arg]) -> Result<String, Error> {
             arg_type.push_str("Array");
         }
 
-        basename.push_str(&arg_type);
+        components.push(arg_type);
     }
 
-    Ok(basename)
+    if components.is_empty() {
+        Ok(From::from("CallbackVoid"))
+    } else {
+        Ok(format!("Callback{}", components.join("")))
+    }
 }
 
 /// Transform a Rust FFI function into a Java native function
@@ -489,16 +498,11 @@ fn rust_ty_to_java(ty: &str) -> &str {
         "()" => "void",
         "f32" => "float",
         "f64" => "double",
-        "i8" => "byte",
-        "i16" => "short",
-        "i32" => "int",
-        "i64" => "long",
-        "isize" => "intptr_t",
-        "u8" => "byte",
-        "u16" => "short",
-        "u32" => "int",
-        "u64" => "long",
-        "usize" => "long",
+        "u8" | "i8" => "byte",
+        "u16" | "u16" => "short",
+        "u32" | "i32" => "int",
+        "u64" | "i64" => "long",
+        "usize" | "isize" => "long",
         // This is why we write out structs and enums as `typedef ...`.
         // We `#include <stdbool.h>` so bool is handled.
         ty => libc_ty_to_java(ty),
