@@ -235,13 +235,21 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
     tokens.to_string()
 }
 
+/// Transform `ast::Arg` into an (identifier, type) tuple
+fn transform_arg(arg: &ast::Arg) -> (quote::Ident, quote::Ident) {
+    (
+        quote::Ident::new(pprust::pat_to_string(&*arg.pat)),
+        quote::Ident::new(pprust::ty_to_string(&*arg.ty)),
+    )
+}
+
 pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
     let cb_name = quote::Ident::new(format!("call_{}", cb_class));
 
-    let mut args: Vec<quote::Tokens> = Vec::new();
-    let mut stmts: Vec<quote::Tokens> = Vec::new();
-    let mut jni_cb_inputs = Vec::new();
-    let mut arg_java_ty = Vec::new();
+    let mut args: Vec<quote::Tokens> = Vec::new(); // Native function call parameters
+    let mut stmts: Vec<quote::Tokens> = Vec::new(); // Callback function statements
+    let mut jni_cb_inputs = Vec::new(); // Arguments for the callback function
+    let mut arg_java_ty = Vec::new(); // String Java type signature constructor
 
     let mut args_iter = (&*cb.decl)
         .inputs
@@ -250,19 +258,18 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
         .peekable();
 
     while let Some(arg) = args_iter.next() {
-        let arg_name = quote::Ident::new(pprust::pat_to_string(&*arg.pat));
-        let arg_ty = quote::Ident::new(pprust::ty_to_string(&*arg.ty));
+        let (arg_name, arg_ty) = transform_arg(&arg);
 
         jni_cb_inputs.push(quote! { #arg_name: #arg_ty });
         args.push(quote! { #arg_name.into() });
 
         if is_array_arg(&arg, args_iter.peek().cloned()) {
+            // Handle array arguments
             let val_java_type = rust_ty_to_signature(&arg.ty).unwrap();
             arg_java_ty.push(JavaType::Array(Box::new(val_java_type)));
 
             if let Some(len_arg) = args_iter.next() {
-                let len_arg_name = quote::Ident::new(pprust::pat_to_string(&*len_arg.pat));
-                let len_arg_ty = quote::Ident::new(pprust::ty_to_string(&*len_arg.ty));
+                let (len_arg_name, len_arg_ty) = transform_arg(&len_arg);
                 jni_cb_inputs.push(quote! { #len_arg_name: #len_arg_ty });
 
                 stmts.push(quote! {
@@ -272,28 +279,29 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
                 // error: no length arg?
             }
         } else {
-            arg_java_ty.push(rust_ty_to_signature(&arg.ty).unwrap());
-
-            match arg.ty.node {
+            let stmt = match arg.ty.node {
                 // Standard pointers.
                 ast::TyKind::Ptr(ref ptr) => {
                     // Detect strings, which are *const c_char or *mut c_char
                     if pprust::ty_to_string(&ptr.ty) == "c_char" {
-                        stmts.push(quote! {
+                        quote! {
                             let #arg_name: JObject = (*#arg_name).to_java(&env).into();
-                        });
+                        }
                     } else {
-                        stmts.push(quote! {
+                        quote! {
                             let #arg_name = (*#arg_name).to_java(&env);
-                        });
+                        }
                     }
                 }
                 _ => {
-                    stmts.push(quote! {
+                    quote! {
                         let #arg_name = #arg_name.to_java(&env);
-                    });
+                    }
                 }
-            }
+            };
+
+            arg_java_ty.push(rust_ty_to_signature(&arg.ty).unwrap());
+            stmts.push(stmt);
         }
     }
 
