@@ -153,7 +153,7 @@ fn transform_callbacks_arg(cb_idents: Vec<(quote::Ident, quote::Ident)>) -> JniA
     // call arg value(s)
     let call_args = cb_idents
         .iter()
-        .map(|&(_, ref cb_fn)| quote!{ Some(#cb_fn) })
+        .map(|&(_, ref cb_fn)| quote! { #cb_fn })
         .collect();
 
     JniArgResult { stmt, call_args }
@@ -199,7 +199,14 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
                     }
                 }
 
-                _ => None,
+                // Native types and others
+                _ => {
+                    let id = quote::Ident::new(arg_name);
+                    Some(JniArgResult {
+                        stmt: quote!{},
+                        call_args: vec![quote! { #id }],
+                    })
+                }
             }
         };
 
@@ -212,6 +219,7 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
     }
 
     let cb_arg_res = transform_callbacks_arg(callbacks);
+    call_args.push(quote! { ctx });
     call_args.extend(cb_arg_res.call_args);
     stmts.push(cb_arg_res.stmt);
 
@@ -299,18 +307,20 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
 
     let tokens =
         quote! {
-        unsafe extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
-            let env = JVM.attach_current_thread_as_daemon().unwrap();
-            let cb = GlobalRef::from_raw_ptr(&env, ctx);
+        extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
+            unsafe {
+                let env = JVM.attach_current_thread_as_daemon().unwrap();
+                let cb = GlobalRef::from_raw_ptr(&env, ctx);
 
-            #(#stmts)*;
+                #(#stmts)*;
 
-            env.call_method(
-                cb.as_obj(),
-                "call",
-                #arg_ty_str,
-                &[ #(#args),* ],
-            ).unwrap();
+                env.call_method(
+                    cb.as_obj(),
+                    "call",
+                    #arg_ty_str,
+                    &[ #(#args),* ],
+                ).unwrap();
+            }
         }
     };
 
