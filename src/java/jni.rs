@@ -221,9 +221,11 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
                 // Native types and others
                 _ => {
                     let id = quote::Ident::new(arg_name);
+                    let native_ty = quote::Ident::new(pprust::ty_to_string(&arg.ty));
+
                     Some(JniArgResult {
                         stmt: quote!{},
-                        call_args: vec![quote! { #id }],
+                        call_args: vec![quote! { #id as #native_ty }],
                     })
                 }
             }
@@ -311,7 +313,7 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
                         // Strings
                         "c_char" => {
                             quote! {
-                            let #arg_name: JObject = (*#arg_name).to_java(&env).into();
+                            let #arg_name: JObject = #arg_name.to_java(&env).into();
                         }
                         }
                         // Other ptrs

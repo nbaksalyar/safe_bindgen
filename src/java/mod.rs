@@ -154,8 +154,8 @@ pub fn callback_name(inputs: &[ast::Arg]) -> Result<String, Error> {
         }
         if is_result_arg(arg) {
             // Make sure that a CB taking a single "result: *const FfiResult" param
-            // won't end up being called "CallbackVoid"
-            components.push(From::from(""));
+            // won't end up being called "CallbackVoid" (but "CallbackResult" instead)
+            components.push(From::from("Result"));
             continue;
         }
 
@@ -499,7 +499,7 @@ fn rust_ty_to_java(ty: &str) -> &str {
         "f32" => "float",
         "f64" => "double",
         "u8" | "i8" => "byte",
-        "u16" | "u16" => "short",
+        "u16" | "i16" => "short",
         "u32" | "i32" => "int",
         "u64" | "i64" => "long",
         "usize" | "isize" => "long",
