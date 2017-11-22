@@ -111,7 +111,9 @@ impl Lang for LangCSharp {
 
         if let ast::ItemKind::Ty(ref ty, ref generics) = item.node {
             if generics.is_parameterized() {
-                return Err(unsupported_generics_error(item, "type aliases"));
+                println!("parameterized type aliases not supported. Skipping.");
+                return Ok(());
+                // return Err(unsupported_generics_error(item, "type aliases"));
             }
 
             let ty = transform_type(ty).ok_or_else(|| unknown_type_error(ty))?;

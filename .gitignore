@@ -2,3 +2,4 @@ target
 Cargo.lock
 *.*~
 bind-gen/
+examples/output
