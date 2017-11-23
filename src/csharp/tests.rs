@@ -127,11 +127,11 @@ fn type_aliases() {
 
          public static class Backend {
              public static void Fun(ulong id) {
-                 fun(id);
+                 FunNative(id);
              }
 
-             [DllImport(\"backend\")]
-             private static extern void fun(ulong id);
+             [DllImport(\"backend\", EntryPoint = \"fun\")]
+             private static extern void FunNative(ulong id);
 
          }
          "
@@ -221,11 +221,11 @@ fn explicitly_ignored_functions() {
 
          public static class Backend {
              public static void Fun2() {
-                 fun2();
+                 Fun2Native();
              }
 
-             [DllImport(\"backend\")]
-             private static extern void fun2();
+             [DllImport(\"backend\", EntryPoint = \"fun2\")]
+             private static extern void Fun2Native();
 
          }
         "
@@ -247,11 +247,11 @@ fn functions_with_no_callback_params() {
 
          public static class Backend {
              public static void Fun0(Engine engine) {
-                 fun0(engine);
+                 Fun0Native(engine);
              }
 
-             [DllImport(\"backend\")]
-             private static extern void fun0(Engine engine);
+             [DllImport(\"backend\", EntryPoint = \"fun0\")]
+             private static extern void Fun0Native(Engine engine);
 
          }
         "
@@ -282,11 +282,11 @@ fn functions_with_one_callback_param() {
              /// Comment for `fun1`.
              public static void Fun1(int num, String name, Action<FfiResult> cb) {
                  var userData = GCHandle.ToIntPtr(GCHandle.Alloc(cb));
-                 fun1(num, name, userData, new Action<IntPtr, FfiResult>(Call<FfiResult>));
+                 Fun1Native(num, name, userData, new Action<IntPtr, FfiResult>(Call<FfiResult>));
              }
 
-             [DllImport(\"backend\")]
-             private static extern void fun1(\
+             [DllImport(\"backend\", EntryPoint = \"fun1\")]
+             private static extern void Fun1Native(\
                 int num, \
                 [MarshalAs(UnmanagedType.LPStr)] String name, \
                 IntPtr userData, \
@@ -327,13 +327,14 @@ fn functions_with_multiple_callback_params() {
          public static class Backend {
              public static void Fun2(Action<FfiResult, Data> cb0, Action<FfiResult> cb1) {
                  var userData = GCHandle.ToIntPtr(GCHandle.Alloc(Tuple.Create(cb0, cb1)));
-                 fun2(userData, \
-                      new Action<IntPtr, FfiResult, Data>(Call0_2_1<FfiResult, Data, FfiResult>), \
-                      new Action<IntPtr, FfiResult>(Call1_2_1<FfiResult, Data, FfiResult>));
+                 Fun2Native(\
+                     userData, \
+                     new Action<IntPtr, FfiResult, Data>(Call0_2_1<FfiResult, Data, FfiResult>), \
+                     new Action<IntPtr, FfiResult>(Call1_2_1<FfiResult, Data, FfiResult>));
              }
 
-             [DllImport(\"backend\")]
-             private static extern void fun2(\
+             [DllImport(\"backend\", EntryPoint = \"fun2\")]
+             private static extern void Fun2Native(\
                  IntPtr userData, \
                  Action<IntPtr, FfiResult, Data> cb0, \
                  Action<IntPtr, FfiResult> cb1);
@@ -372,11 +373,11 @@ fn functions_with_array_params() {
 
          public static class Backend {
              public static void Fun0(byte[] ids) {
-                 fun0(ids, (ulong) ids.Length);
+                 Fun0Native(ids, (ulong) ids.Length);
              }
 
-             [DllImport(\"backend\")]
-             private static extern void fun0(\
+             [DllImport(\"backend\", EntryPoint = \"fun0\")]
+             private static extern void Fun0Native(\
                 [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] ids, \
                 ulong idsLen\
              );
@@ -409,11 +410,11 @@ fn function_with_opaque_params() {
 
          public static class Backend {
              public static void Fun0(Handle handle) {
-                 fun0(handle);
+                 Fun0Native(handle);
              }
 
-             [DllImport(\"backend\")]
-             private static extern void fun0(Handle handle);
+             [DllImport(\"backend\", EntryPoint = \"fun0\")]
+             private static extern void Fun0Native(Handle handle);
 
          }
         "
@@ -435,11 +436,11 @@ fn functions_with_return_values() {
 
          public static class Backend {
              public static bool Fun0(int arg) {
-                 return fun0(arg);
+                 return Fun0Native(arg);
              }
 
-             [DllImport(\"backend\")]
-             private static extern bool fun0(int arg);
+             [DllImport(\"backend\", EntryPoint = \"fun0\")]
+             private static extern bool Fun0Native(int arg);
 
          }
         "
@@ -522,11 +523,11 @@ fn arrays() {
              public const ulong ARRAY_SIZE = 20;
 
              public static void Fun(byte[] a, byte[] b) {
-                 fun(a, b);
+                 FunNative(a, b);
              }
 
-             [DllImport(\"backend\")]
-             private static extern void fun(\
+             [DllImport(\"backend\", EntryPoint = \"fun\")]
+             private static extern void FunNative(\
                  [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)] byte[] a, \
                  [MarshalAs(UnmanagedType.ByValArray, SizeConst = Backend.ARRAY_SIZE)] byte[] b);
 

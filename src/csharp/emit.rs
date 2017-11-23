@@ -125,7 +125,7 @@ fn emit_function_wrapper(
         _ => emit!(output, "return "),
     }
 
-    emit!(output, "{}(", name);
+    emit!(output, "{}(", extern_function_name(name));
 
     let mut first = true;
     for &(ref name, ref ty) in &fun.inputs {
@@ -161,12 +161,25 @@ fn emit_function_wrapper(
 fn emit_function_extern_decl(
     output: &mut IndentedOutput,
     context: &Context,
-    name: &str,
+    native_name: &str,
     fun: &Function,
 ) {
-    emit!(output, "[DllImport(\"{}\")]\n", context.lib_name);
-    emit_function_decl(output, context, "private static", name, fun, true, false);
+    let name = extern_function_name(native_name);
+
+    emit!(
+        output,
+        "[DllImport(\"{}\", EntryPoint = \"{}\")]\n",
+        context.lib_name,
+        native_name
+    );
+    emit_function_decl(output, context, "private static", &name, fun, true, false);
     emit!(output, ";\n\n");
+}
+
+fn extern_function_name(name: &str) -> String {
+    let mut name = name.to_pascal_case();
+    name.push_str("Native");
+    name
 }
 
 // Emit static method that can be passed to native functions as callback and
