@@ -251,11 +251,6 @@ pub fn extract_callbacks(inputs: &[(String, Type)]) -> Vec<(&str, &Function)> {
         .collect()
 }
 
-pub fn callback_arity(fun: &Function) -> usize {
-    // Do not count the user_data param.
-    fun.inputs.len() - 1
-}
-
 pub fn retrieve_docstring(attr: &ast::Attribute) -> Option<String> {
     common::retrieve_docstring(attr, "")
 }

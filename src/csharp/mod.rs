@@ -11,7 +11,7 @@ use Level;
 use common::{self, Lang, Outputs};
 use inflector::Inflector;
 use output::IndentedOutput;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 use std::mem;
 use std::path::PathBuf;
@@ -25,7 +25,6 @@ pub struct LangCSharp {
     opaque_types: HashSet<String>,
     custom_decls: Vec<String>,
     ignored_functions: HashSet<String>,
-    callback_arities: BTreeSet<Vec<usize>>,
     context: Context,
 
     consts: Vec<Snippet<Const>>,
@@ -43,7 +42,6 @@ impl LangCSharp {
             opaque_types: Default::default(),
             custom_decls: Vec::new(),
             ignored_functions: Default::default(),
-            callback_arities: Default::default(),
             context: Context {
                 lib_name: "backend".to_string(),
                 class_name: "Backend".to_string(),
@@ -271,17 +269,6 @@ impl Lang for LangCSharp {
             })?;
             let name = name.to_string();
 
-            {
-                let callbacks = extract_callbacks(&item.inputs);
-                let callback_arities: Vec<_> = callbacks
-                    .into_iter()
-                    .map(|(_, ref fun)| callback_arity(fun))
-                    .collect();
-                if !callback_arities.is_empty() {
-                    let _ = self.callback_arities.insert(callback_arities);
-                }
-            }
-
             self.functions.push(Snippet { docs, name, item });
         }
 
@@ -331,6 +318,18 @@ impl Lang for LangCSharp {
                 );
                 output.indent();
 
+                // Define constant with the native library name, to be used in
+                // the [DllImport] attributes.
+                emit!(output, "#if __IOS__\n");
+                emit!(output, "private const String DLL_NAME = \"__Internal\";\n");
+                emit!(output, "#else\n");
+                emit!(
+                    output,
+                    "private const String DLL_NAME = \"{}\";\n",
+                    self.context.lib_name
+                );
+                emit!(output, "#endif\n\n");
+
                 // Custom declarations.
                 if !self.custom_decls.is_empty() {
                     emit!(output, "#region custom declarations\n");
@@ -347,13 +346,18 @@ impl Lang for LangCSharp {
                 }
 
                 // Functions
-                for snippet in self.functions.drain(..) {
+                for snippet in &self.functions {
                     emit!(output, "{}", snippet.docs);
                     emit_function(&mut output, &self.context, &snippet.name, &snippet.item);
                 }
 
-                emit_callback_wrappers(&mut output, &self.callback_arities);
-                self.callback_arities.clear();
+                {
+                    for callbacks in collect_callbacks(&self.functions) {
+                        emit_callback_wrappers(&mut output, &callbacks);
+                    }
+                }
+
+                self.functions.clear();
 
                 output.unindent();
                 emit!(output, "}}\n");
@@ -419,6 +423,29 @@ fn default_using_decls() -> BTreeSet<String> {
     let _ = result.insert("System".to_string());
     let _ = result.insert("System.Runtime.InteropServices".to_string());
     result
+}
+
+fn collect_callbacks(functions: &[Snippet<Function>]) -> Vec<Vec<(&str, &Function)>> {
+    let mut stash = BTreeMap::new();
+
+    for snippet in functions {
+        let callbacks = extract_callbacks(&snippet.item.inputs);
+        let name = callback_wrapper_name(&callbacks);
+
+        let _ = stash.entry(name).or_insert(callbacks);
+    }
+
+    stash.into_iter().map(|(_, callbacks)| callbacks).collect()
+}
+
+fn callback_wrapper_name(callbacks: &[(&str, &Function)]) -> String {
+    let mut output = String::new();
+    {
+        let mut output = IndentedOutput::new(&mut output, INDENT_WIDTH);
+        emit_callback_wrapper_name(&mut output, callbacks, 0);
+    }
+
+    output
 }
 
 fn unsupported_generics_error(item: &ast::Item, name: &str) -> Error {
