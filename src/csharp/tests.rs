@@ -16,11 +16,15 @@ macro_rules! try_compile {
 // strings.
 macro_rules! assert_multiline_eq {
         ($left:expr, $right:expr) => {{
+            use $crate::colored::*;
+
             let left = $left;
             let right = $right;
 
             if left != right {
-                panic!("assertion failed: `(left == right)`\n```\n{}```\n",
+                panic!("assertion failed: `({} == {})`\n```\n{}```\n",
+                       "left".red(),
+                       "right".green(),
                        format_diff(&left, &right));
             }
         }}
@@ -109,10 +113,11 @@ fn type_aliases() {
         pub struct Message {
             id: Id,
             sender_id: UserId,
+            receiver_ids: [Id; 10],
         }
 
         #[no_mangle]
-        pub extern "C" fn fun(id: Id) {}
+        pub extern "C" fn fun(id: Id, user_data: *mut c_void, cb: extern "C" fn(*mut c_void, Id)) {}
     });
 
     let expected = indoc!(
@@ -123,15 +128,28 @@ fn type_aliases() {
          public class Message {
              public ulong id;
              public ulong senderId;
+             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
+             public ulong[] receiverIds;
          }
 
          public static class Backend {
-             public static void Fun(ulong id) {
-                 FunNative(id);
+             public static void Fun(ulong id, Action<ulong> cb) {
+                 var userData = GCHandle.ToIntPtr(GCHandle.Alloc(cb));
+                 FunNative(id, userData, new Action<IntPtr, ulong>(Call<ulong>));
              }
 
              [DllImport(\"backend\", EntryPoint = \"fun\")]
-             private static extern void FunNative(ulong id);
+             private static extern void FunNative(\
+                 ulong id, \
+                 IntPtr userData, \
+                 Action<IntPtr, ulong> cb);
+
+             private static void Call<T0>(IntPtr userData, T0 arg0) {
+                 var handle = GCHandle.FromIntPtr(userData);
+                 var cb = (Action<T0>) handle.Target;
+                 cb(arg0);
+                 handle.Free();
+             }
 
          }
          "
@@ -205,7 +223,7 @@ fn functions_without_extern_and_no_mangle_are_ignored() {
 
 #[test]
 fn explicitly_ignored_functions() {
-    let mut lang = LangCSharp::new("backend");
+    let mut lang = LangCSharp::new();
     lang.ignore_function("fun1");
 
     let actual = compile!(lang, {
@@ -391,7 +409,7 @@ fn functions_with_array_params() {
 
 #[test]
 fn function_with_opaque_params() {
-    let mut lang = LangCSharp::new("backend");
+    let mut lang = LangCSharp::new();
     lang.add_opaque_type("Handle");
 
     let actual = compile!(lang, {
@@ -451,7 +469,7 @@ fn functions_with_return_values() {
 
 #[test]
 fn constants() {
-    let mut lang = LangCSharp::new("backend");
+    let mut lang = LangCSharp::new();
     lang.add_custom_decl("public const byte CUSTOM = 45;");
 
     let actual = compile!(lang, {
@@ -550,7 +568,7 @@ fn try_compile<T: Into<Option<LangCSharp>>>(
         .unwrap();
 
     let mut outputs = Outputs::default();
-    let mut lang = lang.into().unwrap_or_else(|| LangCSharp::new("backend"));
+    let mut lang = lang.into().unwrap_or_else(|| LangCSharp::new());
 
     parse::parse_mod(&mut lang, &ast.module, &mut outputs)?;
     lang.finalise_output(&mut outputs)?;

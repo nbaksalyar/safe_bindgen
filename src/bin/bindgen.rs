@@ -2,7 +2,7 @@ extern crate safe_bindgen;
 #[macro_use]
 extern crate clap;
 
-use safe_bindgen::{Cheddar, LangJava, LangCSharp};
+use safe_bindgen::{Cheddar, LangCSharp, LangJava};
 use std::collections::HashMap;
 
 fn main() {
@@ -57,7 +57,8 @@ fn main() {
 
     match lang {
         "csharp" => {
-            let mut lang = LangCSharp::new(lib);
+            let mut lang = LangCSharp::new();
+            lang.set_lib_name(lib);
             bindgen.run_build(&mut lang, &output_dir)
         }
         "java" => {
@@ -88,4 +89,3 @@ fn main() {
         _ => unreachable!(),
     }
 }
-

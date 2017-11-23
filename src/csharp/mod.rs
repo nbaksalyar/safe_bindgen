@@ -13,6 +13,7 @@ use inflector::Inflector;
 use output::IndentedOutput;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
+use std::mem;
 use std::path::PathBuf;
 use syntax::ast;
 use syntax::print::pprust;
@@ -31,27 +32,21 @@ pub struct LangCSharp {
     enums: Vec<Snippet<Enum>>,
     structs: Vec<Snippet<Struct>>,
     functions: Vec<Snippet<Function>>,
+
     aliases: HashMap<String, Type>,
 }
 
 impl LangCSharp {
-    pub fn new<T: Into<String>>(lib_name: T) -> Self {
-        let mut using_decls = BTreeSet::default();
-        let _ = using_decls.insert("System".to_string());
-        let _ = using_decls.insert("System.Runtime.InteropServices".to_string());
-
-        let lib_name = lib_name.into();
-        let class_name = lib_name.to_pascal_case();
-
+    pub fn new() -> Self {
         LangCSharp {
-            using_decls,
+            using_decls: default_using_decls(),
             opaque_types: Default::default(),
             custom_decls: Vec::new(),
             ignored_functions: Default::default(),
             callback_arities: Default::default(),
             context: Context {
-                lib_name,
-                class_name,
+                lib_name: "backend".to_string(),
+                class_name: "Backend".to_string(),
             },
             consts: Vec::new(),
             enums: Vec::new(),
@@ -59,6 +54,13 @@ impl LangCSharp {
             functions: Vec::new(),
             aliases: Default::default(),
         }
+    }
+
+    /// Set the name of the native library. This also sets the class name.
+    pub fn set_lib_name<T: Into<String>>(&mut self, name: T) {
+        let name = name.into();
+        self.context.class_name = name.to_pascal_case();
+        self.context.lib_name = name;
     }
 
     /// Set the name of the static class containing all transformed functions and
@@ -105,8 +107,6 @@ impl LangCSharp {
                 resolve_alias(&self.aliases, ty)
             }
         }
-
-        self.aliases.clear();
     }
 }
 
@@ -290,6 +290,7 @@ impl Lang for LangCSharp {
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
         self.resolve_aliases();
+        self.ignored_functions.clear();
 
         let mut output = String::new();
 
@@ -300,6 +301,8 @@ impl Lang for LangCSharp {
             for decl in &self.using_decls {
                 emit!(output, "using {};\n", decl);
             }
+            self.using_decls = default_using_decls();
+
             emit!(output, "\n");
 
             // Enums
@@ -318,6 +321,7 @@ impl Lang for LangCSharp {
             for name in &self.opaque_types {
                 emit_opaque_type(&mut output, name);
             }
+            self.opaque_types.clear();
 
             if !self.functions.is_empty() || !self.consts.is_empty() {
                 emit!(
@@ -330,7 +334,7 @@ impl Lang for LangCSharp {
                 // Custom declarations.
                 if !self.custom_decls.is_empty() {
                     emit!(output, "#region custom declarations\n");
-                    for decl in &self.custom_decls {
+                    for decl in self.custom_decls.drain(..) {
                         emit!(output, "{}\n", decl);
                     }
                     emit!(output, "#endregion\n\n");
@@ -349,6 +353,7 @@ impl Lang for LangCSharp {
                 }
 
                 emit_callback_wrappers(&mut output, &self.callback_arities);
+                self.callback_arities.clear();
 
                 output.unindent();
                 emit!(output, "}}\n");
@@ -370,17 +375,31 @@ pub struct Context {
 }
 
 fn resolve_alias(aliases: &HashMap<String, Type>, new_ty: &mut Type) {
-    let old_ty = if let Type::User(ref name) = *new_ty {
-        if let Some(old_ty) = lookup_alias(aliases, name) {
-            old_ty.clone()
-        } else {
-            return;
-        }
-    } else {
-        return;
-    };
+    let mut orig_new_ty = mem::replace(new_ty, Type::Unit);
 
-    *new_ty = old_ty;
+    match orig_new_ty {
+        Type::User(ref name) => {
+            if let Some(old_ty) = lookup_alias(aliases, name) {
+                *new_ty = old_ty.clone();
+                return;
+            }
+        }
+        Type::Pointer(ref mut ty) => {
+            resolve_alias(aliases, ty);
+        }
+        Type::Array(ref mut ty, _) => {
+            resolve_alias(aliases, ty);
+        }
+        Type::Function(ref mut fun) => {
+            resolve_alias(aliases, &mut fun.output);
+            for &mut (_, ref mut input) in &mut fun.inputs {
+                resolve_alias(aliases, input);
+            }
+        }
+        _ => (),
+    }
+
+    mem::replace(new_ty, orig_new_ty);
 }
 
 fn lookup_alias<'a>(aliases: &'a HashMap<String, Type>, name: &str) -> Option<&'a Type> {
@@ -393,6 +412,13 @@ fn lookup_alias<'a>(aliases: &'a HashMap<String, Type>, name: &str) -> Option<&'
     } else {
         None
     }
+}
+
+fn default_using_decls() -> BTreeSet<String> {
+    let mut result = BTreeSet::default();
+    let _ = result.insert("System".to_string());
+    let _ = result.insert("System.Runtime.InteropServices".to_string());
+    result
 }
 
 fn unsupported_generics_error(item: &ast::Item, name: &str) -> Error {
