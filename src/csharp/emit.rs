@@ -13,9 +13,77 @@ macro_rules! emit {
     }
 }
 
-/// Emits public function to wrap the native function, performing any necessary
-/// transformations.
-pub fn emit_function_wrapper(
+pub fn emit_function(output: &mut IndentedOutput, context: &Context, name: &str, item: &Function) {
+    emit_function_wrapper(output, context, &name, item);
+    emit_function_extern_decl(output, context, &name, item);
+}
+
+pub fn emit_callback_wrappers(output: &mut IndentedOutput, all_arities: &BTreeSet<Vec<usize>>) {
+    for arities in all_arities {
+        for index in 0..arities.len() {
+            emit_callback_wrapper(output, index, &arities);
+        }
+    }
+}
+
+pub fn emit_const(output: &mut IndentedOutput, name: &str, item: &Const) {
+    emit!(output, "public ");
+
+    match item.value {
+        ConstValue::Array(..) |
+        ConstValue::Struct(..) => emit!(output, "static readonly "),
+        _ => emit!(output, "const "),
+    }
+
+    emit_managed_type(output, &item.ty);
+    emit!(output, " {} = ", name.to_screaming_snake_case());
+    emit_const_value(output, Some(&item.ty), &item.value);
+    emit!(output, ";\n\n");
+}
+
+pub fn emit_enum(output: &mut IndentedOutput, name: &str, item: &Enum) {
+
+    emit!(output, "public enum {} {{\n", name);
+    output.indent();
+
+    for variant in &item.variants {
+        emit!(output, "{}", variant.docs);
+
+        if let Some(value) = variant.value {
+            emit!(output, "{} = {},\n", variant.name, value);
+        } else {
+            emit!(output, "{},\n", variant.name);
+        }
+    }
+
+    output.unindent();
+    emit!(output, "}}\n\n");
+}
+
+pub fn emit_struct(output: &mut IndentedOutput, context: &Context, name: &str, item: &Struct) {
+    emit!(output, "[StructLayout(LayoutKind.Sequential)]\n");
+    emit!(output, "public class {} {{\n", name);
+    output.indent();
+
+    for field in &item.fields {
+        emit!(output, "{}", field.docs);
+        emit_struct_field(output, context, "public", &field.ty, &field.name);
+    }
+
+    output.unindent();
+    emit!(output, "}}\n\n");
+}
+
+pub fn emit_opaque_type(output: &mut IndentedOutput, name: &str) {
+    emit!(output, "[StructLayout(LayoutKind.Sequential)]\n");
+    emit!(output, "public struct {} {{\n", name);
+    output.indent();
+    emit!(output, "private IntPtr value;\n");
+    output.unindent();
+    emit!(output, "}}\n\n");
+}
+
+fn emit_function_wrapper(
     output: &mut IndentedOutput,
     context: &Context,
     name: &str,
@@ -90,61 +158,41 @@ pub fn emit_function_wrapper(
     emit!(output, "}}\n\n");
 }
 
-/// Emit the declaration of the native function.
-pub fn emit_function_extern_decl(
+fn emit_function_extern_decl(
     output: &mut IndentedOutput,
     context: &Context,
     name: &str,
     fun: &Function,
-    lib_name: &str,
 ) {
-    emit!(output, "[DllImport(\"{}\")]\n", lib_name);
+    emit!(output, "[DllImport(\"{}\")]\n", context.lib_name);
     emit_function_decl(output, context, "private static", name, fun, true, false);
     emit!(output, ";\n\n");
 }
 
-pub fn emit_struct_field(
-    output: &mut IndentedOutput,
-    context: &Context,
-    access: &str,
-    ty: &Type,
-    name: &str,
-) {
-    emit_marshal_as(output, context, ty, None, "\n");
-    emit!(output, "{} ", access);
-    emit_managed_type(output, ty);
-    emit!(output, " {};\n", name);
-}
+// Emit static method that can be passed to native functions as callback and
+// which in turn calls the delegate stored in the `user_data` pointer.
+fn emit_callback_wrapper(output: &mut IndentedOutput, index: usize, arities: &[usize]) {
+    emit!(output, "private static void ");
+    emit_callback_wrapper_name(output, index, arities);
+    emit_generic_params(output, arities.iter().sum());
+    emit!(output, "(IntPtr userData");
 
-pub fn emit_callback_wrappers(output: &mut IndentedOutput, all_arities: &BTreeSet<Vec<usize>>) {
-    for arities in all_arities {
-        for index in 0..arities.len() {
-            emit_callback_wrapper(output, index, &arities);
-        }
-    }
-}
+    let offset: usize = arities.iter().take(index).sum();
 
-pub fn emit_const(output: &mut IndentedOutput, name: &str, ty: &Type, value: &ConstValue) {
-    emit!(output, "public ");
-
-    match *value {
-        ConstValue::Array(..) |
-        ConstValue::Struct(..) => emit!(output, "static readonly "),
-        _ => emit!(output, "const "),
+    for index in 0..arities[index] {
+        emit!(output, ", T{} arg{}", offset + index, index);
     }
 
-    emit_managed_type(output, ty);
-    emit!(output, " {} = ", name.to_screaming_snake_case());
-    emit_const_value(output, Some(&ty), value);
-    emit!(output, ";\n\n");
-}
-
-pub fn emit_type_alias(output: &mut IndentedOutput, context: &Context, ty: &Type, name: &str) {
-    emit!(output, "[StructLayout(LayoutKind.Sequential)]\n");
-    emit!(output, "public struct {} {{\n", name);
+    emit!(output, ") {{\n");
     output.indent();
 
-    emit_struct_field(output, context, "private", &ty, "value");
+    emit!(output, "var handle = GCHandle.FromIntPtr(userData);\n");
+
+    if arities.len() > 1 {
+        emit_multiple_callback_invocation(output, index, arities);
+    } else {
+        emit_single_callback_invocation(output, arities[0], offset)
+    }
 
     output.unindent();
     emit!(output, "}}\n\n");
@@ -192,6 +240,19 @@ fn emit_const_value(output: &mut IndentedOutput, ty: Option<&Type>, value: &Cons
             emit!(output, " }}");
         }
     }
+}
+
+fn emit_struct_field(
+    output: &mut IndentedOutput,
+    context: &Context,
+    access: &str,
+    ty: &Type,
+    name: &str,
+) {
+    emit_marshal_as(output, context, ty, None, "\n");
+    emit!(output, "{} ", access);
+    emit_managed_type(output, ty);
+    emit!(output, " {};\n", name);
 }
 
 fn emit_function_decl(
@@ -378,35 +439,6 @@ fn emit_generic_params(output: &mut IndentedOutput, count: usize) {
     }
 
     emit!(output, ">");
-}
-
-// Emit static method that can be passed to native functions as callback and
-// which in turn calls the delegate stored in the `user_data` pointer.
-fn emit_callback_wrapper(output: &mut IndentedOutput, index: usize, arities: &[usize]) {
-    emit!(output, "private static void ");
-    emit_callback_wrapper_name(output, index, arities);
-    emit_generic_params(output, arities.iter().sum());
-    emit!(output, "(IntPtr userData");
-
-    let offset: usize = arities.iter().take(index).sum();
-
-    for index in 0..arities[index] {
-        emit!(output, ", T{} arg{}", offset + index, index);
-    }
-
-    emit!(output, ") {{\n");
-    output.indent();
-
-    emit!(output, "var handle = GCHandle.FromIntPtr(userData);\n");
-
-    if arities.len() > 1 {
-        emit_multiple_callback_invocation(output, index, arities);
-    } else {
-        emit_single_callback_invocation(output, arities[0], offset)
-    }
-
-    output.unindent();
-    emit!(output, "}}\n\n");
 }
 
 fn emit_callback_wrapper_name(output: &mut IndentedOutput, index: usize, arities: &[usize]) {

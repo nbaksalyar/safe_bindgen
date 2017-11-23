@@ -11,25 +11,27 @@ use Level;
 use common::{self, Lang, Outputs};
 use inflector::Inflector;
 use output::IndentedOutput;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use syntax::ast;
 use syntax::print::pprust;
 
 const INDENT_WIDTH: usize = 4;
-const TYPES: &'static str = "_types";
-const FUNCTIONS: &'static str = "_functions";
-const CONSTANTS: &'static str = "_constants";
 
 pub struct LangCSharp {
-    lib_name: String,
     using_decls: BTreeSet<String>,
     opaque_types: HashSet<String>,
     custom_decls: Vec<String>,
     ignored_functions: HashSet<String>,
     callback_arities: BTreeSet<Vec<usize>>,
     context: Context,
+
+    consts: Vec<Snippet<Const>>,
+    enums: Vec<Snippet<Enum>>,
+    structs: Vec<Snippet<Struct>>,
+    functions: Vec<Snippet<Function>>,
+    aliases: HashMap<String, Type>,
 }
 
 impl LangCSharp {
@@ -42,13 +44,20 @@ impl LangCSharp {
         let class_name = lib_name.to_pascal_case();
 
         LangCSharp {
-            lib_name,
             using_decls,
             opaque_types: Default::default(),
             custom_decls: Vec::new(),
             ignored_functions: Default::default(),
             callback_arities: Default::default(),
-            context: Context { class_name },
+            context: Context {
+                lib_name,
+                class_name,
+            },
+            consts: Vec::new(),
+            enums: Vec::new(),
+            structs: Vec::new(),
+            functions: Vec::new(),
+            aliases: Default::default(),
         }
     }
 
@@ -77,57 +86,79 @@ impl LangCSharp {
     pub fn ignore_function<T: Into<String>>(&mut self, name: T) {
         let _ = self.ignored_functions.insert(name.into());
     }
+
+    fn resolve_aliases(&mut self) {
+        for snippet in &mut self.consts {
+            resolve_alias(&self.aliases, &mut snippet.item.ty);
+        }
+
+        for snippet in &mut self.structs {
+            for field in &mut snippet.item.fields {
+                resolve_alias(&self.aliases, &mut field.ty);
+            }
+        }
+
+        for snippet in &mut self.functions {
+            resolve_alias(&self.aliases, &mut snippet.item.output);
+
+            for &mut (_, ref mut ty) in &mut snippet.item.inputs {
+                resolve_alias(&self.aliases, ty)
+            }
+        }
+
+        self.aliases.clear();
+    }
 }
 
 impl Lang for LangCSharp {
-    fn parse_const(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
-        let (_, docs) = common::parse_attr(&item.attrs, |_| true, retrieve_docstring);
-
-        if let ast::ItemKind::Const(ref ty, ref expr) = item.node {
-            let name = &*item.ident.name.as_str();
-            let ty = transform_type(ty).ok_or_else(|| unknown_type_error(ty))?;
-            let value = transform_const_value(expr).ok_or_else(|| {
-                let value = pprust::expr_to_string(expr);
-
-                Error {
-                    level: Level::Error,
-                    span: Some(expr.span),
-                    message: format!("bindgen can not handle constant value {}", value),
-                }
-            })?;
-
-            let mut output = output(outputs, CONSTANTS);
-
-            emit!(output, "{}", docs);
-            emit_const(&mut output, name, &ty, &value)
-        }
-
-        Ok(())
-    }
-
-    fn parse_ty(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
-        let (_, docs) = common::parse_attr(&item.attrs, |_| true, retrieve_docstring);
-        let name = &*item.ident.name.as_str();
-
+    fn parse_ty(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         if let ast::ItemKind::Ty(ref ty, ref generics) = item.node {
             if generics.is_parameterized() {
                 println!("parameterized type aliases not supported. Skipping.");
                 return Ok(());
-                // return Err(unsupported_generics_error(item, "type aliases"));
             }
 
-            let ty = transform_type(ty).ok_or_else(|| unknown_type_error(ty))?;
+            let ty = transform_type(ty).ok_or_else(|| {
+                Error {
+                    level: Level::Error,
+                    span: Some(ty.span),
+                    message: format!(
+                        "bindgen can not handle the type `{}`",
+                        pprust::ty_to_string(ty)
+                    ),
+                }
+            })?;
+            let name = item.ident.name.as_str().to_string();
 
-            let mut output = output(outputs, TYPES);
-
-            emit!(output, "{}", docs);
-            emit_type_alias(&mut output, &self.context, &ty, &name);
+            self.aliases.insert(name, ty);
         }
 
         Ok(())
     }
 
-    fn parse_enum(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_const(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        let (_, docs) = common::parse_attr(&item.attrs, |_| true, retrieve_docstring);
+
+        if let ast::ItemKind::Const(ref ty, ref expr) = item.node {
+            let name = item.ident.name.as_str().to_string();
+            let item = transform_const(ty, expr).ok_or_else(|| {
+                Error {
+                    level: Level::Error,
+                    span: Some(expr.span),
+                    message: format!(
+                        "bindgen can not handle constant {}",
+                        pprust::item_to_string(item)
+                    ),
+                }
+            })?;
+
+            self.consts.push(Snippet { docs, name, item });
+        }
+
+        Ok(())
+    }
+
+    fn parse_enum(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         let (repr_c, docs) =
             common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring);
 
@@ -136,50 +167,31 @@ impl Lang for LangCSharp {
             return Ok(());
         }
 
-        let name = &*item.ident.name.as_str();
 
         if let ast::ItemKind::Enum(ast::EnumDef { ref variants }, ref generics) = item.node {
             if generics.is_parameterized() {
                 return Err(unsupported_generics_error(item, "enums"));
             }
 
-            let mut output = output(outputs, TYPES);
-
-            emit!(output, "{}", docs);
-            emit!(output, "public enum {} {{\n", name);
-            output.indent();
-
-            for variant in variants {
-                if !variant.node.data.is_unit() {
-                    return Err(Error {
-                        level: Level::Error,
-                        span: Some(variant.span),
-                        message: "bindgen can not handle enum variants with data".into(),
-                    });
+            let name = item.ident.name.as_str().to_string();
+            let item = transform_enum(variants).ok_or_else(|| {
+                Error {
+                    level: Level::Error,
+                    span: Some(item.span),
+                    message: format!(
+                        "bindgen can not handle enum {}",
+                        pprust::item_to_string(item)
+                    ),
                 }
+            })?;
 
-                let (_, doc) =
-                    common::parse_attr(&variant.node.attrs, |_| true, retrieve_docstring);
-                let name = &*variant.node.name.name.as_str();
-                let value = extract_enum_variant_value(variant);
-
-                emit!(output, "{}", doc);
-
-                if let Some(value) = value {
-                    emit!(output, "{} = {},\n", name, value);
-                } else {
-                    emit!(output, "{},\n", name);
-                }
-            }
-
-            output.unindent();
-            emit!(output, "}}\n\n");
+            self.enums.push(Snippet { docs, name, item });
         }
 
         Ok(())
     }
 
-    fn parse_struct(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_struct(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         let (repr_c, docs) =
             common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring);
 
@@ -190,7 +202,6 @@ impl Lang for LangCSharp {
 
         let name = item.ident.name.as_str();
 
-
         if let ast::ItemKind::Struct(ref variants, ref generics) = item.node {
             if generics.is_parameterized() {
                 return Err(unsupported_generics_error(item, "structs"));
@@ -200,41 +211,29 @@ impl Lang for LangCSharp {
                 return Err(Error {
                     level: Level::Error,
                     span: Some(item.span),
-                    message: "bindgen can not handle unit or tuple structs".into(),
+                    message: format!("bindgen can not handle unit or tuple structs ({})", name),
                 });
             }
 
-            let mut output = output(outputs, TYPES);
+            let item = transform_struct(variants.fields()).ok_or_else(|| {
+                Error {
+                    level: Level::Error,
+                    span: Some(item.span),
+                    message: format!(
+                        "bindgen can not handle struct {}",
+                        pprust::item_to_string(item)
+                    ),
+                }
+            })?;
+            let name = name.to_string();
 
-            emit!(output, "{}", docs);
-            emit!(output, "[StructLayout(LayoutKind.Sequential)]\n");
-            emit!(output, "public class {} {{\n", name);
-            output.indent();
-
-            let fields = variants.fields();
-            let mut fields = fields.iter();
-            while let Some(field) = fields.next() {
-                let (_, doc) = common::parse_attr(&field.attrs, |_| true, retrieve_docstring);
-
-                let name = field.ident.unwrap().name.as_str();
-                let name = name.to_camel_case();
-
-                let ty = transform_type(&field.ty).ok_or_else(
-                    || unknown_type_error(&field.ty),
-                )?;
-
-                emit!(output, "{}", doc);
-                emit_struct_field(&mut output, &self.context, "public", &ty, &name);
-            }
-
-            output.unindent();
-            emit!(output, "}}\n\n");
+            self.structs.push(Snippet { docs, name, item });
         }
 
         Ok(())
     }
 
-    fn parse_fn(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_fn(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         let name = item.ident.name.as_str();
 
         if self.ignored_functions.contains(&*name) {
@@ -252,7 +251,6 @@ impl Lang for LangCSharp {
         if let ast::ItemKind::Fn(ref fn_decl, unsafety, ref constness, abi, ref generics, _) =
             item.node
         {
-
             if !common::is_extern(abi) {
                 return Ok(());
             }
@@ -261,71 +259,75 @@ impl Lang for LangCSharp {
                 return Err(unsupported_generics_error(item, "extern functions"));
             }
 
-            let mut output = output(outputs, FUNCTIONS);
-
-            let function = transform_function(&fn_decl).ok_or_else(|| {
-                let decl =
+            let item = transform_function(&fn_decl).ok_or_else(|| {
+                let string =
                     pprust::fun_to_string(fn_decl, unsafety, constness.node, item.ident, generics);
 
                 Error {
                     level: Level::Error,
                     span: Some(item.span),
-                    message: format!("bindgen can not handle function {}", decl),
+                    message: format!("bindgen can not handle function {}", string),
                 }
             })?;
+            let name = name.to_string();
 
-            let callbacks = extract_callbacks(&function.inputs);
-            let callback_arities: Vec<_> = callbacks
-                .into_iter()
-                .map(|(_, ref fun)| callback_arity(fun))
-                .collect();
-            if !callback_arities.is_empty() {
-                let _ = self.callback_arities.insert(callback_arities);
+            {
+                let callbacks = extract_callbacks(&item.inputs);
+                let callback_arities: Vec<_> = callbacks
+                    .into_iter()
+                    .map(|(_, ref fun)| callback_arity(fun))
+                    .collect();
+                if !callback_arities.is_empty() {
+                    let _ = self.callback_arities.insert(callback_arities);
+                }
             }
 
-            emit!(output, "{}", docs);
-            emit_function_wrapper(&mut output, &self.context, &name, &function);
-            emit_function_extern_decl(&mut output, &self.context, &name, &function, &self.lib_name);
+            self.functions.push(Snippet { docs, name, item });
         }
 
         Ok(())
     }
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
+        self.resolve_aliases();
+
         let mut output = String::new();
-        let class_name = self.lib_name.to_pascal_case();
 
         {
             let mut output = IndentedOutput::new(&mut output, INDENT_WIDTH);
 
-            let types = outputs.remove(Path::new(TYPES)).unwrap_or(String::new());
-            let functions = outputs.remove(Path::new(FUNCTIONS)).unwrap_or(
-                String::new(),
-            );
-            let constants = outputs.remove(Path::new(CONSTANTS)).unwrap_or(
-                String::new(),
-            );
+            // Using declarations.
+            for decl in &self.using_decls {
+                emit!(output, "using {};\n", decl);
+            }
+            emit!(output, "\n");
 
-            if !types.is_empty() || !functions.is_empty() || !constants.is_empty() {
-                for decl in &self.using_decls {
-                    emit!(output, "using {};\n", decl);
-                }
-                emit!(output, "\n");
+            // Enums
+            for snippet in self.enums.drain(..) {
+                emit!(output, "{}", snippet.docs);
+                emit_enum(&mut output, &snippet.name, &snippet.item);
             }
 
-            emit!(output, "{}", types);
+            // Structs
+            for snippet in self.structs.drain(..) {
+                emit!(output, "{}", snippet.docs);
+                emit_struct(&mut output, &self.context, &snippet.name, &snippet.item);
+            }
 
-            // Inject opaque types.
-            let opaque_ty = Type::Pointer(Box::new(Type::Unit));
+            // Opaque types.
             for name in &self.opaque_types {
-                emit_type_alias(&mut output, &self.context, &opaque_ty, name);
+                emit_opaque_type(&mut output, name);
             }
 
-            if !functions.is_empty() || !constants.is_empty() {
-                emit!(output, "public static class {} {{\n", class_name);
+            if !self.functions.is_empty() || !self.consts.is_empty() {
+                emit!(
+                    output,
+                    "public static class {} {{\n",
+                    self.context.class_name
+                );
                 output.indent();
 
-                // Inject custom declarations.
+                // Custom declarations.
                 if !self.custom_decls.is_empty() {
                     emit!(output, "#region custom declarations\n");
                     for decl in &self.custom_decls {
@@ -334,8 +336,18 @@ impl Lang for LangCSharp {
                     emit!(output, "#endregion\n\n");
                 }
 
-                emit!(output, "{}", constants);
-                emit!(output, "{}", functions);
+                // Consts
+                for snippet in self.consts.drain(..) {
+                    emit!(output, "{}", snippet.docs);
+                    emit_const(&mut output, &snippet.name, &snippet.item);
+                }
+
+                // Functions
+                for snippet in self.functions.drain(..) {
+                    emit!(output, "{}", snippet.docs);
+                    emit_function(&mut output, &self.context, &snippet.name, &snippet.item);
+                }
+
                 emit_callback_wrappers(&mut output, &self.callback_arities);
 
                 output.unindent();
@@ -343,34 +355,43 @@ impl Lang for LangCSharp {
             }
         }
 
-        outputs.insert(PathBuf::from(format!("{}.cs", class_name)), output);
+        outputs.insert(
+            PathBuf::from(format!("{}.cs", self.context.class_name)),
+            output,
+        );
 
         Ok(())
     }
 }
 
 pub struct Context {
+    lib_name: String,
     class_name: String,
 }
 
-impl Context {}
+fn resolve_alias(aliases: &HashMap<String, Type>, new_ty: &mut Type) {
+    let old_ty = if let Type::User(ref name) = *new_ty {
+        if let Some(old_ty) = lookup_alias(aliases, name) {
+            old_ty.clone()
+        } else {
+            return;
+        }
+    } else {
+        return;
+    };
 
-fn output<'a>(outputs: &'a mut Outputs, name: &str) -> IndentedOutput<'a> {
-    IndentedOutput::new(
-        outputs.entry(PathBuf::from(name)).or_insert(String::new()),
-        INDENT_WIDTH,
-    )
+    *new_ty = old_ty;
 }
 
-
-fn unknown_type_error(ty: &ast::Ty) -> Error {
-    Error {
-        level: Level::Error,
-        span: Some(ty.span),
-        message: format!(
-            "bindgen can not handle the type `{}`",
-            pprust::ty_to_string(ty)
-        ),
+fn lookup_alias<'a>(aliases: &'a HashMap<String, Type>, name: &str) -> Option<&'a Type> {
+    if let Some(ty) = aliases.get(name) {
+        if let Type::User(ref name) = *ty {
+            Some(lookup_alias(aliases, name).unwrap_or(ty))
+        } else {
+            Some(ty)
+        }
+    } else {
+        None
     }
 }
 

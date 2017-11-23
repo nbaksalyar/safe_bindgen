@@ -2,6 +2,7 @@
 //! and the target language code.
 
 use common;
+use inflector::Inflector;
 use std::cmp;
 use std::collections::BTreeMap;
 use syntax::ast;
@@ -46,6 +47,17 @@ pub struct Function {
     pub output: Type,
 }
 
+pub struct Snippet<T> {
+    pub docs: String,
+    pub name: String,
+    pub item: T,
+}
+
+pub struct Const {
+    pub ty: Type,
+    pub value: ConstValue,
+}
+
 pub enum ConstValue {
     Bool(bool),
     Char(char),
@@ -54,6 +66,26 @@ pub enum ConstValue {
     String(String),
     Array(Vec<ConstValue>),
     Struct(String, BTreeMap<String, ConstValue>),
+}
+
+pub struct Struct {
+    pub fields: Vec<StructField>,
+}
+
+pub struct StructField {
+    pub docs: String,
+    pub name: String,
+    pub ty: Type,
+}
+
+pub struct Enum {
+    pub variants: Vec<EnumVariant>,
+}
+
+pub struct EnumVariant {
+    pub docs: String,
+    pub name: String,
+    pub value: Option<i64>,
 }
 
 pub fn transform_type(input: &ast::Ty) -> Option<Type> {
@@ -136,7 +168,99 @@ pub fn transform_function_param(arg: &ast::Arg) -> Option<(String, Type)> {
     }
 }
 
-pub fn transform_const_value(expr: &ast::Expr) -> Option<ConstValue> {
+pub fn transform_const(ty: &ast::Ty, value: &ast::Expr) -> Option<Const> {
+    let ty = match transform_type(ty) {
+        Some(ty) => ty,
+        None => return None,
+    };
+
+    let value = match transform_const_value(value) {
+        Some(value) => value,
+        None => return None,
+    };
+
+    Some(Const { ty, value })
+}
+
+pub fn transform_enum(variants: &[ast::Variant]) -> Option<Enum> {
+    let variants: Option<Vec<_>> = variants
+        .into_iter()
+        .map(|variant| {
+            if !variant.node.data.is_unit() {
+                return None;
+            }
+
+            let (_, docs) = common::parse_attr(&variant.node.attrs, |_| true, retrieve_docstring);
+            let name = variant.node.name.name.as_str().to_string();
+            let value = extract_enum_variant_value(variant);
+
+            Some(EnumVariant { docs, name, value })
+        })
+        .collect();
+
+    variants.map(|variants| Enum { variants })
+}
+
+pub fn transform_struct(fields: &[ast::StructField]) -> Option<Struct> {
+    let fields: Option<Vec<_>> = fields
+        .into_iter()
+        .map(|field| {
+            let (_, docs) = common::parse_attr(&field.attrs, |_| true, retrieve_docstring);
+            let name = field.ident.unwrap().name.as_str().to_camel_case();
+            let ty = match transform_type(&field.ty) {
+                Some(ty) => ty,
+                None => return None,
+            };
+
+            Some(StructField { docs, name, ty })
+        })
+        .collect();
+
+    fields.map(|fields| Struct { fields })
+}
+
+/// Is the given parameter an `user_data` for a callback?
+pub fn is_user_data(name: &str, ty: &Type) -> bool {
+    if let Type::Pointer(ref ty) = *ty {
+        if let Type::Unit = **ty {
+            return name == "" || name == "user_data";
+        }
+    }
+
+    false
+}
+
+pub fn extract_callback(ty: &Type) -> Option<&Function> {
+    if let Type::Function(ref fun) = *ty {
+        if let Some(first) = fun.inputs.first() {
+            if is_user_data(&first.0, &first.1) {
+                return Some(fun);
+            }
+        }
+    }
+
+    None
+}
+
+pub fn extract_callbacks(inputs: &[(String, Type)]) -> Vec<(&str, &Function)> {
+    inputs
+        .iter()
+        .filter_map(|&(ref name, ref ty)| {
+            extract_callback(ty).map(|fun| (name.as_str(), fun))
+        })
+        .collect()
+}
+
+pub fn callback_arity(fun: &Function) -> usize {
+    // Do not count the user_data param.
+    fun.inputs.len() - 1
+}
+
+pub fn retrieve_docstring(attr: &ast::Attribute) -> Option<String> {
+    common::retrieve_docstring(attr, "")
+}
+
+fn transform_const_value(expr: &ast::Expr) -> Option<ConstValue> {
     match expr.node {
         ast::ExprKind::Lit(ref lit) => transform_const_literal(lit),
         ast::ExprKind::Array(ref elements) => transform_const_array(elements),
@@ -329,44 +453,7 @@ fn transform_reference(lifetime: &Option<ast::Lifetime>, ty: &ast::Ty) -> Option
     }
 }
 
-/// Is the given parameter an `user_data` for a callback?
-pub fn is_user_data(name: &str, ty: &Type) -> bool {
-    if let Type::Pointer(ref ty) = *ty {
-        if let Type::Unit = **ty {
-            return name == "" || name == "user_data";
-        }
-    }
-
-    false
-}
-
-pub fn extract_callback(ty: &Type) -> Option<&Function> {
-    if let Type::Function(ref fun) = *ty {
-        if let Some(first) = fun.inputs.first() {
-            if is_user_data(&first.0, &first.1) {
-                return Some(fun);
-            }
-        }
-    }
-
-    None
-}
-
-pub fn extract_callbacks(inputs: &[(String, Type)]) -> Vec<(&str, &Function)> {
-    inputs
-        .iter()
-        .filter_map(|&(ref name, ref ty)| {
-            extract_callback(ty).map(|fun| (name.as_str(), fun))
-        })
-        .collect()
-}
-
-pub fn callback_arity(fun: &Function) -> usize {
-    // Do not count the user_data param.
-    fun.inputs.len() - 1
-}
-
-pub fn extract_enum_variant_value(variant: &ast::Variant) -> Option<u64> {
+fn extract_enum_variant_value(variant: &ast::Variant) -> Option<i64> {
     if let Some(ref expr) = variant.node.disr_expr {
         if let ast::ExprKind::Lit(ref lit) = expr.node {
             return extract_int_literal(lit);
@@ -376,14 +463,10 @@ pub fn extract_enum_variant_value(variant: &ast::Variant) -> Option<u64> {
     None
 }
 
-fn extract_int_literal(lit: &ast::Lit) -> Option<u64> {
+fn extract_int_literal(lit: &ast::Lit) -> Option<i64> {
     if let ast::LitKind::Int(val, ..) = lit.node {
-        Some(val)
+        Some(val as i64)
     } else {
         None
     }
-}
-
-pub fn retrieve_docstring(attr: &ast::Attribute) -> Option<String> {
-    common::retrieve_docstring(attr, "")
 }

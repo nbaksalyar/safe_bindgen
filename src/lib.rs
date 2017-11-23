@@ -18,6 +18,10 @@ extern crate quote;
 extern crate jni;
 
 #[cfg(test)]
+extern crate colored;
+#[cfg(test)]
+extern crate diff;
+#[cfg(test)]
 #[macro_use]
 extern crate indoc;
 

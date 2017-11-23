@@ -18,18 +18,17 @@ macro_rules! assert_multiline_eq {
         ($left:expr, $right:expr) => {{
             let left = $left;
             let right = $right;
+
             if left != right {
-                panic!("assertion failed: `(left == right)`\n\
-                        ---- left:  ----\n{}\n\
-                        ---- right: ----\n{}\n",
-                       left, right);
+                panic!("assertion failed: `(left == right)`\n```\n{}```\n",
+                       format_diff(&left, &right));
             }
         }}
     }
 
 #[test]
 fn non_repr_c_types_are_ignored() {
-    let output = compile!(None, {
+    let actual = compile!(None, {
         pub struct Foo {
             bar: i32,
         }
@@ -41,7 +40,14 @@ fn non_repr_c_types_are_ignored() {
         }
     });
 
-    assert!(output.is_empty());
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+
+        "
+    );
+
+    assert_multiline_eq!(actual, expected);
 }
 
 #[test]
@@ -95,21 +101,39 @@ fn structs() {
 #[test]
 fn type_aliases() {
     let actual = compile!(None, {
-        /// Some nice comment here.
-        pub type Signature = [u8; 32];
+        pub type Id = u64;
+        // Double indirection.
+        pub type UserId = Id;
+
+        #[repr(C)]
+        pub struct Message {
+            id: Id,
+            sender_id: UserId,
+        }
+
+        #[no_mangle]
+        pub extern "C" fn fun(id: Id) {}
     });
 
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
 
-         /// Some nice comment here.
          [StructLayout(LayoutKind.Sequential)]
-         public struct Signature {
-             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
-             private byte[] value;
+         public class Message {
+             public ulong id;
+             public ulong senderId;
          }
 
+         public static class Backend {
+             public static void Fun(ulong id) {
+                 fun(id);
+             }
+
+             [DllImport(\"backend\")]
+             private static extern void fun(ulong id);
+
+         }
          "
     );
 
@@ -169,7 +193,14 @@ fn functions_without_extern_and_no_mangle_are_ignored() {
         pub fn fun2() {}
     });
 
-    assert!(actual.is_empty());
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+
+        "
+    );
+
+    assert_multiline_eq!(actual, expected);
 }
 
 #[test]
@@ -477,30 +508,27 @@ fn constants() {
 #[test]
 fn arrays() {
     let actual = compile!(None, {
-        pub type LitSizeArray = [u8; 10];
-        pub type ConstSizeArray = [u8; ARRAY_SIZE];
-
         pub const ARRAY_SIZE: usize = 20;
+
+        #[no_mangle]
+        pub extern "C" fn fun(a: [u8; 10], b: [u8; ARRAY_SIZE]) {}
     });
 
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
 
-         [StructLayout(LayoutKind.Sequential)]
-         public struct LitSizeArray {
-             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
-             private byte[] value;
-         }
-
-         [StructLayout(LayoutKind.Sequential)]
-         public struct ConstSizeArray {
-             [MarshalAs(UnmanagedType.ByValArray, SizeConst = Backend.ARRAY_SIZE)]
-             private byte[] value;
-         }
-
          public static class Backend {
              public const ulong ARRAY_SIZE = 20;
+
+             public static void Fun(byte[] a, byte[] b) {
+                 fun(a, b);
+             }
+
+             [DllImport(\"backend\")]
+             private static extern void fun(\
+                 [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)] byte[] a, \
+                 [MarshalAs(UnmanagedType.ByValArray, SizeConst = Backend.ARRAY_SIZE)] byte[] b);
 
          }
         "
@@ -533,4 +561,22 @@ fn try_compile<T: Into<Option<LangCSharp>>>(
             .next()
             .unwrap_or(String::new()),
     )
+}
+
+fn format_diff(left: &str, right: &str) -> String {
+    use diff;
+    use std::fmt::Write;
+    use colored::*;
+
+    let mut output = String::new();
+
+    for res in diff::lines(left, right) {
+        match res {
+            diff::Result::Left(line) => writeln!(output, "{}", line.red()).unwrap(),
+            diff::Result::Right(line) => writeln!(output, "{}", line.green()).unwrap(),
+            diff::Result::Both(line, _) => writeln!(output, "{}", line.white()).unwrap(),
+        };
+    }
+
+    output
 }
