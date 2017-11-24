@@ -4,6 +4,7 @@ use super::Context;
 use super::intermediate::*;
 use inflector::Inflector;
 use output::IndentedOutput;
+use std::collections::BTreeSet;
 use std::fmt::Write;
 
 macro_rules! emit {
@@ -12,35 +13,71 @@ macro_rules! emit {
     }
 }
 
+pub fn emit_using_decls(output: &mut IndentedOutput, decls: &BTreeSet<String>) {
+    for decl in decls {
+        emit!(output, "using {};\n", decl);
+    }
+
+    if !decls.is_empty() {
+        emit!(output, "\n");
+    }
+}
+
 pub fn emit_function(output: &mut IndentedOutput, context: &Context, name: &str, item: &Function) {
-    emit_function_wrapper(output, context, &name, item);
+    if num_callbacks(&item.inputs) <= 1 {
+        emit_function_wrapper(output, &name, item);
+    }
     emit_function_extern_decl(output, context, &name, item);
 }
 
-pub fn emit_callback_wrappers(output: &mut IndentedOutput, callbacks: &[(&str, &Function)]) {
-    for index in 0..callbacks.len() {
-        emit_callback_wrapper(output, callbacks, index);
-    }
+pub fn emit_callback_delegate(output: &mut IndentedOutput, callback: &Function) {
+    emit!(output, "internal delegate void ");
+    emit_callback_wrapper_name(output, callback);
+    emit!(output, "(");
+    emit_managed_function_params(output, &callback.inputs, false);
+    emit!(output, ");\n\n");
 }
 
-pub fn emit_callback_wrapper_name(
-    output: &mut IndentedOutput,
-    funs: &[(&str, &Function)],
-    index: usize,
-) {
-    for (index, &(_, fun)) in funs.into_iter().enumerate() {
-        if index > 0 {
-            emit!(output, "And");
+pub fn emit_callback_wrapper(output: &mut IndentedOutput, callback: &Function) {
+    emit!(output, "#if __IOS__\n");
+    emit!(output, "[MonoPInvokeCallback(typeof(");
+    emit_callback_wrapper_name(output, callback);
+    emit!(output, "))]\n");
+    emit!(output, "#endif\n");
+
+    emit!(output, "private static void On");
+    emit_callback_wrapper_name(output, callback);
+    emit!(output, "(");
+    emit_managed_function_params(output, &callback.inputs, false);
+    emit!(output, ") {{\n");
+    output.indent();
+
+    emit!(output, "Utilities.CompleteTask(");
+    emit_args(output, &callback.inputs[0..2], 0);
+
+    if callback.inputs.len() > 2 {
+        emit!(output, ", ");
+
+        if callback.inputs.len() > 3 {
+            emit!(output, "(");
         }
 
-        emit_delegate_base_name(output, fun);
+        emit_args(output, &callback.inputs[2..], 2);
+
+        if callback.inputs.len() > 3 {
+            emit!(output, ")");
+        }
     }
 
+    emit!(output, ");\n");
+
+    output.unindent();
+    emit!(output, "}}\n\n");
+}
+
+pub fn emit_callback_wrapper_name(output: &mut IndentedOutput, callback: &Function) {
+    emit_delegate_base_name(output, callback);
     emit!(output, "Cb");
-
-    if funs.len() > 1 {
-        emit!(output, "{}", index);
-    }
 }
 
 pub fn emit_const(output: &mut IndentedOutput, name: &str, item: &Const) {
@@ -59,7 +96,6 @@ pub fn emit_const(output: &mut IndentedOutput, name: &str, item: &Const) {
 }
 
 pub fn emit_enum(output: &mut IndentedOutput, name: &str, item: &Enum) {
-
     emit!(output, "public enum {} {{\n", name);
     output.indent();
 
@@ -100,52 +136,69 @@ pub fn emit_opaque_type(output: &mut IndentedOutput, name: &str) {
     emit!(output, "}}\n\n");
 }
 
-fn emit_function_wrapper(
+pub fn emit_utilities(
     output: &mut IndentedOutput,
-    context: &Context,
-    name: &str,
-    fun: &Function,
+    using_decls: &BTreeSet<String>,
+    namespace: &str,
 ) {
-    emit_function_decl(
-        output,
-        context,
-        "public static",
-        &name.to_pascal_case(),
-        fun,
-        false,
-    );
-    emit!(output, " {{\n");
-    output.indent();
+    emit_using_decls(output, using_decls);
 
-    let callbacks = extract_callbacks(&fun.inputs);
-    let mut callback_index = 0;
-
-    if callbacks.len() > 0 {
-        emit!(output, "var userData = ");
-        emit_delegate_holder(output, &callbacks);
-        emit!(output, ";\n");
+    if !namespace.is_empty() {
+        emit!(output, "namespace {} {{\n", namespace);
+        output.indent();
     }
 
+    emit!(
+        output,
+        "{}",
+        include_str!("../../resources/csharp/Utilities.cs")
+    );
 
-    match fun.output {
-        Type::Unit => (),
-        _ => emit!(output, "return "),
+    if !namespace.is_empty() {
+        output.unindent();
+        emit!(output, "}}\n");
+    }
+}
+
+fn emit_function_wrapper(output: &mut IndentedOutput, name: &str, fun: &Function) {
+    let callback = fun.inputs.last().and_then(
+        |&(_, ref ty)| extract_callback(ty),
+    );
+
+    emit!(output, "public static ");
+
+    if let Some(callback) = callback {
+        emit_task(output, &callback.inputs);
+    } else {
+        emit_type(output, &fun.output);
+    }
+
+    emit!(output, " {}(", name.to_pascal_case());
+    emit_managed_function_params(output, &fun.inputs, true);
+    emit!(output, ") {{\n");
+    output.indent();
+
+    if let Some(callback) = callback {
+        emit!(output, "var (task, userData) = Utilities.PrepareTask");
+        emit_task_generic_args(output, &callback.inputs);
+        emit!(output, "();\n");
+    } else {
+        match fun.output {
+            Type::Unit => (),
+            _ => emit!(output, "return "),
+        }
     }
 
     emit!(output, "{}(", extern_function_name(name));
 
-    let mut first = true;
-    for &(ref name, ref ty) in &fun.inputs {
-        if first {
-            first = false;
-        } else {
+    for (index, &(ref name, ref ty)) in fun.inputs.iter().enumerate() {
+        if index > 0 {
             emit!(output, ", ");
         }
 
-        if extract_callback(ty).is_some() {
+        if let Some(callback) = extract_callback(ty) {
             emit!(output, "On");
-            emit_callback_wrapper_name(output, &callbacks, callback_index);
-            callback_index += 1;
+            emit_callback_wrapper_name(output, &callback);
         } else if let Type::Array(_, ArraySize::Dynamic) = *ty {
             let name = name.to_camel_case();
             emit!(output, "{}, (ulong) {}.Length", name, name);
@@ -155,6 +208,10 @@ fn emit_function_wrapper(
     }
 
     emit!(output, ");\n");
+
+    if callback.is_some() {
+        emit!(output, "return task;\n");
+    }
 
     output.unindent();
     emit!(output, "}}\n\n");
@@ -173,8 +230,11 @@ fn emit_function_extern_decl(
         "[DllImport(DLL_NAME, EntryPoint = \"{}\")]\n",
         native_name
     );
-    emit_function_decl(output, context, "private static", &name, fun, true);
-    emit!(output, ";\n\n");
+    emit!(output, "internal static extern ");
+    emit_type(output, &fun.output);
+    emit!(output, " {}(", name);
+    emit_native_function_params(output, context, &fun.inputs, false);
+    emit!(output, ");\n\n");
 }
 
 fn extern_function_name(name: &str) -> String {
@@ -183,68 +243,37 @@ fn extern_function_name(name: &str) -> String {
     name
 }
 
-fn emit_callback_wrapper(output: &mut IndentedOutput, funs: &[(&str, &Function)], index: usize) {
-    let params = &funs[index].1.inputs;
+fn emit_task(output: &mut IndentedOutput, params: &[(String, Type)]) {
+    emit!(output, "Task");
+    emit_task_generic_args(output, params);
+}
 
-    emit!(output, "private delegate void ");
-    emit_callback_wrapper_name(output, funs, index);
-    emit!(output, "(");
-    emit_managed_function_params(output, params, false, true);
-    emit!(output, ");\n\n");
+fn emit_task_generic_args(output: &mut IndentedOutput, params: &[(String, Type)]) {
+    // Nore: assuming here the first param is user_data and the second is result.
 
-    emit!(output, "#if __IOS__\n");
-    emit!(output, "[MonoPInvokeCallback(typeof(");
-    emit_callback_wrapper_name(output, funs, index);
-    emit!(output, "))]\n");
-    emit!(output, "#endif\n");
-
-    emit!(output, "private static void On");
-    emit_callback_wrapper_name(output, funs, index);
-    emit!(output, "(");
-    emit_managed_function_params(output, params, false, true);
-    emit!(output, ") {{\n");
-    output.indent();
-
-    emit!(output, "var handle = GCHandle.FromIntPtr(arg0);\n");
-    emit!(output, "var cb = (");
-
-    if funs.len() > 1 {
-        emit!(output, "Tuple<");
+    if params.len() <= 2 {
+        return;
     }
 
-    for (index, &(_, fun)) in funs.into_iter().enumerate() {
+    emit!(output, "<");
+
+    if params.len() > 3 {
+        emit!(output, "(");
+    }
+
+    for (index, &(_, ref ty)) in params[2..].into_iter().enumerate() {
         if index > 0 {
             emit!(output, ", ");
         }
 
-        emit_action(output, fun, true);
+        emit_type(output, ty);
     }
 
-    if funs.len() > 1 {
-        emit!(output, ">");
+    if params.len() > 3 {
+        emit!(output, ")");
     }
 
-    emit!(output, ") handle.Target;\n");
-    emit!(output, "handle.Free();\n");
-
-    if funs.len() > 1 {
-        emit!(output, "cb.Item{}(", index + 1);
-    } else {
-        emit!(output, "cb(");
-    }
-
-    for index in 1..params.len() {
-        if index > 1 {
-            emit!(output, ", ");
-        }
-
-        emit!(output, "arg{}", index);
-    }
-
-    emit!(output, ");\n");
-
-    output.unindent();
-    emit!(output, "}}\n\n");
+    emit!(output, ">");
 }
 
 fn emit_const_value(output: &mut IndentedOutput, ty: Option<&Type>, value: &ConstValue) {
@@ -304,35 +333,10 @@ fn emit_struct_field(
     emit!(output, " {};\n", name);
 }
 
-fn emit_function_decl(
-    output: &mut IndentedOutput,
-    context: &Context,
-    modifiers: &str,
-    name: &str,
-    fun: &Function,
-    native: bool,
-) {
-    emit!(output, "{} ", modifiers);
-
-    if native {
-        emit!(output, "extern ");
-    }
-
-    emit_type(output, &fun.output);
-    emit!(output, " {}(", name);
-    if native {
-        emit_native_function_params(output, context, &fun.inputs, false);
-    } else {
-        emit_managed_function_params(output, &fun.inputs, true, false);
-    }
-    emit!(output, ")");
-}
-
 fn emit_managed_function_params(
     output: &mut IndentedOutput,
     params: &[(String, Type)],
     skip_user_data: bool,
-    anonymize: bool,
 ) {
     let mut index = 0;
     for &(ref name, ref ty) in params {
@@ -341,18 +345,21 @@ fn emit_managed_function_params(
             continue;
         }
 
+        // Skip callbacks.
+        if extract_callback(ty).is_some() {
+            continue;
+        }
+
         if index > 0 {
             emit!(output, ", ");
         }
 
-        if let Some(fun) = extract_callback(ty) {
-            emit_action(output, fun, true);
+        emit_type(output, ty);
+        if name.is_empty() {
+            emit!(output, " arg{}", index);
         } else {
-            emit_type(output, ty);
+            emit!(output, " {}", name.to_camel_case());
         }
-
-        let name = param_name(name, index, anonymize);
-        emit!(output, " {}", name);
 
         index += 1;
     }
@@ -365,12 +372,7 @@ fn emit_native_function_params(
     params: &[(String, Type)],
     anonymize: bool,
 ) {
-
-    let callbacks = extract_callbacks(params);
-
     let mut index = 0;
-    let mut callback_index = 0;
-
     for &(ref name, ref ty) in params {
         if index > 0 {
             emit!(output, ", ");
@@ -378,9 +380,8 @@ fn emit_native_function_params(
 
         emit_marshal_as(output, context, ty, Some(index), " ");
 
-        if extract_callback(ty).is_some() {
-            emit_callback_wrapper_name(output, &callbacks, callback_index);
-            callback_index += 1;
+        if let Some(callback) = extract_callback(ty) {
+            emit_callback_wrapper_name(output, &callback);
         } else {
             emit_type(output, ty);
         }
@@ -422,7 +423,12 @@ fn emit_marshal_as(
             match *size {
                 ArraySize::Lit(value) => emit!(output, ", SizeConst = {}", value),
                 ArraySize::Const(ref name) => {
-                    emit!(output, ", SizeConst = {}.{}", context.class_name, name)
+                    emit!(
+                        output,
+                        ", SizeConst = (int) {}.{}",
+                        context.class_name,
+                        name
+                    )
                 }
                 ArraySize::Dynamic => {
                     if let Some(index) = index {
@@ -497,74 +503,29 @@ fn emit_sanitized_type_name(output: &mut IndentedOutput, ty: &Type) {
     }
 }
 
-fn emit_action(output: &mut IndentedOutput, fun: &Function, skip_first: bool) {
-    let params = fun.inputs.iter().map(|&(_, ref ty)| ty);
-
-    emit!(output, "Action");
-
-    if skip_first {
-        emit_generic_args(output, params.skip(1));
-    } else {
-        emit_generic_args(output, params);
-    }
-}
-
-// Emits generic argument (on instantiation) list, e.g.: `<int, bool, MyType>`.
-fn emit_generic_args<'a, T: IntoIterator<Item = &'a Type>>(output: &mut IndentedOutput, params: T) {
-    let mut params = params.into_iter().peekable();
-    if params.peek().is_none() {
-        return;
-    }
-
-    emit!(output, "<");
-
-    let mut first = true;
-    for ty in params {
-        if first {
-            first = false;
-        } else {
+fn emit_args(output: &mut IndentedOutput, args: &[(String, Type)], offset: usize) {
+    for (index, &(ref name, _)) in args.into_iter().enumerate() {
+        if index > 0 {
             emit!(output, ", ");
         }
 
-        emit_type(output, ty);
+        if name.is_empty() {
+            emit!(output, "arg{}", offset + index);
+        } else {
+            emit!(output, "{}", name.to_camel_case());
+        }
     }
-
-    emit!(output, ">");
 }
 
 fn emit_delegate_base_name(output: &mut IndentedOutput, fun: &Function) {
     if fun.inputs.len() > 1 {
+        // Skip the user data param.
         for &(_, ref ty) in &fun.inputs[1..] {
             emit_sanitized_type_name(output, ty);
         }
     } else {
         emit!(output, "None");
     }
-}
-
-fn emit_delegate_holder(output: &mut IndentedOutput, callbacks: &[(&str, &Function)]) {
-    emit!(output, "GCHandle.ToIntPtr(GCHandle.Alloc(");
-
-    if callbacks.len() > 1 {
-        emit!(output, "Tuple.Create(");
-
-        let mut first = true;
-        for &(name, _) in callbacks {
-            if first {
-                first = false;
-            } else {
-                emit!(output, ", ");
-            }
-
-            emit!(output, "{}", name.to_camel_case());
-        }
-
-        emit!(output, ")");
-    } else {
-        emit!(output, "{}", callbacks[0].0.to_camel_case());
-    }
-
-    emit!(output, "))");
 }
 
 fn unmanaged_type(ty: &Type) -> Option<&str> {

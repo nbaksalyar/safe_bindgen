@@ -12,6 +12,7 @@ use common::{self, Lang, Outputs};
 use inflector::Inflector;
 use output::IndentedOutput;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::btree_map::Entry;
 use std::fmt::{Display, Write};
 use std::mem;
 use std::path::PathBuf;
@@ -22,6 +23,7 @@ const INDENT_WIDTH: usize = 4;
 
 pub struct LangCSharp {
     using_decls: BTreeSet<String>,
+    namespace: String,
     opaque_types: HashSet<String>,
     custom_decls: Vec<String>,
     ignored_functions: HashSet<String>,
@@ -41,6 +43,7 @@ impl LangCSharp {
     pub fn new() -> Self {
         LangCSharp {
             using_decls: default_using_decls(),
+            namespace: String::new(),
             opaque_types: Default::default(),
             custom_decls: Vec::new(),
             ignored_functions: Default::default(),
@@ -73,6 +76,11 @@ impl LangCSharp {
     /// Add additional `using` declaration.
     pub fn add_using_decl<T: Into<String>>(&mut self, decl: T) {
         let _ = self.using_decls.insert(decl.into());
+    }
+
+    /// Set the namespace to put all the generated code in.
+    pub fn set_namespace<T: Into<String>>(&mut self, namespace: T) {
+        self.namespace = namespace.into();
     }
 
     /// Add definition of opaque type (type represented by an opaque pointer).
@@ -278,7 +286,7 @@ impl Lang for LangCSharp {
                 return Err(unsupported_generics_error(item, "extern functions"));
             }
 
-            let item = transform_function(&fn_decl).ok_or_else(|| {
+            let function = transform_function(&fn_decl).ok_or_else(|| {
                 let string =
                     pprust::fun_to_string(fn_decl, unsafety, constness.node, item.ident, generics);
 
@@ -288,9 +296,12 @@ impl Lang for LangCSharp {
                     message: format!("bindgen can not handle function {}", string),
                 }
             })?;
-            let name = name.to_string();
 
-            self.functions.push(Snippet { docs, name, item });
+            self.functions.push(Snippet {
+                docs,
+                name: name.to_string(),
+                item: function,
+            });
         }
 
         Ok(())
@@ -306,12 +317,13 @@ impl Lang for LangCSharp {
             let mut output = IndentedOutput::new(&mut output, INDENT_WIDTH);
 
             // Using declarations.
-            for decl in &self.using_decls {
-                emit!(output, "using {};\n", decl);
-            }
+            emit_using_decls(&mut output, &self.using_decls);
             self.using_decls = default_using_decls();
 
-            emit!(output, "\n");
+            if !self.namespace.is_empty() {
+                emit!(output, "namespace {} {{\n", self.namespace);
+                output.indent();
+            }
 
             // Enums
             for snippet in self.enums.drain(..) {
@@ -332,21 +344,17 @@ impl Lang for LangCSharp {
             self.opaque_types.clear();
 
             if !self.functions.is_empty() || !self.consts.is_empty() {
-                emit!(
-                    output,
-                    "public static class {} {{\n",
-                    self.context.class_name
-                );
+                emit!(output, "public class {} {{\n", self.context.class_name);
                 output.indent();
 
                 // Define constant with the native library name, to be used in
                 // the [DllImport] attributes.
                 emit!(output, "#if __IOS__\n");
-                emit!(output, "private const String DLL_NAME = \"__Internal\";\n");
+                emit!(output, "internal const String DLL_NAME = \"__Internal\";\n");
                 emit!(output, "#else\n");
                 emit!(
                     output,
-                    "private const String DLL_NAME = \"{}\";\n",
+                    "internal const String DLL_NAME = \"{}\";\n",
                     self.context.lib_name
                 );
                 emit!(output, "#endif\n\n");
@@ -378,13 +386,22 @@ impl Lang for LangCSharp {
                 }
 
                 {
-                    for callbacks in collect_callbacks(&self.functions) {
-                        emit_callback_wrappers(&mut output, &callbacks);
+                    for (callback, single) in collect_callbacks(&self.functions) {
+                        emit_callback_delegate(&mut output, callback);
+
+                        if single {
+                            emit_callback_wrapper(&mut output, callback);
+                        }
                     }
                 }
 
                 self.functions.clear();
 
+                output.unindent();
+                emit!(output, "}}\n");
+            }
+
+            if !self.namespace.is_empty() {
                 output.unindent();
                 emit!(output, "}}\n");
             }
@@ -394,6 +411,15 @@ impl Lang for LangCSharp {
             PathBuf::from(format!("{}.cs", self.context.class_name)),
             output,
         );
+
+        // Utilities
+        let mut output = String::new();
+        {
+            let mut output = IndentedOutput::new(&mut output, INDENT_WIDTH);
+            emit_utilities(&mut output, &self.using_decls, &self.namespace);
+        }
+
+        outputs.insert(PathBuf::from("Utilities.cs"), output);
 
         Ok(())
     }
@@ -448,27 +474,41 @@ fn default_using_decls() -> BTreeSet<String> {
     let mut result = BTreeSet::default();
     let _ = result.insert("System".to_string());
     let _ = result.insert("System.Runtime.InteropServices".to_string());
+    let _ = result.insert("System.Threading.Tasks".to_string());
     result
 }
 
-fn collect_callbacks(functions: &[Snippet<Function>]) -> Vec<Vec<(&str, &Function)>> {
+fn collect_callbacks(functions: &[Snippet<Function>]) -> Vec<(&Function, bool)> {
     let mut stash = BTreeMap::new();
 
     for snippet in functions {
         let callbacks = extract_callbacks(&snippet.item.inputs);
-        let name = callback_wrapper_name(&callbacks);
+        let count = callbacks.len();
 
-        let _ = stash.entry(name).or_insert(callbacks);
+        for callback in callbacks {
+            let name = callback_wrapper_name(callback);
+
+            match stash.entry(name) {
+                Entry::Vacant(entry) => {
+                    let _ = entry.insert((callback, count == 1));
+                }
+                Entry::Occupied(mut entry) => {
+                    if count == 1 {
+                        entry.get_mut().1 = true;
+                    }
+                }
+            }
+        }
     }
 
-    stash.into_iter().map(|(_, callbacks)| callbacks).collect()
+    stash.into_iter().map(|(_, entry)| entry).collect()
 }
 
-fn callback_wrapper_name(callbacks: &[(&str, &Function)]) -> String {
+fn callback_wrapper_name(callback: &Function) -> String {
     let mut output = String::new();
     {
         let mut output = IndentedOutput::new(&mut output, INDENT_WIDTH);
-        emit_callback_wrapper_name(&mut output, callbacks, 0);
+        emit_callback_wrapper_name(&mut output, callback);
     }
 
     output

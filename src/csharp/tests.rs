@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 macro_rules! compile {
         ($lang:expr, $rust:tt) => { try_compile!($lang, $rust).unwrap() }
@@ -47,6 +48,7 @@ fn non_repr_c_types_are_ignored() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
         "
     );
@@ -71,6 +73,7 @@ fn structs() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
          [StructLayout(LayoutKind.Sequential)]
          public class Record {
@@ -107,12 +110,18 @@ fn type_aliases() {
         }
 
         #[no_mangle]
-        pub extern "C" fn fun(id: Id, user_data: *mut c_void, cb: extern "C" fn(*mut c_void, Id)) {}
+        pub extern "C" fn fun(
+            id: Id,
+            user_data: *mut c_void,
+            cb: extern "C" fn(*mut c_void, *const FfiResult, Id),
+        ) {
+        }
     });
 
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
          [StructLayout(LayoutKind.Sequential)]
          public class Message {
@@ -122,34 +131,31 @@ fn type_aliases() {
              public ulong[] receiverIds;
          }
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
-             public static void Fun(ulong id, Action<ulong> cb) {
-                 var userData = GCHandle.ToIntPtr(GCHandle.Alloc(cb));
-                 FunNative(id, userData, OnULongCb);
+             public static Task<ulong> Fun(ulong id) {
+                 var (task, userData) = Utilities.PrepareTask<ulong>();
+                 FunNative(id, userData, OnFfiResultULongCb);
+                 return task;
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun\")]
-             private static extern void FunNative(\
-                 ulong id, \
-                 IntPtr userData, \
-                 ULongCb cb);
+             internal static extern void FunNative(ulong id, \
+                                                   IntPtr userData, \
+                                                   FfiResultULongCb cb);
 
-             private delegate void ULongCb(IntPtr arg0, ulong arg1);
+             internal delegate void FfiResultULongCb(IntPtr arg0, FfiResult arg1, ulong arg2);
 
              #if __IOS__
-             [MonoPInvokeCallback(typeof(ULongCb))]
+             [MonoPInvokeCallback(typeof(FfiResultULongCb))]
              #endif
-             private static void OnULongCb(IntPtr arg0, ulong arg1) {
-                 var handle = GCHandle.FromIntPtr(arg0);
-                 var cb = (Action<ulong>) handle.Target;
-                 handle.Free();
-                 cb(arg1);
+             private static void OnFfiResultULongCb(IntPtr arg0, FfiResult arg1, ulong arg2) {
+                 Utilities.CompleteTask(arg0, arg1, arg2);
              }
 
          }
@@ -179,6 +185,7 @@ fn enums() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
          public enum Mode {
              ReadOnly,
@@ -209,6 +216,7 @@ fn functions_without_extern_and_no_mangle_are_ignored() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
         "
     );
@@ -231,12 +239,13 @@ fn explicitly_ignored_functions() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
              public static void Fun2() {
@@ -244,7 +253,7 @@ fn explicitly_ignored_functions() {
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
-             private static extern void Fun2Native();
+             internal static extern void Fun2Native();
 
          }
         "
@@ -263,12 +272,13 @@ fn functions_with_no_callback_params() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
              public static void Fun0(Engine engine) {
@@ -276,7 +286,7 @@ fn functions_with_no_callback_params() {
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-             private static extern void Fun0Native(Engine engine);
+             internal static extern void Fun0Native(Engine engine);
 
          }
         "
@@ -301,36 +311,35 @@ fn functions_with_one_callback_param() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
-             public static void Fun1(int num, String name, Action<FfiResult> cb) {
-                 var userData = GCHandle.ToIntPtr(GCHandle.Alloc(cb));
+             public static Task Fun1(int num, String name) {
+                 var (task, userData) = Utilities.PrepareTask();
                  Fun1Native(num, name, userData, OnFfiResultCb);
+                 return task;
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
-             private static extern void Fun1Native(\
+             internal static extern void Fun1Native(\
                 int num, \
                 [MarshalAs(UnmanagedType.LPStr)] String name, \
                 IntPtr userData, \
                 FfiResultCb cb);
 
-             private delegate void FfiResultCb(IntPtr arg0, FfiResult arg1);
+             internal delegate void FfiResultCb(IntPtr userData, FfiResult result);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultCb))]
              #endif
-             private static void OnFfiResultCb(IntPtr arg0, FfiResult arg1) {
-                 var handle = GCHandle.FromIntPtr(arg0);
-                 var cb = (Action<FfiResult>) handle.Target;
-                 handle.Free();
-                 cb(arg1);
+             private static void OnFfiResultCb(IntPtr userData, FfiResult result) {
+                 Utilities.CompleteTask(userData, result);
              }
 
          }
@@ -344,69 +353,39 @@ fn functions_with_one_callback_param() {
 fn functions_with_multiple_callback_params() {
     let actual = compile!(None, {
         #[no_mangle]
-        pub extern "C" fn fun2(
+        pub extern "C" fn fun(
+            input: i32,
             user_data: *mut c_void,
-            cb0: extern "C" fn(user_data: *mut c_void,
+            cb0: extern "C" fn(user_data: *mut c_void),
+            cb1: extern "C" fn(user_data: *mut c_void,
                                result: *const FfiResult,
-                               data: *const Data),
-            cb1: extern "C" fn(user_data: *mut c_void, result: *const FfiResult),
+                               output: i32),
         ) {
         }
     });
 
+    // Only the native declaration should be produced.
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
-             public static void Fun2(Action<FfiResult, Data> cb0, Action<FfiResult> cb1) {
-                 var userData = GCHandle.ToIntPtr(GCHandle.Alloc(Tuple.Create(cb0, cb1)));
-                 Fun2Native(userData, \
-                            OnFfiResultDataAndFfiResultCb0, \
-                            OnFfiResultDataAndFfiResultCb1);
-             }
+             [DllImport(DLL_NAME, EntryPoint = \"fun\")]
+             internal static extern void FunNative(int input, \
+                                                   IntPtr userData, \
+                                                   NoneCb cb0, \
+                                                   FfiResultIntCb cb1);
 
-             [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
-             private static extern void Fun2Native(\
-                 IntPtr userData, \
-                 FfiResultDataAndFfiResultCb0 cb0, \
-                 FfiResultDataAndFfiResultCb1 cb1);
+             internal delegate void FfiResultIntCb(IntPtr userData, FfiResult result, int output);
 
-             private delegate void FfiResultDataAndFfiResultCb0(\
-                 IntPtr arg0, FfiResult arg1, Data arg2);
-
-             #if __IOS__
-             [MonoPInvokeCallback(typeof(FfiResultDataAndFfiResultCb0))]
-             #endif
-             private static void OnFfiResultDataAndFfiResultCb0(\
-                 IntPtr arg0, FfiResult arg1, Data arg2\
-             ) {
-                 var handle = GCHandle.FromIntPtr(arg0);
-                 var cb = (Tuple<Action<FfiResult, Data>, Action<FfiResult>>) handle.Target;
-                 handle.Free();
-                 cb.Item1(arg1, arg2);
-             }
-
-             private delegate void FfiResultDataAndFfiResultCb1(\
-                 IntPtr arg0, FfiResult arg1);
-
-             #if __IOS__
-             [MonoPInvokeCallback(typeof(FfiResultDataAndFfiResultCb1))]
-             #endif
-             private static void OnFfiResultDataAndFfiResultCb1(\
-                 IntPtr arg0, FfiResult arg1\
-             ) {
-                 var handle = GCHandle.FromIntPtr(arg0);
-                 var cb = (Tuple<Action<FfiResult, Data>, Action<FfiResult>>) handle.Target;
-                 handle.Free();
-                 cb.Item2(arg1);
-             }
+             internal delegate void NoneCb(IntPtr userData);
 
          }
         "
@@ -434,12 +413,13 @@ fn functions_with_array_params() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
              public static void Fun0(byte[] data) {
@@ -447,7 +427,7 @@ fn functions_with_array_params() {
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-             private static extern void Fun0Native(\
+             internal static extern void Fun0Native(\
                 [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
                 ulong dataLen\
              );
@@ -457,7 +437,7 @@ fn functions_with_array_params() {
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
-             private static extern void Fun1Native(\
+             internal static extern void Fun1Native(\
                 [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
                 ulong dataLen\
              );
@@ -467,7 +447,7 @@ fn functions_with_array_params() {
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
-             private static extern void Fun2Native(\
+             internal static extern void Fun2Native(\
                 [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
                 ulong dataLen\
              );
@@ -477,7 +457,7 @@ fn functions_with_array_params() {
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun3\")]
-             private static extern void Fun3Native(\
+             internal static extern void Fun3Native(\
                 ulong id, \
                 [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] data, \
                 ulong dataLen\
@@ -503,17 +483,18 @@ fn function_with_opaque_params() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
          [StructLayout(LayoutKind.Sequential)]
          public struct Handle {
              private IntPtr value;
          }
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
              public static void Fun0(Handle handle) {
@@ -521,7 +502,7 @@ fn function_with_opaque_params() {
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-             private static extern void Fun0Native(Handle handle);
+             internal static extern void Fun0Native(Handle handle);
 
          }
         "
@@ -540,12 +521,13 @@ fn functions_with_return_values() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
              public static bool Fun0(int arg) {
@@ -553,7 +535,7 @@ fn functions_with_return_values() {
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-             private static extern bool Fun0Native(int arg);
+             internal static extern bool Fun0Native(int arg);
 
          }
         "
@@ -588,12 +570,13 @@ fn constants() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
              #region custom declarations
@@ -628,12 +611,13 @@ fn arrays() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
 
-         public static class Backend {
+         public class Backend {
              #if __IOS__
-             private const String DLL_NAME = \"__Internal\";
+             internal const String DLL_NAME = \"__Internal\";
              #else
-             private const String DLL_NAME = \"backend\";
+             internal const String DLL_NAME = \"backend\";
              #endif
 
              public const ulong ARRAY_SIZE = 20;
@@ -643,9 +627,44 @@ fn arrays() {
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun\")]
-             private static extern void FunNative(\
-                 [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)] byte[] a, \
-                 [MarshalAs(UnmanagedType.ByValArray, SizeConst = Backend.ARRAY_SIZE)] byte[] b);
+             internal static extern void FunNative(\
+                 [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)] \
+                 byte[] a, \
+                 [MarshalAs(UnmanagedType.ByValArray, SizeConst = (int) Backend.ARRAY_SIZE)] \
+                 byte[] b);
+
+         }
+        "
+    );
+
+    assert_multiline_eq!(actual, expected);
+}
+
+#[test]
+fn namespace() {
+    let mut lang = LangCSharp::new();
+    lang.set_namespace("Bindings");
+
+    let actual = compile!(lang, {
+        #[repr(C)]
+        pub struct Record {
+            id: u64,
+            name: *const c_char,
+        }
+    });
+
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
+
+         namespace Bindings {
+             [StructLayout(LayoutKind.Sequential)]
+             public class Record {
+                 public ulong id;
+                 [MarshalAs(UnmanagedType.LPStr)]
+                 public String name;
+             }
 
          }
         "
@@ -671,13 +690,9 @@ fn try_compile<T: Into<Option<LangCSharp>>>(
     parse::parse_mod(&mut lang, &ast.module, &mut outputs)?;
     lang.finalise_output(&mut outputs)?;
 
-    Ok(
-        outputs
-            .into_iter()
-            .map(|(_, output)| output)
-            .next()
-            .unwrap_or(String::new()),
-    )
+    Ok(outputs.remove(Path::new("Backend.cs")).unwrap_or(
+        String::new(),
+    ))
 }
 
 fn format_diff(left: &str, right: &str) -> String {

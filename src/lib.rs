@@ -238,7 +238,7 @@ impl Bindgen {
     /// This does not add any include-guards, includes, or extern declarations. It is mainly
     /// intended for internal use, but may be of interest to people who wish to embed
     /// moz-cheddar's generated code in another file.
-    pub fn compile<L: Lang>(&self, lang: &mut L, finalise: bool) -> Result<Outputs, Vec<Error>> {
+    pub fn compile<L: Lang>(&self, lang: &mut L) -> Result<Outputs, Vec<Error>> {
         let base_path = self.input.parent().unwrap();
         let mut outputs = HashMap::new();
 
@@ -270,9 +270,7 @@ impl Bindgen {
             // .map(|source| format!("{}\n\n{}", self.custom_code, source))
         }
 
-        if finalise {
-            lang.finalise_output(&mut outputs)?;
-        }
+        lang.finalise_output(&mut outputs)?;
 
         Ok(outputs)
     }
@@ -304,7 +302,7 @@ impl Bindgen {
     ///
     /// Panics on any compilation error so that the build script exits and prints output.
     pub fn run_build<P: AsRef<path::Path>, L: Lang>(&self, lang: &mut L, output_dir: P) {
-        match self.compile(lang, true) {
+        match self.compile(lang) {
             Err(errors) => {
                 for error in &errors {
                     self.print_error(error);

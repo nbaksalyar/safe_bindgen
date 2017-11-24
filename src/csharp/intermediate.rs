@@ -233,25 +233,30 @@ pub fn is_user_data(name: &str, ty: &Type) -> bool {
     false
 }
 
+pub fn extract_callbacks(inputs: &[(String, Type)]) -> Vec<&Function> {
+    inputs
+        .into_iter()
+        .filter_map(|&(_, ref ty)| extract_callback(ty))
+        .collect()
+}
+
+pub fn num_callbacks(inputs: &[(String, Type)]) -> usize {
+    inputs
+        .into_iter()
+        .filter_map(|&(_, ref ty)| extract_callback(ty))
+        .count()
+}
+
 pub fn extract_callback(ty: &Type) -> Option<&Function> {
     if let Type::Function(ref fun) = *ty {
-        if let Some(first) = fun.inputs.first() {
-            if is_user_data(&first.0, &first.1) {
-                return Some(fun);
-            }
+        let &(ref name, ref ty) = try_opt!(fun.inputs.get(0));
+
+        if is_user_data(name, ty) {
+            return Some(fun);
         }
     }
 
     None
-}
-
-pub fn extract_callbacks(inputs: &[(String, Type)]) -> Vec<(&str, &Function)> {
-    inputs
-        .iter()
-        .filter_map(|&(ref name, ref ty)| {
-            extract_callback(ty).map(|fun| (name.as_str(), fun))
-        })
-        .collect()
 }
 
 pub fn retrieve_docstring(attr: &ast::Attribute) -> Option<String> {
