@@ -25,6 +25,8 @@ pub struct LangCSharp {
     opaque_types: HashSet<String>,
     custom_decls: Vec<String>,
     ignored_functions: HashSet<String>,
+    extract_comments: bool,
+
     context: Context,
 
     consts: Vec<Snippet<Const>>,
@@ -42,6 +44,7 @@ impl LangCSharp {
             opaque_types: Default::default(),
             custom_decls: Vec::new(),
             ignored_functions: Default::default(),
+            extract_comments: false,
             context: Context {
                 lib_name: "backend".to_string(),
                 class_name: "Backend".to_string(),
@@ -135,7 +138,11 @@ impl Lang for LangCSharp {
     }
 
     fn parse_const(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
-        let (_, docs) = common::parse_attr(&item.attrs, |_| true, retrieve_docstring);
+        let docs = if self.extract_comments {
+            common::parse_attr(&item.attrs, |_| true, retrieve_docstring).1
+        } else {
+            String::new()
+        };
 
         if let ast::ItemKind::Const(ref ty, ref expr) = item.node {
             let name = item.ident.name.as_str().to_string();
@@ -157,8 +164,11 @@ impl Lang for LangCSharp {
     }
 
     fn parse_enum(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
-        let (repr_c, docs) =
-            common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring);
+        let (repr_c, docs) = if self.extract_comments {
+            common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring)
+        } else {
+            common::parse_attr(&item.attrs, common::check_repr_c, |_| None)
+        };
 
         // If it's not #[repr(C)] ignore it.
         if !repr_c {
@@ -190,8 +200,11 @@ impl Lang for LangCSharp {
     }
 
     fn parse_struct(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
-        let (repr_c, docs) =
-            common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring);
+        let (repr_c, docs) = if self.extract_comments {
+            common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring)
+        } else {
+            common::parse_attr(&item.attrs, common::check_repr_c, |_| None)
+        };
 
         // If it's not #[repr(C)] ignore it.
         if !repr_c {
@@ -238,8 +251,11 @@ impl Lang for LangCSharp {
             return Ok(());
         }
 
-        let (no_mangle, docs) =
-            common::parse_attr(&item.attrs, common::check_no_mangle, retrieve_docstring);
+        let (no_mangle, docs) = if self.extract_comments {
+            common::parse_attr(&item.attrs, common::check_no_mangle, retrieve_docstring)
+        } else {
+            common::parse_attr(&item.attrs, common::check_no_mangle, |_| None)
+        };
 
         // Ignore function without #[no_mangle].
         if !no_mangle {
@@ -340,9 +356,14 @@ impl Lang for LangCSharp {
                 }
 
                 // Consts
-                for snippet in self.consts.drain(..) {
+                for snippet in &self.consts {
                     emit!(output, "{}", snippet.docs);
                     emit_const(&mut output, &snippet.name, &snippet.item);
+                }
+
+                if !self.consts.is_empty() {
+                    emit!(output, "\n");
+                    self.consts.clear();
                 }
 
                 // Functions

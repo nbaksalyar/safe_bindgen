@@ -57,14 +57,9 @@ fn non_repr_c_types_are_ignored() {
 #[test]
 fn structs() {
     let actual = compile!(None, {
-        /// This comment
-        /// spans multiple lines.
         #[repr(C)]
         pub struct Record {
-            /// Comment for the `id` field.
             id: u64,
-            /// Comment for the `enabled` field
-            /// spans multiple lines.
             enabled: bool,
             name: *const c_char,
             random_numbers: [i32; 10],
@@ -77,14 +72,9 @@ fn structs() {
         "using System;
          using System.Runtime.InteropServices;
 
-         /// This comment
-         /// spans multiple lines.
          [StructLayout(LayoutKind.Sequential)]
          public class Record {
-             /// Comment for the `id` field.
              public ulong id;
-             /// Comment for the `enabled` field
-             /// spans multiple lines.
              [MarshalAs(UnmanagedType.Bool)]
              public bool enabled;
              [MarshalAs(UnmanagedType.LPStr)]
@@ -158,8 +148,8 @@ fn type_aliases() {
              private static void OnULongCb(IntPtr arg0, ulong arg1) {
                  var handle = GCHandle.FromIntPtr(arg0);
                  var cb = (Action<ulong>) handle.Target;
-                 cb(arg1);
                  handle.Free();
+                 cb(arg1);
              }
 
          }
@@ -172,12 +162,9 @@ fn type_aliases() {
 #[test]
 fn enums() {
     let actual = compile!(None, {
-        /// Some nice comment here.
         #[repr(C)]
         pub enum Mode {
-            /// Comment for the `ReadOnly` variant.
             ReadOnly,
-            /// Comment for the `WriteOnly` variant.
             WriteOnly,
             ReadAndWrite,
         }
@@ -193,11 +180,8 @@ fn enums() {
         "using System;
          using System.Runtime.InteropServices;
 
-         /// Some nice comment here.
          public enum Mode {
-             /// Comment for the `ReadOnly` variant.
              ReadOnly,
-             /// Comment for the `WriteOnly` variant.
              WriteOnly,
              ReadAndWrite,
          }
@@ -304,7 +288,6 @@ fn functions_with_no_callback_params() {
 #[test]
 fn functions_with_one_callback_param() {
     let actual = compile!(None, {
-        /// Comment for `fun1`.
         #[no_mangle]
         pub extern "C" fn fun1(
             num: i32,
@@ -326,7 +309,6 @@ fn functions_with_one_callback_param() {
              private const String DLL_NAME = \"backend\";
              #endif
 
-             /// Comment for `fun1`.
              public static void Fun1(int num, String name, Action<FfiResult> cb) {
                  var userData = GCHandle.ToIntPtr(GCHandle.Alloc(cb));
                  Fun1Native(num, name, userData, OnFfiResultCb);
@@ -347,8 +329,8 @@ fn functions_with_one_callback_param() {
              private static void OnFfiResultCb(IntPtr arg0, FfiResult arg1) {
                  var handle = GCHandle.FromIntPtr(arg0);
                  var cb = (Action<FfiResult>) handle.Target;
-                 cb(arg1);
                  handle.Free();
+                 cb(arg1);
              }
 
          }
@@ -407,8 +389,8 @@ fn functions_with_multiple_callback_params() {
              ) {
                  var handle = GCHandle.FromIntPtr(arg0);
                  var cb = (Tuple<Action<FfiResult, Data>, Action<FfiResult>>) handle.Target;
-                 cb.Item1(arg1, arg2);
                  handle.Free();
+                 cb.Item1(arg1, arg2);
              }
 
              private delegate void FfiResultDataAndFfiResultCb1(\
@@ -422,8 +404,8 @@ fn functions_with_multiple_callback_params() {
              ) {
                  var handle = GCHandle.FromIntPtr(arg0);
                  var cb = (Tuple<Action<FfiResult, Data>, Action<FfiResult>>) handle.Target;
-                 cb.Item2(arg1);
                  handle.Free();
+                 cb.Item2(arg1);
              }
 
          }
@@ -586,9 +568,7 @@ fn constants() {
     lang.add_custom_decl("public const byte CUSTOM = 45;");
 
     let actual = compile!(lang, {
-        /// Comment for `NUMBER`.
         pub const NUMBER: i32 = 123;
-        /// Comment for `STRING`.
         pub const STRING: &'static str = "hello world";
         pub const ARRAY: [u8; 4] = [0, 1, 2, 3];
 
@@ -620,20 +600,13 @@ fn constants() {
              public const byte CUSTOM = 45;
              #endregion
 
-             /// Comment for `NUMBER`.
              public const int NUMBER = 123;
-
-             /// Comment for `STRING`.
              public const String STRING = \"hello world\";
-
              public static readonly byte[] ARRAY = new byte[] { 0, 1, 2, 3 };
-
              public static readonly Record STRUCT_VALUE = new Record { \
                  id = 0, secretCode = \"xyz\" };
-
              public static readonly Record STRUCT_REF = new Record { \
                  id = 1, secretCode = \"xyz\" };
-
              public const String EMPTY_STR = \"\";
 
          }

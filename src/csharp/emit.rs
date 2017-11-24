@@ -55,7 +55,7 @@ pub fn emit_const(output: &mut IndentedOutput, name: &str, item: &Const) {
     emit_type(output, &item.ty);
     emit!(output, " {} = ", name.to_screaming_snake_case());
     emit_const_value(output, Some(&item.ty), &item.value);
-    emit!(output, ";\n\n");
+    emit!(output, ";\n");
 }
 
 pub fn emit_enum(output: &mut IndentedOutput, name: &str, item: &Enum) {
@@ -225,6 +225,7 @@ fn emit_callback_wrapper(output: &mut IndentedOutput, funs: &[(&str, &Function)]
     }
 
     emit!(output, ") handle.Target;\n");
+    emit!(output, "handle.Free();\n");
 
     if funs.len() > 1 {
         emit!(output, "cb.Item{}(", index + 1);
@@ -241,7 +242,6 @@ fn emit_callback_wrapper(output: &mut IndentedOutput, funs: &[(&str, &Function)]
     }
 
     emit!(output, ");\n");
-    emit!(output, "handle.Free();\n");
 
     output.unindent();
     emit!(output, "}}\n\n");
