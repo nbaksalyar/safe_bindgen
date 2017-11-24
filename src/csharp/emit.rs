@@ -533,8 +533,12 @@ fn emit_generic_args<'a, T: IntoIterator<Item = &'a Type>>(output: &mut Indented
 }
 
 fn emit_delegate_base_name(output: &mut IndentedOutput, fun: &Function) {
-    for &(_, ref ty) in fun.inputs.iter().skip(1) {
-        emit_sanitized_type_name(output, ty);
+    if fun.inputs.len() > 1 {
+        for &(_, ref ty) in &fun.inputs[1..] {
+            emit_sanitized_type_name(output, ty);
+        }
+    } else {
+        emit!(output, "None");
     }
 }
 

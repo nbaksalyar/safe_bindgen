@@ -436,8 +436,17 @@ fn functions_with_multiple_callback_params() {
 #[test]
 fn functions_with_array_params() {
     let actual = compile!(None, {
+        // Support different naming conventions.
         #[no_mangle]
-        pub extern "C" fn fun0(ids: *const u8, ids_len: usize) {}
+        pub extern "C" fn fun0(data_ptr: *const u8, data_len: usize) {}
+        #[no_mangle]
+        pub extern "C" fn fun1(data: *const u8, data_len: usize) {}
+        #[no_mangle]
+        pub extern "C" fn fun2(data: *const u8, len: usize) {}
+
+        // Params before and/or after the array
+        #[no_mangle]
+        pub extern "C" fn fun3(id: u64, data: *const u8, len: usize) {}
     });
 
     let expected = indoc!(
@@ -451,14 +460,45 @@ fn functions_with_array_params() {
              private const String DLL_NAME = \"backend\";
              #endif
 
-             public static void Fun0(byte[] ids) {
-                 Fun0Native(ids, (ulong) ids.Length);
+             public static void Fun0(byte[] data) {
+                 Fun0Native(data, (ulong) data.Length);
              }
 
              [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
              private static extern void Fun0Native(\
-                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] ids, \
-                ulong idsLen\
+                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
+                ulong dataLen\
+             );
+
+             public static void Fun1(byte[] data) {
+                 Fun1Native(data, (ulong) data.Length);
+             }
+
+             [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
+             private static extern void Fun1Native(\
+                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
+                ulong dataLen\
+             );
+
+             public static void Fun2(byte[] data) {
+                 Fun2Native(data, (ulong) data.Length);
+             }
+
+             [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
+             private static extern void Fun2Native(\
+                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
+                ulong dataLen\
+             );
+
+             public static void Fun3(ulong id, byte[] data) {
+                 Fun3Native(id, data, (ulong) data.Length);
+             }
+
+             [DllImport(DLL_NAME, EntryPoint = \"fun3\")]
+             private static extern void Fun3Native(\
+                ulong id, \
+                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] data, \
+                ulong dataLen\
              );
 
          }

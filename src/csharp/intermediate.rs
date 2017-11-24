@@ -9,6 +9,16 @@ use syntax::ast;
 use syntax::print::pprust;
 use syntax::ptr;
 
+// TODO: replace whit macro with the ? operator one we upgrade to rust 1.22
+macro_rules! try_opt {
+    ($e:expr) => {
+        match $e {
+            Some(value) => value,
+            None => return None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Type {
     Unit,
@@ -115,44 +125,47 @@ pub fn transform_function(decl: &ast::FnDecl) -> Option<Function> {
     };
 
     let mut inputs = Vec::with_capacity(decl.inputs.len());
-
     let mut iter = decl.inputs.iter();
-    let mut param = None;
+
+    let mut carry = None;
 
     loop {
-        if let Some(param) = param.take() {
-            inputs.push(param);
+        let one = if let Some(param) = carry.take() {
+            Some(param)
         } else {
             if let Some(arg) = iter.next() {
-                let (name, ty) = match transform_function_param(arg) {
-                    Some(param) => param,
-                    None => return None,
-                };
+                Some(try_opt!(transform_function_param(arg)))
+            } else {
+                None
+            }
+        };
 
-                if let Some(next_arg) = iter.next() {
-                    let (next_name, next_ty) = match transform_function_param(next_arg) {
-                        Some(param) => param,
-                        None => return None,
-                    };
+        let two = if let Some(arg) = iter.next() {
+            Some(try_opt!(transform_function_param(arg)))
+        } else {
+            None
+        };
 
-                    if let Some(new_param) = transform_ptr_and_len_to_array(
-                        &name,
-                        &ty,
-                        &next_name,
-                        &next_ty,
-                    )
-                    {
-                        param = Some(new_param);
-                    } else {
-                        inputs.push((name, ty));
-                        param = Some((next_name, next_ty));
-                    }
+        if let Some(one) = one {
+            if let Some(two) = two {
+                if let Some(new_one) = transform_ptr_and_len_to_array(
+                    &one.0,
+                    &one.1,
+                    &two.0,
+                    &two.1,
+                )
+                {
+                    inputs.push(new_one);
                 } else {
-                    param = Some((name, ty));
+                    inputs.push(one);
+                    carry = Some(two);
                 }
             } else {
+                inputs.push(one);
                 break;
             }
+        } else {
+            break;
         }
     }
 
@@ -169,15 +182,8 @@ pub fn transform_function_param(arg: &ast::Arg) -> Option<(String, Type)> {
 }
 
 pub fn transform_const(ty: &ast::Ty, value: &ast::Expr) -> Option<Const> {
-    let ty = match transform_type(ty) {
-        Some(ty) => ty,
-        None => return None,
-    };
-
-    let value = match transform_const_value(value) {
-        Some(value) => value,
-        None => return None,
-    };
+    let ty = try_opt!(transform_type(ty));
+    let value = try_opt!(transform_const_value(value));
 
     Some(Const { ty, value })
 }
@@ -207,10 +213,7 @@ pub fn transform_struct(fields: &[ast::StructField]) -> Option<Struct> {
         .map(|field| {
             let (_, docs) = common::parse_attr(&field.attrs, |_| true, retrieve_docstring);
             let name = field.ident.unwrap().name.as_str().to_camel_case();
-            let ty = match transform_type(&field.ty) {
-                Some(ty) => ty,
-                None => return None,
-            };
+            let ty = try_opt!(transform_type(&field.ty));
 
             Some(StructField { docs, name, ty })
         })
@@ -372,12 +375,10 @@ fn transform_ptr_and_len_to_array(
         return None;
     }
 
-    // Matches "foo_ptr"/"foo_len" or "foo"/"foo_len"
-    const PTR_SUFFIX: &'static str = "_ptr";
-    const LEN_SUFFIX: &'static str = "_len";
+    // Matches "foo_ptr"/"foo_len" or "foo"/"foo_len" or "foo"/"len"
 
-    let index = if ptr_name.ends_with(PTR_SUFFIX) {
-        ptr_name.len() - PTR_SUFFIX.len()
+    let index = if ptr_name.ends_with("_ptr") {
+        ptr_name.len() - "_ptr".len()
     } else {
         ptr_name.len()
     };
@@ -385,7 +386,7 @@ fn transform_ptr_and_len_to_array(
     let base_name = &ptr_name[0..index];
     let (len_name_0, len_name_1) = len_name.split_at(cmp::min(index, len_name.len()));
 
-    if len_name_0 == base_name && len_name_1 == LEN_SUFFIX {
+    if (len_name_0 == base_name && len_name_1 == "_len") || len_name == "len" {
         Some((
             base_name.to_string(),
             Type::Array(Box::new(elem_ty.clone()), ArraySize::Dynamic),
