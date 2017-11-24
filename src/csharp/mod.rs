@@ -12,7 +12,7 @@ use common::{self, Lang, Outputs};
 use inflector::Inflector;
 use output::IndentedOutput;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fmt::Write;
+use std::fmt::{Display, Write};
 use std::mem;
 use std::path::PathBuf;
 use syntax::ast;
@@ -83,6 +83,11 @@ impl LangCSharp {
     /// Add additional declaration.
     pub fn add_custom_decl<T: Into<String>>(&mut self, decl: T) {
         self.custom_decls.push(decl.into());
+    }
+
+    /// Add constant definition.
+    pub fn add_const<T: Display>(&mut self, ty: &str, name: &str, value: T) {
+        self.add_custom_decl(format!("public const {} {} = {};", ty, name, value));
     }
 
     /// Ignore the function with the given name when transforming to the target language.

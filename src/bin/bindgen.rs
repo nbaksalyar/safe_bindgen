@@ -2,7 +2,7 @@ extern crate safe_bindgen;
 #[macro_use]
 extern crate clap;
 
-use safe_bindgen::{Cheddar, LangCSharp, LangJava};
+use safe_bindgen::{Bindgen, LangCSharp, LangJava};
 use std::collections::HashMap;
 
 fn main() {
@@ -41,7 +41,7 @@ fn main() {
         ))
         .get_matches();
 
-    let mut bindgen = Cheddar::new().expect("cargo manifest could not be read");
+    let mut bindgen = Bindgen::new().expect("cargo manifest could not be read");
     let lang = matches.value_of("LANG").unwrap();
     let lib = matches.value_of("LIB").unwrap();
 

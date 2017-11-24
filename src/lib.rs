@@ -157,7 +157,7 @@ impl Error {
     }
 }
 
-/// Stores configuration for the Cheddar compiler.
+/// Stores configuration for the bindgen.
 ///
 /// # Examples
 ///
@@ -166,14 +166,14 @@ impl Error {
 /// practice).
 ///
 /// ```ignore
-/// cheddar::Cheddar::new().expect("unable to read cargo manifest");
+/// Bindgen::new().expect("unable to read cargo manifest");
 /// ```
 ///
 /// If your project is a valid cargo project or follows the same structure, you can simply place
 /// the following in your build script.
 ///
 /// ```ignore
-/// cheddar::Cheddar::new().expect("unable to read cargo manifest")
+/// Bindgen::new().expect("unable to read cargo manifest")
 ///     .run_build("path/to/output/file");
 /// ```
 ///
@@ -181,11 +181,11 @@ impl Error {
 /// root crate file.
 ///
 /// ```ignore
-/// cheddar::Cheddar::new().expect("unable to read cargo manifest")
+/// Bindgen::new().expect("unable to read cargo manifest")
 ///     .source_file("src/root.rs")
 ///     .run_build("include/my_header.h");
 /// ```
-pub struct Cheddar {
+pub struct Bindgen {
     /// The root source file of the crate.
     input: path::PathBuf,
     /// Custom C code which is placed after the `#include`s.
@@ -196,16 +196,16 @@ pub struct Cheddar {
     session: syntax::parse::ParseSess,
 }
 
-impl Cheddar {
-    /// Create a new Cheddar compiler.
+impl Bindgen {
+    /// Create a new bindgen instance.
     ///
     /// This can only fail if there are issues reading the cargo manifest. If there is no cargo
     /// manifest available then the source file defaults to `src/lib.rs`.
-    pub fn new() -> std::result::Result<Cheddar, Error> {
+    pub fn new() -> std::result::Result<Self, Error> {
         let source_path = source_file_from_cargo()?;
         let input = path::PathBuf::from(source_path);
 
-        Ok(Cheddar {
+        Ok(Bindgen {
             input: input,
             custom_code: String::new(),
             session: syntax::parse::ParseSess::new(),
@@ -215,7 +215,7 @@ impl Cheddar {
     /// Set the path to the root source file of the crate.
     ///
     /// This should only be used when not using a `cargo` build system.
-    pub fn source_file<T>(&mut self, path: T) -> &mut Cheddar
+    pub fn source_file<T>(&mut self, path: T) -> &mut Self
     where
         path::PathBuf: convert::From<T>,
     {
@@ -228,7 +228,7 @@ impl Cheddar {
     /// If you compile a full header file, this is inserted after the `#include`s.
     ///
     /// This can be called multiple times, each time appending more code.
-    pub fn insert_code(&mut self, code: &str) -> &mut Cheddar {
+    pub fn insert_code(&mut self, code: &str) -> &mut Self {
         self.custom_code.push_str(code);
         self
     }
@@ -238,7 +238,7 @@ impl Cheddar {
     /// This does not add any include-guards, includes, or extern declarations. It is mainly
     /// intended for internal use, but may be of interest to people who wish to embed
     /// moz-cheddar's generated code in another file.
-    pub fn compile<L: Lang>(&self, lang: &mut L) -> Result<Outputs, Vec<Error>> {
+    pub fn compile<L: Lang>(&self, lang: &mut L, finalise: bool) -> Result<Outputs, Vec<Error>> {
         let base_path = self.input.parent().unwrap();
         let mut outputs = HashMap::new();
 
@@ -270,7 +270,9 @@ impl Cheddar {
             // .map(|source| format!("{}\n\n{}", self.custom_code, source))
         }
 
-        lang.finalise_output(&mut outputs)?;
+        if finalise {
+            lang.finalise_output(&mut outputs)?;
+        }
 
         Ok(outputs)
     }
@@ -302,7 +304,7 @@ impl Cheddar {
     ///
     /// Panics on any compilation error so that the build script exits and prints output.
     pub fn run_build<P: AsRef<path::Path>, L: Lang>(&self, lang: &mut L, output_dir: P) {
-        match self.compile(lang) {
+        match self.compile(lang, true) {
             Err(errors) => {
                 for error in &errors {
                     self.print_error(error);
