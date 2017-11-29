@@ -40,7 +40,11 @@ pub fn imported_mods(module: &ast::Mod) -> Vec<Vec<String>> {
 ///
 /// Iterates through all items in the module and dispatches to correct methods, then pulls all
 /// the results together into a header.
-pub fn parse_mod<L: Lang>(module: &ast::Mod, outputs: &mut Outputs) -> Result<(), Vec<Error>> {
+pub fn parse_mod<L: Lang>(
+    lang: &mut L,
+    module: &ast::Mod,
+    outputs: &mut Outputs,
+) -> Result<(), Vec<Error>> {
     let mut errors = vec![];
 
     for item in &module.items {
@@ -54,10 +58,10 @@ pub fn parse_mod<L: Lang>(module: &ast::Mod, outputs: &mut Outputs) -> Result<()
             // TODO: Check for ItemStatic and ItemConst as well.
             //     - How would this work?
             //     - Is it even possible?
-            ast::ItemKind::Ty(..) => L::parse_ty(item, outputs),
-            ast::ItemKind::Enum(..) => L::parse_enum(item, outputs),
-            ast::ItemKind::Struct(..) => L::parse_struct(item, outputs),
-            ast::ItemKind::Fn(..) => L::parse_fn(item, outputs),
+            ast::ItemKind::Ty(..) => lang.parse_ty(item, outputs),
+            ast::ItemKind::Enum(..) => lang.parse_enum(item, outputs),
+            ast::ItemKind::Struct(..) => lang.parse_struct(item, outputs),
+            ast::ItemKind::Fn(..) => lang.parse_fn(item, outputs),
             _ => Ok(()),
         };
 

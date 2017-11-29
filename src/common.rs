@@ -12,27 +12,27 @@ pub type Outputs = HashMap<PathBuf, String>;
 /// Target language support
 pub trait Lang {
     /// Convert `pub type A = B;` into `typedef B A;`.
-    fn parse_ty(_item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_ty(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         Ok(())
     }
 
     /// Convert a Rust enum into a target language enum.
-    fn parse_enum(_item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_enum(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         Ok(())
     }
 
     /// Convert a Rust struct into a target language struct.
-    fn parse_struct(_item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_struct(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         Ok(())
     }
 
     /// Convert a Rust function declaration into a target language function declaration.
-    fn parse_fn(_item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_fn(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         Ok(())
     }
 
     /// Add extra and custom code after the code generation part is done.
-    fn finalise_output(_outputs: &mut Outputs) -> Result<(), Error> {
+    fn finalise_output(&mut self, _outputs: &mut Outputs) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -69,7 +69,7 @@ pub fn is_ptr_len_arg(arg: &ast::Arg) -> bool {
 /// `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
 pub fn is_array_arg(arg: &ast::Arg, next_arg: Option<&ast::Arg>) -> bool {
     if let ast::TyKind::Ptr(..) = arg.ty.node {
-        next_arg.map(is_ptr_len_arg).unwrap_or(false)
+        !is_result_arg(arg) && next_arg.map(is_ptr_len_arg).unwrap_or(false)
     } else {
         false
     }

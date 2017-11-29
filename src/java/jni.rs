@@ -1,6 +1,7 @@
 //! Functions to generate JNI bindings
 
 use common::{is_array_arg, is_user_data_arg};
+use std::collections::HashMap;
 use syntax::ast;
 use syntax::print::pprust;
 use java::callback_name;
@@ -52,7 +53,20 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
     }
 }
 
-fn rust_ty_to_signature(ty: &ast::Ty) -> Option<JavaType> {
+fn java_ty_to_signature(s: &str) -> Option<JavaType> {
+    match s {
+        "long" => Some(JavaType::Primitive(signature::Primitive::Long)),
+        "byte[]" => Some(JavaType::Array(
+            Box::new(JavaType::Primitive(signature::Primitive::Byte)),
+        )),
+        _ => None,
+    }
+}
+
+fn rust_ty_to_signature(
+    ty: &ast::Ty,
+    type_map: &HashMap<&'static str, &'static str>,
+) -> Option<JavaType> {
     match ty.node {
         // Callback
         ast::TyKind::BareFn(ref _bare_fn) => Some(JavaType::Object(From::from("java/lang/Object"))),
@@ -73,7 +87,15 @@ fn rust_ty_to_signature(ty: &ast::Ty) -> Option<JavaType> {
                     JavaType::Primitive(signature::Primitive::Long),
                 ),
                 "c_bool" | "bool" => Some(JavaType::Object(From::from("java/lang/Boolean"))),
-                _ => Some(JavaType::Object(From::from(ty))),
+                _ => {
+                    if let Some(mapped) = type_map.get(ty) {
+                        java_ty_to_signature(mapped).or_else(|| {
+                            Some(JavaType::Object(From::from(ty)))
+                        })
+                    } else {
+                        Some(JavaType::Object(From::from(ty)))
+                    }
+                }
             }
         }
 
@@ -83,7 +105,7 @@ fn rust_ty_to_signature(ty: &ast::Ty) -> Option<JavaType> {
             if pprust::ty_to_string(&ptr.ty) == "c_char" {
                 Some(JavaType::Object(From::from("java/lang/String")))
             } else {
-                rust_ty_to_signature(&ptr.ty)
+                rust_ty_to_signature(&ptr.ty, type_map)
             }
         }
 
@@ -176,7 +198,12 @@ fn transform_opaque_ptr(arg_name: &str, ty: &str) -> JniArgResult {
     JniArgResult { stmt, call_args }
 }
 
-pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: &str) -> String {
+pub fn generate_jni_function(
+    args: Vec<ast::Arg>,
+    native_name: &str,
+    func_name: &str,
+    type_map: &HashMap<&'static str, &'static str>,
+) -> String {
     let func_name = quote::Ident::new(format!("Java_NativeBindings_{}", func_name));
     let native_name = quote::Ident::new(native_name);
 
@@ -198,8 +225,10 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
             match arg.ty.node {
                 // Callback
                 ast::TyKind::BareFn(ref bare_fn) => {
-                    let cb_class =
-                        format!("call_{}", callback_name(&*bare_fn.decl.inputs).unwrap());
+                    let cb_class = format!(
+                        "call_{}",
+                        callback_name(&*bare_fn.decl.inputs, type_map).unwrap()
+                    );
 
                     callbacks.push((quote::Ident::new(arg_name), quote::Ident::new(cb_class)));
 
@@ -239,10 +268,12 @@ pub fn generate_jni_function(args: Vec<ast::Arg>, native_name: &str, func_name: 
         jni_fn_inputs.push(transform_jni_arg(&arg));
     }
 
-    let cb_arg_res = transform_callbacks_arg(callbacks);
-    call_args.push(quote! { ctx });
-    call_args.extend(cb_arg_res.call_args);
-    stmts.push(cb_arg_res.stmt);
+    if callbacks.len() > 0 {
+        let cb_arg_res = transform_callbacks_arg(callbacks);
+        call_args.push(quote! { ctx });
+        call_args.extend(cb_arg_res.call_args);
+        stmts.push(cb_arg_res.stmt);
+    }
 
     let tokens =
         quote! {
@@ -264,7 +295,11 @@ fn transform_arg(arg: &ast::Arg) -> (quote::Ident, quote::Ident) {
     )
 }
 
-pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
+pub fn generate_jni_callback(
+    cb: &ast::BareFnTy,
+    cb_class: &str,
+    type_map: &HashMap<&'static str, &'static str>,
+) -> String {
     let cb_name = quote::Ident::new(format!("call_{}", cb_class));
 
     let mut args: Vec<quote::Tokens> = Vec::new(); // Native function call parameters
@@ -286,7 +321,7 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
 
         if is_array_arg(&arg, args_iter.peek().cloned()) {
             // Handle array arguments
-            let val_java_type = rust_ty_to_signature(&arg.ty).unwrap();
+            let val_java_type = rust_ty_to_signature(&arg.ty, type_map).unwrap();
             arg_java_ty.push(JavaType::Array(Box::new(val_java_type)));
 
             if let Some(len_arg) = args_iter.next() {
@@ -331,7 +366,7 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str) -> String {
                 }
             };
 
-            arg_java_ty.push(rust_ty_to_signature(&arg.ty).unwrap());
+            arg_java_ty.push(rust_ty_to_signature(&arg.ty, type_map).unwrap());
             stmts.push(stmt);
         }
     }
