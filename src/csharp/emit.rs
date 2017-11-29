@@ -3,222 +3,237 @@
 use super::Context;
 use super::intermediate::*;
 use inflector::Inflector;
-use output::IndentedOutput;
-use std::collections::BTreeSet;
+use output::IndentedWriter;
 use std::fmt::Write;
 
 macro_rules! emit {
-    ($output:expr, $($arg:tt)*) => {
-        write!($output, $($arg)*).unwrap()
+    ($writer:expr, $($arg:tt)*) => {
+        write!($writer, $($arg)*).unwrap()
     }
 }
 
-pub fn emit_using_decls(output: &mut IndentedOutput, decls: &BTreeSet<String>) {
-    for decl in decls {
-        emit!(output, "using {};\n", decl);
-    }
-
-    if !decls.is_empty() {
-        emit!(output, "\n");
-    }
-}
-
-pub fn emit_function(output: &mut IndentedOutput, context: &Context, name: &str, item: &Function) {
+pub fn emit_function(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Function) {
     if num_callbacks(&item.inputs) <= 1 {
-        emit_function_wrapper(output, &name, item);
+        emit_wrapper_function(writer, context, &name, item);
     }
-    emit_function_extern_decl(output, context, &name, item);
+    emit_function_extern_decl(writer, context, &name, item);
 }
 
-pub fn emit_callback_delegate(output: &mut IndentedOutput, callback: &Function) {
-    emit!(output, "internal delegate void ");
-    emit_callback_wrapper_name(output, callback);
-    emit!(output, "(");
-    emit_managed_function_params(output, &callback.inputs, false);
-    emit!(output, ");\n\n");
+pub fn emit_callback_delegate(writer: &mut IndentedWriter, context: &Context, callback: &Function) {
+    emit!(writer, "internal delegate void ");
+    emit_callback_wrapper_name(writer, callback);
+    emit!(writer, "(");
+    emit_callback_params(writer, context, &callback.inputs);
+    emit!(writer, ");\n\n");
 }
 
-pub fn emit_callback_wrapper(output: &mut IndentedOutput, callback: &Function) {
-    emit!(output, "#if __IOS__\n");
-    emit!(output, "[MonoPInvokeCallback(typeof(");
-    emit_callback_wrapper_name(output, callback);
-    emit!(output, "))]\n");
-    emit!(output, "#endif\n");
+pub fn emit_callback_wrapper(writer: &mut IndentedWriter, context: &Context, callback: &Function) {
+    emit!(writer, "#if __IOS__\n");
+    emit!(writer, "[MonoPInvokeCallback(typeof(");
+    emit_callback_wrapper_name(writer, callback);
+    emit!(writer, "))]\n");
+    emit!(writer, "#endif\n");
 
-    emit!(output, "private static void On");
-    emit_callback_wrapper_name(output, callback);
-    emit!(output, "(");
-    emit_managed_function_params(output, &callback.inputs, false);
-    emit!(output, ") {{\n");
-    output.indent();
+    emit!(writer, "private static void On");
+    emit_callback_wrapper_name(writer, callback);
+    emit!(writer, "(");
+    emit_callback_params(writer, context, &callback.inputs);
+    emit!(writer, ") {{\n");
+    writer.indent();
 
-    emit!(output, "Utilities.CompleteTask(");
-    emit_args(output, &callback.inputs[0..2], 0);
+    emit!(writer, "{}.CompleteTask(", &context.utils_class_name);
+    emit_args(writer, context, &callback.inputs[0..2], 0, PointerMode::Ref);
 
     if callback.inputs.len() > 2 {
-        emit!(output, ", ");
+        emit!(writer, ", ");
 
         if callback.inputs.len() > 3 {
-            emit!(output, "(");
+            emit!(writer, "(");
         }
 
-        emit_args(output, &callback.inputs[2..], 2);
+        emit_args(
+            writer,
+            context,
+            &callback.inputs[2..],
+            2,
+            PointerMode::Deref,
+        );
 
         if callback.inputs.len() > 3 {
-            emit!(output, ")");
+            emit!(writer, ")");
         }
     }
 
-    emit!(output, ");\n");
+    emit!(writer, ");\n");
 
-    output.unindent();
-    emit!(output, "}}\n\n");
+    writer.unindent();
+    emit!(writer, "}}\n\n");
 }
 
-pub fn emit_callback_wrapper_name(output: &mut IndentedOutput, callback: &Function) {
-    emit_delegate_base_name(output, callback);
-    emit!(output, "Cb");
+pub fn emit_callback_wrapper_name(writer: &mut IndentedWriter, callback: &Function) {
+    emit_delegate_base_name(writer, callback);
+    emit!(writer, "Cb");
 }
 
-pub fn emit_const(output: &mut IndentedOutput, name: &str, item: &Const) {
-    emit!(output, "public ");
+pub fn emit_const(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Const) {
+    emit!(writer, "public ");
 
     match item.value {
         ConstValue::Array(..) |
-        ConstValue::Struct(..) => emit!(output, "static readonly "),
-        _ => emit!(output, "const "),
+        ConstValue::Struct(..) => emit!(writer, "static readonly "),
+        _ => emit!(writer, "const "),
     }
 
-    emit_type(output, &item.ty);
-    emit!(output, " {} = ", name.to_screaming_snake_case());
-    emit_const_value(output, Some(&item.ty), &item.value);
-    emit!(output, ";\n");
+    emit_type(writer, context, &item.ty, PointerMode::Opaque);
+    emit!(writer, " {} = ", name.to_screaming_snake_case());
+    emit_const_value(writer, context, Some(&item.ty), &item.value);
+    emit!(writer, ";\n");
 }
 
-pub fn emit_enum(output: &mut IndentedOutput, name: &str, item: &Enum) {
-    emit!(output, "public enum {} {{\n", name);
-    output.indent();
+pub fn emit_enum(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Enum) {
+    emit!(writer, "public enum {} {{\n", name);
+    writer.indent();
 
     for variant in &item.variants {
-        emit!(output, "{}", variant.docs);
+        emit_docs(writer, context, &variant.docs);
 
         if let Some(value) = variant.value {
-            emit!(output, "{} = {},\n", variant.name, value);
+            emit!(writer, "{} = {},\n", variant.name, value);
         } else {
-            emit!(output, "{},\n", variant.name);
+            emit!(writer, "{},\n", variant.name);
         }
     }
 
-    output.unindent();
-    emit!(output, "}}\n\n");
+    writer.unindent();
+    emit!(writer, "}}\n\n");
 }
 
-pub fn emit_struct(output: &mut IndentedOutput, context: &Context, name: &str, item: &Struct) {
-    emit!(output, "[StructLayout(LayoutKind.Sequential)]\n");
-    emit!(output, "public class {} {{\n", name);
-    output.indent();
+pub fn emit_struct(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Struct) {
+    emit!(writer, "public struct {}", name);
+    emit!(writer, " {{\n");
+    writer.indent();
 
     for field in &item.fields {
-        emit!(output, "{}", field.docs);
-        emit_struct_field(output, context, "public", &field.ty, &field.name);
+        emit_docs(writer, context, &field.docs);
+        emit_struct_field(writer, context, &field.ty, &field.name);
     }
 
-    output.unindent();
-    emit!(output, "}}\n\n");
+    writer.unindent();
+    emit!(writer, "}}\n\n");
 }
 
-pub fn emit_opaque_type(output: &mut IndentedOutput, name: &str) {
-    emit!(output, "[StructLayout(LayoutKind.Sequential)]\n");
-    emit!(output, "public struct {} {{\n", name);
-    output.indent();
-    emit!(output, "private IntPtr value;\n");
-    output.unindent();
-    emit!(output, "}}\n\n");
+pub fn emit_opaque_type(writer: &mut IndentedWriter, name: &str) {
+    emit!(writer, "public struct {} {{\n", name);
+    writer.indent();
+    emit!(writer, "private IntPtr _value;\n");
+    writer.unindent();
+    emit!(writer, "}}\n\n");
 }
 
-pub fn emit_utilities(
-    output: &mut IndentedOutput,
-    using_decls: &BTreeSet<String>,
-    namespace: &str,
+pub fn emit_utilities(writer: &mut IndentedWriter, context: &Context) {
+    let content = include_str!("../../resources/csharp/Utils.cs.template");
+    let content = content.replace("@Namespace", &context.namespace);
+    let content = content.replace("@Class", &context.utils_class_name);
+
+    emit!(writer, "{}", content);
+}
+
+pub fn emit_docs(writer: &mut IndentedWriter, context: &Context, docs: &str) {
+    if context.preserve_comments {
+        emit!(writer, "{}", docs);
+    }
+}
+
+pub fn emit_wrapper_function_decl(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    modifiers: &str,
+    name: &str,
+    fun: &Function,
 ) {
-    emit_using_decls(output, using_decls);
-
-    if !namespace.is_empty() {
-        emit!(output, "namespace {} {{\n", namespace);
-        output.indent();
+    if !modifiers.is_empty() {
+        emit!(writer, "{} ", modifiers);
     }
 
-    emit!(
-        output,
-        "{}",
-        include_str!("../../resources/csharp/Utilities.cs")
-    );
-
-    if !namespace.is_empty() {
-        output.unindent();
-        emit!(output, "}}\n");
+    if let Some(callback) = extract_first_callback(&fun.inputs) {
+        emit_task(writer, context, &callback.inputs);
+    } else {
+        emit_type(writer, context, &fun.output, PointerMode::Ref);
     }
+
+    emit!(writer, " {}(", name.to_pascal_case());
+    emit_wrapper_function_params(writer, context, &fun.inputs, true);
+    emit!(writer, ")");
 }
 
-fn emit_function_wrapper(output: &mut IndentedOutput, name: &str, fun: &Function) {
-    let callback = fun.inputs.last().and_then(
-        |&(_, ref ty)| extract_callback(ty),
-    );
+fn emit_wrapper_function(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    name: &str,
+    fun: &Function,
+) {
+    let callback = extract_first_callback(&fun.inputs);
 
-    emit!(output, "public static ");
-
-    if let Some(callback) = callback {
-        emit_task(output, &callback.inputs);
-    } else {
-        emit_type(output, &fun.output);
-    }
-
-    emit!(output, " {}(", name.to_pascal_case());
-    emit_managed_function_params(output, &fun.inputs, true);
-    emit!(output, ") {{\n");
-    output.indent();
+    emit_wrapper_function_decl(writer, context, "public", name, fun);
+    emit!(writer, " {{\n");
+    writer.indent();
 
     if let Some(callback) = callback {
-        emit!(output, "var (task, userData) = Utilities.PrepareTask");
-        emit_task_generic_args(output, &callback.inputs);
-        emit!(output, "();\n");
+        emit!(
+            writer,
+            "var (task, userData) = {}.PrepareTask",
+            &context.utils_class_name
+        );
+        emit_task_generic_args(writer, context, &callback.inputs);
+        emit!(writer, "();\n");
     } else {
         match fun.output {
             Type::Unit => (),
-            _ => emit!(output, "return "),
+            _ => emit!(writer, "return "),
         }
     }
 
-    emit!(output, "{}(", extern_function_name(name));
+    emit!(writer, "{}(", extern_function_name(name));
 
     for (index, &(ref name, ref ty)) in fun.inputs.iter().enumerate() {
         if index > 0 {
-            emit!(output, ", ");
+            emit!(writer, ", ");
         }
 
         if let Some(callback) = extract_callback(ty) {
-            emit!(output, "On");
-            emit_callback_wrapper_name(output, &callback);
-        } else if let Type::Array(_, ArraySize::Dynamic) = *ty {
-            let name = name.to_camel_case();
-            emit!(output, "{}, (ulong) {}.Length", name, name);
+            emit!(writer, "On");
+            emit_callback_wrapper_name(writer, &callback);
         } else {
-            emit!(output, "{}", name.to_camel_case());
+            let name = param_name(name, index);
+
+            if let Type::Array(_, ArraySize::Dynamic) = *ty {
+                emit!(writer, "{}, (ulong) {}.Length", name, name)
+            } else if let Type::Pointer(ref ty) = *ty {
+                emit_pointer_use(
+                    writer,
+                    context,
+                    &**ty,
+                    &name.to_camel_case(),
+                    PointerMode::Ref,
+                )
+            } else {
+                emit!(writer, "{}", name)
+            }
         }
     }
 
-    emit!(output, ");\n");
+    emit!(writer, ");\n");
 
     if callback.is_some() {
-        emit!(output, "return task;\n");
+        emit!(writer, "return task;\n");
     }
 
-    output.unindent();
-    emit!(output, "}}\n\n");
+    writer.unindent();
+    emit!(writer, "}}\n\n");
 }
 
 fn emit_function_extern_decl(
-    output: &mut IndentedOutput,
+    writer: &mut IndentedWriter,
     context: &Context,
     native_name: &str,
     fun: &Function,
@@ -226,15 +241,15 @@ fn emit_function_extern_decl(
     let name = extern_function_name(native_name);
 
     emit!(
-        output,
+        writer,
         "[DllImport(DLL_NAME, EntryPoint = \"{}\")]\n",
         native_name
     );
-    emit!(output, "internal static extern ");
-    emit_type(output, &fun.output);
-    emit!(output, " {}(", name);
-    emit_native_function_params(output, context, &fun.inputs, false);
-    emit!(output, ");\n\n");
+    emit!(writer, "internal static extern ");
+    emit_type(writer, context, &fun.output, PointerMode::Ref);
+    emit!(writer, " {}(", name);
+    emit_native_function_params(writer, context, &fun.inputs);
+    emit!(writer, ");\n\n");
 }
 
 fn extern_function_name(name: &str) -> String {
@@ -243,98 +258,106 @@ fn extern_function_name(name: &str) -> String {
     name
 }
 
-fn emit_task(output: &mut IndentedOutput, params: &[(String, Type)]) {
-    emit!(output, "Task");
-    emit_task_generic_args(output, params);
+fn emit_task(writer: &mut IndentedWriter, context: &Context, params: &[(String, Type)]) {
+    emit!(writer, "Task");
+    emit_task_generic_args(writer, context, params);
 }
 
-fn emit_task_generic_args(output: &mut IndentedOutput, params: &[(String, Type)]) {
+fn emit_task_generic_args(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    params: &[(String, Type)],
+) {
     // Nore: assuming here the first param is user_data and the second is result.
 
     if params.len() <= 2 {
         return;
     }
 
-    emit!(output, "<");
+    emit!(writer, "<");
 
     if params.len() > 3 {
-        emit!(output, "(");
+        emit!(writer, "(");
     }
 
     for (index, &(_, ref ty)) in params[2..].into_iter().enumerate() {
         if index > 0 {
-            emit!(output, ", ");
+            emit!(writer, ", ");
         }
 
-        emit_type(output, ty);
+        emit_type(writer, context, ty, PointerMode::Deref);
     }
 
     if params.len() > 3 {
-        emit!(output, ")");
+        emit!(writer, ")");
     }
 
-    emit!(output, ">");
+    emit!(writer, ">");
 }
 
-fn emit_const_value(output: &mut IndentedOutput, ty: Option<&Type>, value: &ConstValue) {
+fn emit_const_value(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    ty: Option<&Type>,
+    value: &ConstValue,
+) {
     match *value {
-        ConstValue::Bool(true) => emit!(output, "true"),
-        ConstValue::Bool(false) => emit!(output, "false"),
-        ConstValue::Char(value) => emit!(output, "{:?}", value),
-        ConstValue::Int(value) => emit!(output, "{}", value),
-        ConstValue::Float(ref value) => emit!(output, "{}", value),
-        ConstValue::String(ref value) => emit!(output, "{:?}", value),
+        ConstValue::Bool(true) => emit!(writer, "true"),
+        ConstValue::Bool(false) => emit!(writer, "false"),
+        ConstValue::Char(value) => emit!(writer, "{:?}", value),
+        ConstValue::Int(value) => emit!(writer, "{}", value),
+        ConstValue::Float(ref value) => emit!(writer, "{}", value),
+        ConstValue::String(ref value) => emit!(writer, "{:?}", value),
         ConstValue::Array(ref elements) => {
             if let Some(&Type::Array(ref ty, ..)) = ty {
-                emit!(output, "new ");
-                emit_type(output, ty);
-                emit!(output, "[] ");
+                emit!(writer, "new ");
+                emit_type(writer, context, ty, PointerMode::Opaque);
+                emit!(writer, "[] ");
             }
 
-            emit!(output, "{{ ");
+            emit!(writer, "{{ ");
 
             for (index, element) in elements.iter().enumerate() {
                 if index > 0 {
-                    emit!(output, ", ");
+                    emit!(writer, ", ");
                 }
 
-                emit_const_value(output, None, element);
+                emit_const_value(writer, context, None, element);
             }
 
-            emit!(output, " }}");
+            emit!(writer, " }}");
         }
         ConstValue::Struct(ref name, ref fields) => {
-            emit!(output, "new {} {{ ", name);
+            emit!(writer, "new {} {{ ", name);
 
             for (index, (name, value)) in fields.into_iter().enumerate() {
                 if index > 0 {
-                    emit!(output, ", ");
+                    emit!(writer, ", ");
                 }
 
-                emit!(output, "{} = ", name.to_camel_case());
-                emit_const_value(output, None, value);
+                emit!(writer, "{} = ", name.to_camel_case());
+                emit_const_value(writer, context, None, value);
             }
 
-            emit!(output, " }}");
+            emit!(writer, " }}");
         }
     }
 }
 
-fn emit_struct_field(
-    output: &mut IndentedOutput,
-    context: &Context,
-    access: &str,
-    ty: &Type,
-    name: &str,
-) {
-    emit_marshal_as(output, context, ty, None, "\n");
-    emit!(output, "{} ", access);
-    emit_type(output, ty);
-    emit!(output, " {};\n", name);
+fn emit_const_use(writer: &mut IndentedWriter, context: &Context, name: &str) {
+    emit!(writer, "{}.{}", context.consts_class_name, name);
 }
 
-fn emit_managed_function_params(
-    output: &mut IndentedOutput,
+fn emit_struct_field(writer: &mut IndentedWriter, context: &Context, ty: &Type, name: &str) {
+    emit_marshal_as(writer, context, ty, None, "\n");
+    emit!(writer, "public ");
+    emit_type(writer, context, ty, PointerMode::Opaque);
+    emit!(writer, " {};\n", name.to_pascal_case());
+}
+
+fn emit_wrapper_function_params(
+    writer: &mut IndentedWriter,
+    context: &Context,
     params: &[(String, Type)],
     skip_user_data: bool,
 ) {
@@ -351,54 +374,75 @@ fn emit_managed_function_params(
         }
 
         if index > 0 {
-            emit!(output, ", ");
+            emit!(writer, ", ");
         }
 
-        emit_type(output, ty);
+        emit_type(writer, context, ty, PointerMode::Ref);
         if name.is_empty() {
-            emit!(output, " arg{}", index);
+            emit!(writer, " arg{}", index);
         } else {
-            emit!(output, " {}", name.to_camel_case());
+            emit!(writer, " {}", name.to_camel_case());
         }
 
         index += 1;
     }
-
 }
 
 fn emit_native_function_params(
-    output: &mut IndentedOutput,
+    writer: &mut IndentedWriter,
     context: &Context,
     params: &[(String, Type)],
-    anonymize: bool,
 ) {
     let mut index = 0;
     for &(ref name, ref ty) in params {
         if index > 0 {
-            emit!(output, ", ");
+            emit!(writer, ", ");
         }
 
-        emit_marshal_as(output, context, ty, Some(index), " ");
+        emit_marshal_as(writer, context, ty, Some(index), " ");
 
         if let Some(callback) = extract_callback(ty) {
-            emit_callback_wrapper_name(output, &callback);
+            emit_callback_wrapper_name(writer, &callback);
         } else {
-            emit_type(output, ty);
+            emit_type(writer, context, ty, PointerMode::Ref);
         }
 
-        let name = param_name(name, index, anonymize);
-        emit!(output, " {}", name);
+        let name = param_name(name, index);
+        emit!(writer, " {}", name);
 
         if let Type::Array(_, ArraySize::Dynamic) = *ty {
-            emit!(output, ", ulong {}Len", name);
+            emit!(writer, ", ulong {}Len", name);
         }
 
         index += 1;
     }
 }
 
-fn param_name(name: &str, index: usize, anon: bool) -> String {
-    if anon || name.is_empty() {
+fn emit_callback_params(writer: &mut IndentedWriter, context: &Context, params: &[(String, Type)]) {
+    for (index, &(ref name, ref ty)) in params.into_iter().enumerate() {
+        if index > 0 {
+            emit!(writer, ", ");
+        }
+
+        let name = param_name(name, index);
+
+        match *ty {
+            Type::Array(_, ArraySize::Dynamic) => {
+                emit!(writer, "IntPtr {}Ptr, ulong {}Len", name, name);
+            }
+            Type::Array(_, _) => {
+                emit!(writer, "IntPtr {}Ptr", name);
+            }
+            _ => {
+                emit_type(writer, context, ty, PointerMode::Ref);
+                emit!(writer, " {}", name);
+            }
+        }
+    }
+}
+
+fn param_name(name: &str, index: usize) -> String {
+    if name.is_empty() {
         format!("arg{}", index)
     } else {
         name.to_camel_case()
@@ -406,135 +450,200 @@ fn param_name(name: &str, index: usize, anon: bool) -> String {
 }
 
 fn emit_marshal_as(
-    output: &mut IndentedOutput,
+    writer: &mut IndentedWriter,
     context: &Context,
     ty: &Type,
     index: Option<usize>,
     append: &str,
 ) {
     if let Some(unmanaged) = unmanaged_type(ty) {
-        emit!(output, "[MarshalAs(UnmanagedType.{}", unmanaged);
+        emit!(writer, "[MarshalAs(UnmanagedType.{}", unmanaged);
 
         if let Type::Array(ref ty, ref size) = *ty {
             if let Some(unmanaged) = unmanaged_type(ty) {
-                emit!(output, ", ArraySubType = UnmanagedType.{}", unmanaged);
+                emit!(writer, ", ArraySubType = UnmanagedType.{}", unmanaged);
             }
 
             match *size {
-                ArraySize::Lit(value) => emit!(output, ", SizeConst = {}", value),
+                ArraySize::Lit(value) => emit!(writer, ", SizeConst = {}", value),
                 ArraySize::Const(ref name) => {
-                    emit!(
-                        output,
-                        ", SizeConst = (int) {}.{}",
-                        context.class_name,
-                        name
-                    )
+                    emit!(writer, ", SizeConst = (int) ");
+                    emit_const_use(writer, context, name);
                 }
                 ArraySize::Dynamic => {
                     if let Some(index) = index {
-                        emit!(output, ", SizeParamIndex = {}", index + 1)
+                        emit!(writer, ", SizeParamIndex = {}", index + 1)
                     }
                 }
             }
         }
 
-        emit!(output, ")]{}", append);
-    }
-}
-
-fn emit_type(output: &mut IndentedOutput, ty: &Type) {
-    match *ty {
-        Type::Unit => emit!(output, "void"),
-        Type::Bool => emit!(output, "bool"),
-        Type::CChar => emit!(output, "sbyte"),
-        Type::Char => emit!(output, "char"),
-        Type::F32 => emit!(output, "float"),
-        Type::F64 => emit!(output, "double"),
-        Type::I8 => emit!(output, "sbyte"),
-        Type::I16 => emit!(output, "short"),
-        Type::I32 => emit!(output, "int"),
-        Type::I64 => emit!(output, "long"),
-        Type::ISize => emit!(output, "long"),
-        Type::U8 => emit!(output, "byte"),
-        Type::U16 => emit!(output, "ushort"),
-        Type::U32 => emit!(output, "uint"),
-        Type::U64 => emit!(output, "ulong"),
-        Type::USize => emit!(output, "ulong"),
-        Type::String => emit!(output, "String"),
-        Type::Pointer(ref ty) => {
-            match **ty {
-                // Pointer to an user type => object reference
-                Type::User(ref name) => emit!(output, "{}", name),
-                _ => emit!(output, "IntPtr"),
-            }
-        }
-        Type::Array(ref ty, ..) => {
-            emit_type(output, ty);
-            emit!(output, "[]")
-        }
-        Type::Function(..) => unimplemented!(),
-        Type::User(ref name) => emit!(output, "{}", name),
-    }
-}
-
-fn emit_sanitized_type_name(output: &mut IndentedOutput, ty: &Type) {
-    match *ty {
-        Type::Unit => emit!(output, "Void"),
-        Type::Bool => emit!(output, "Bool"),
-        Type::Char => emit!(output, "Char"),
-        Type::F32 => emit!(output, "Float"),
-        Type::F64 => emit!(output, "Double"),
-        Type::I8 | Type::CChar => emit!(output, "SByte"),
-        Type::I16 => emit!(output, "Short"),
-        Type::I32 => emit!(output, "Int"),
-        Type::I64 | Type::ISize => emit!(output, "Long"),
-        Type::U8 => emit!(output, "Byte"),
-        Type::U16 => emit!(output, "UShort"),
-        Type::U32 => emit!(output, "UInt"),
-        Type::U64 | Type::USize => emit!(output, "ULong"),
-        Type::String => emit!(output, "String"),
-        Type::Pointer(ref ty) => emit_sanitized_type_name(output, ty),
-        Type::Array(ref ty, _) => {
-            emit!(output, "ArrayOf");
-            emit_sanitized_type_name(output, ty);
-        }
-        Type::User(ref name) => emit!(output, "{}", name),
-        _ => unimplemented!(),
-    }
-}
-
-fn emit_args(output: &mut IndentedOutput, args: &[(String, Type)], offset: usize) {
-    for (index, &(ref name, _)) in args.into_iter().enumerate() {
-        if index > 0 {
-            emit!(output, ", ");
-        }
-
-        if name.is_empty() {
-            emit!(output, "arg{}", offset + index);
-        } else {
-            emit!(output, "{}", name.to_camel_case());
-        }
-    }
-}
-
-fn emit_delegate_base_name(output: &mut IndentedOutput, fun: &Function) {
-    if fun.inputs.len() > 1 {
-        // Skip the user data param.
-        for &(_, ref ty) in &fun.inputs[1..] {
-            emit_sanitized_type_name(output, ty);
-        }
-    } else {
-        emit!(output, "None");
+        emit!(writer, ")]{}", append);
     }
 }
 
 fn unmanaged_type(ty: &Type) -> Option<&str> {
     match *ty {
-        Type::Bool => Some("Bool"),
+        Type::Bool => Some("U1"),
         // TODO: consider marshaling as "LPUTF8Str", is possible and useful.
         Type::String => Some("LPStr"),
         Type::Array(_, ArraySize::Dynamic) => Some("LPArray"),
         Type::Array(_, _) => Some("ByValArray"),
         _ => None,
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum PointerMode {
+    Opaque,
+    Ref,
+    Deref,
+}
+
+fn emit_type(writer: &mut IndentedWriter, context: &Context, ty: &Type, mode: PointerMode) {
+    match *ty {
+        Type::Unit => emit!(writer, "void"),
+        Type::Bool => emit!(writer, "bool"),
+        Type::CChar => emit!(writer, "sbyte"),
+        Type::Char => emit!(writer, "char"),
+        Type::F32 => emit!(writer, "float"),
+        Type::F64 => emit!(writer, "double"),
+        Type::I8 => emit!(writer, "sbyte"),
+        Type::I16 => emit!(writer, "short"),
+        Type::I32 => emit!(writer, "int"),
+        Type::I64 => emit!(writer, "long"),
+        Type::ISize => emit!(writer, "long"),
+        Type::U8 => emit!(writer, "byte"),
+        Type::U16 => emit!(writer, "ushort"),
+        Type::U32 => emit!(writer, "uint"),
+        Type::U64 => emit!(writer, "ulong"),
+        Type::USize => emit!(writer, "ulong"),
+        Type::String => emit!(writer, "String"),
+        Type::Pointer(ref ty) => {
+            if let Type::User(ref name) = **ty {
+                if context.opaque_types.contains(name) {
+                    emit!(writer, "{}", name)
+                } else {
+                    match mode {
+                        PointerMode::Opaque => emit!(writer, "IntPtr"),
+                        PointerMode::Ref => emit!(writer, "ref {}", name),
+                        PointerMode::Deref => emit!(writer, "{}", name),
+                    }
+                }
+            } else {
+                emit!(writer, "IntPtr")
+            }
+        }
+        Type::Array(ref ty, ..) => {
+            emit_type(writer, context, ty, mode);
+            emit!(writer, "[]")
+        }
+        Type::Function(..) => unimplemented!(),
+        Type::User(ref name) => emit!(writer, "{}", name),
+    }
+}
+
+fn emit_args(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    args: &[(String, Type)],
+    offset: usize,
+    mode: PointerMode,
+) {
+    for (index, &(ref name, ref ty)) in args.into_iter().enumerate() {
+        if index > 0 {
+            emit!(writer, ", ");
+        }
+
+        let name = param_name(name, offset + index);
+        match *ty {
+            Type::Array(ref ty, ref size) => {
+                emit_copy_utility_name(writer, context, ty);
+                emit!(writer, "({}Ptr, ", name);
+
+                match *size {
+                    ArraySize::Lit(value) => emit!(writer, "{}", value),
+                    ArraySize::Const(ref name) => emit_const_use(writer, context, name),
+                    ArraySize::Dynamic => emit!(writer, "{}Len", name),
+                }
+
+                emit!(writer, ")");
+            }
+            Type::Pointer(ref ty) => emit_pointer_use(writer, context, &**ty, &name, mode),
+            _ => emit!(writer, "{}", name),
+        }
+    }
+}
+
+fn emit_pointer_use(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    ty: &Type,
+    name: &str,
+    mode: PointerMode,
+) {
+    if let Type::User(ref pointee) = *ty {
+        if mode == PointerMode::Ref && !context.opaque_types.contains(pointee) {
+            emit!(writer, "ref {}", name);
+            return;
+        }
+    }
+
+    emit!(writer, "{}", name);
+}
+
+fn emit_delegate_base_name(writer: &mut IndentedWriter, fun: &Function) {
+    if fun.inputs.len() > 1 {
+        // Skip the user data param.
+        for &(_, ref ty) in &fun.inputs[1..] {
+            emit_delegate_base_part_name(writer, ty);
+        }
+    } else {
+        emit!(writer, "None");
+    }
+}
+
+fn emit_delegate_base_part_name(writer: &mut IndentedWriter, ty: &Type) {
+    match *ty {
+        Type::Unit => emit!(writer, "Void"),
+        Type::Bool => emit!(writer, "Bool"),
+        Type::Char => emit!(writer, "Char"),
+        Type::F32 => emit!(writer, "Float"),
+        Type::F64 => emit!(writer, "Double"),
+        Type::I8 | Type::CChar => emit!(writer, "SByte"),
+        Type::I16 => emit!(writer, "Short"),
+        Type::I32 => emit!(writer, "Int"),
+        Type::I64 | Type::ISize => emit!(writer, "Long"),
+        Type::U8 => emit!(writer, "Byte"),
+        Type::U16 => emit!(writer, "UShort"),
+        Type::U32 => emit!(writer, "UInt"),
+        Type::U64 | Type::USize => emit!(writer, "ULong"),
+        Type::String => emit!(writer, "String"),
+        Type::Pointer(ref ty) => emit_delegate_base_part_name(writer, ty),
+        Type::Array(ref ty, ref size) => {
+            emit_delegate_base_part_name(writer, ty);
+
+            match *size {
+                ArraySize::Lit(value) => emit!(writer, "Array{}", value),
+                ArraySize::Const(ref name) => emit!(writer, "Array{}", name.to_pascal_case()),
+                ArraySize::Dynamic => emit!(writer, "List"),
+            }
+        }
+        Type::User(ref name) => emit!(writer, "{}", name),
+        _ => unimplemented!(),
+    }
+}
+
+fn emit_copy_utility_name(writer: &mut IndentedWriter, context: &Context, ty: &Type) {
+    emit!(writer, "{}.CopyTo", context.utils_class_name);
+    match *ty {
+        Type::F32 => emit!(writer, "SingleArray"),
+        Type::F64 => emit!(writer, "DoubleArray"),
+        Type::I16 => emit!(writer, "Int16Array"),
+        Type::I32 => emit!(writer, "Int32Array"),
+        Type::I64 => emit!(writer, "Int64Array"),
+        Type::U8 => emit!(writer, "ByteArray"),
+        Type::User(ref name) => emit!(writer, "ObjectArray<{}>", name),
+        _ => panic!("cannot emit copy utility name for array of {:?}", ty),
     }
 }

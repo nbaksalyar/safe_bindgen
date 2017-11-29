@@ -2,8 +2,6 @@
 //! and the target language code.
 
 use common;
-use inflector::Inflector;
-use std::cmp;
 use std::collections::BTreeMap;
 use syntax::ast;
 use syntax::print::pprust;
@@ -96,6 +94,18 @@ pub struct EnumVariant {
     pub docs: String,
     pub name: String,
     pub value: Option<i64>,
+}
+
+impl Struct {
+    pub fn has_pointer_fields(&self) -> bool {
+        self.fields.iter().any(|field| if let Type::Pointer(_) =
+            field.ty
+        {
+            true
+        } else {
+            false
+        })
+    }
 }
 
 pub fn transform_type(input: &ast::Ty) -> Option<Type> {
@@ -212,7 +222,7 @@ pub fn transform_struct(fields: &[ast::StructField]) -> Option<Struct> {
         .into_iter()
         .map(|field| {
             let (_, docs) = common::parse_attr(&field.attrs, |_| true, retrieve_docstring);
-            let name = field.ident.unwrap().name.as_str().to_camel_case();
+            let name = field.ident.unwrap().name.as_str().to_string();
             let ty = try_opt!(transform_type(&field.ty));
 
             Some(StructField { docs, name, ty })
@@ -238,6 +248,13 @@ pub fn extract_callbacks(inputs: &[(String, Type)]) -> Vec<&Function> {
         .into_iter()
         .filter_map(|&(_, ref ty)| extract_callback(ty))
         .collect()
+}
+
+pub fn extract_first_callback(inputs: &[(String, Type)]) -> Option<&Function> {
+    inputs
+        .into_iter()
+        .filter_map(|&(_, ref ty)| extract_callback(ty))
+        .next()
 }
 
 pub fn num_callbacks(inputs: &[(String, Type)]) -> usize {
@@ -380,20 +397,23 @@ fn transform_ptr_and_len_to_array(
         return None;
     }
 
-    // Matches "foo_ptr"/"foo_len" or "foo"/"foo_len" or "foo"/"len"
+    // Matches "foo_ptr"/"foo_len"
 
-    let index = if ptr_name.ends_with("_ptr") {
+    let ptr_index = if ptr_name.ends_with("_ptr") {
         ptr_name.len() - "_ptr".len()
     } else {
-        ptr_name.len()
+        return None;
     };
 
-    let base_name = &ptr_name[0..index];
-    let (len_name_0, len_name_1) = len_name.split_at(cmp::min(index, len_name.len()));
+    let len_index = if len_name.ends_with("_len") {
+        len_name.len() - "_len".len()
+    } else {
+        return None;
+    };
 
-    if (len_name_0 == base_name && len_name_1 == "_len") || len_name == "len" {
+    if ptr_name[0..ptr_index] == len_name[0..len_index] {
         Some((
-            base_name.to_string(),
+            ptr_name[0..ptr_index].to_string(),
             Type::Array(Box::new(elem_ty.clone()), ArraySize::Dynamic),
         ))
     } else {

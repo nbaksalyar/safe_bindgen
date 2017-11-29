@@ -9,9 +9,8 @@ use self::intermediate::*;
 use Error;
 use Level;
 use common::{self, Lang, Outputs};
-use inflector::Inflector;
-use output::IndentedOutput;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use output::IndentedWriter;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::btree_map::Entry;
 use std::fmt::{Display, Write};
 use std::mem;
@@ -22,15 +21,8 @@ use syntax::print::pprust;
 const INDENT_WIDTH: usize = 4;
 
 pub struct LangCSharp {
-    using_decls: BTreeSet<String>,
-    namespace: String,
-    opaque_types: HashSet<String>,
-    custom_decls: Vec<String>,
-    ignored_functions: HashSet<String>,
-    extract_comments: bool,
-
+    custom_consts: Vec<String>,
     context: Context,
-
     consts: Vec<Snippet<Const>>,
     enums: Vec<Snippet<Enum>>,
     structs: Vec<Snippet<Struct>>,
@@ -39,18 +31,30 @@ pub struct LangCSharp {
     aliases: HashMap<String, Type>,
 }
 
+pub struct Context {
+    lib_name: String,
+    namespace: String,
+    class_name: String,
+    consts_class_name: String,
+    types_file_name: String,
+    utils_class_name: String,
+    preserve_comments: bool,
+    opaque_types: HashSet<String>,
+}
+
 impl LangCSharp {
     pub fn new() -> Self {
         LangCSharp {
-            using_decls: default_using_decls(),
-            namespace: String::new(),
-            opaque_types: Default::default(),
-            custom_decls: Vec::new(),
-            ignored_functions: Default::default(),
-            extract_comments: false,
+            custom_consts: Vec::new(),
             context: Context {
                 lib_name: "backend".to_string(),
+                namespace: "Backend".to_string(),
                 class_name: "Backend".to_string(),
+                consts_class_name: "Constants".to_string(),
+                types_file_name: "Types".to_string(),
+                utils_class_name: "Utils".to_string(),
+                preserve_comments: false,
+                opaque_types: Default::default(),
             },
             consts: Vec::new(),
             enums: Vec::new(),
@@ -62,9 +66,12 @@ impl LangCSharp {
 
     /// Set the name of the native library. This also sets the class name.
     pub fn set_lib_name<T: Into<String>>(&mut self, name: T) {
-        let name = name.into();
-        self.context.class_name = name.to_pascal_case();
-        self.context.lib_name = name;
+        self.context.lib_name = name.into();
+    }
+
+    /// Set the namespace to put all the generated code in.
+    pub fn set_namespace<T: Into<String>>(&mut self, namespace: T) {
+        self.context.namespace = namespace.into();
     }
 
     /// Set the name of the static class containing all transformed functions and
@@ -73,34 +80,40 @@ impl LangCSharp {
         self.context.class_name = name.into();
     }
 
-    /// Add additional `using` declaration.
-    pub fn add_using_decl<T: Into<String>>(&mut self, decl: T) {
-        let _ = self.using_decls.insert(decl.into());
-    }
-
-    /// Set the namespace to put all the generated code in.
-    pub fn set_namespace<T: Into<String>>(&mut self, namespace: T) {
-        self.namespace = namespace.into();
-    }
-
     /// Add definition of opaque type (type represented by an opaque pointer).
     pub fn add_opaque_type<T: Into<String>>(&mut self, name: T) {
-        let _ = self.opaque_types.insert(name.into());
-    }
-
-    /// Add additional declaration.
-    pub fn add_custom_decl<T: Into<String>>(&mut self, decl: T) {
-        self.custom_decls.push(decl.into());
+        let _ = self.context.opaque_types.insert(name.into());
     }
 
     /// Add constant definition.
     pub fn add_const<T: Display>(&mut self, ty: &str, name: &str, value: T) {
-        self.add_custom_decl(format!("public const {} {} = {};", ty, name, value));
+        self.custom_consts.push(format!(
+            "public const {} {} = {};",
+            ty,
+            name,
+            value
+        ));
     }
 
-    /// Ignore the function with the given name when transforming to the target language.
-    pub fn ignore_function<T: Into<String>>(&mut self, name: T) {
-        let _ = self.ignored_functions.insert(name.into());
+    /// Set the name of the class containing all constants.
+    pub fn set_consts_class_name<T: Into<String>>(&mut self, name: T) {
+        self.context.consts_class_name = name.into();
+    }
+
+    /// Set the name of the file containing types (structs, enums, ...).
+    pub fn set_types_file_name<T: Into<String>>(&mut self, name: T) {
+        let mut name = name.into();
+        if name.ends_with(".cs") {
+            let len = name.len();
+            name.truncate(len - 3);
+        }
+
+        self.context.types_file_name = name;
+    }
+
+    /// Set the name of the utils class.
+    pub fn set_utils_class_name<T: Into<String>>(&mut self, name: T) {
+        self.context.utils_class_name = name.into();
     }
 
     fn resolve_aliases(&mut self) {
@@ -109,6 +122,10 @@ impl LangCSharp {
         }
 
         for snippet in &mut self.structs {
+            if let Some(&Type::User(ref name)) = lookup_alias(&self.aliases, &snippet.name) {
+                snippet.name = name.clone();
+            }
+
             for field in &mut snippet.item.fields {
                 resolve_alias(&self.aliases, &mut field.ty);
             }
@@ -151,11 +168,7 @@ impl Lang for LangCSharp {
     }
 
     fn parse_const(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
-        let docs = if self.extract_comments {
-            common::parse_attr(&item.attrs, |_| true, retrieve_docstring).1
-        } else {
-            String::new()
-        };
+        let docs = common::parse_attr(&item.attrs, |_| true, retrieve_docstring).1;
 
         if let ast::ItemKind::Const(ref ty, ref expr) = item.node {
             let name = item.ident.name.as_str().to_string();
@@ -177,11 +190,8 @@ impl Lang for LangCSharp {
     }
 
     fn parse_enum(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
-        let (repr_c, docs) = if self.extract_comments {
-            common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring)
-        } else {
-            common::parse_attr(&item.attrs, common::check_repr_c, |_| None)
-        };
+        let (repr_c, docs) =
+            common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring);
 
         // If it's not #[repr(C)] ignore it.
         if !repr_c {
@@ -213,11 +223,8 @@ impl Lang for LangCSharp {
     }
 
     fn parse_struct(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
-        let (repr_c, docs) = if self.extract_comments {
-            common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring)
-        } else {
-            common::parse_attr(&item.attrs, common::check_repr_c, |_| None)
-        };
+        let (repr_c, docs) =
+            common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring);
 
         // If it's not #[repr(C)] ignore it.
         if !repr_c {
@@ -251,6 +258,13 @@ impl Lang for LangCSharp {
             })?;
             let name = name.to_string();
 
+            if item.has_pointer_fields() {
+                let _ = self.aliases.insert(
+                    name.clone(),
+                    Type::User(format!("{}Native", name)),
+                );
+            }
+
             self.structs.push(Snippet { docs, name, item });
         }
 
@@ -259,16 +273,8 @@ impl Lang for LangCSharp {
 
     fn parse_fn(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         let name = item.ident.name.as_str();
-
-        if self.ignored_functions.contains(&*name) {
-            return Ok(());
-        }
-
-        let (no_mangle, docs) = if self.extract_comments {
-            common::parse_attr(&item.attrs, common::check_no_mangle, retrieve_docstring)
-        } else {
-            common::parse_attr(&item.attrs, common::check_no_mangle, |_| None)
-        };
+        let (no_mangle, docs) =
+            common::parse_attr(&item.attrs, common::check_no_mangle, retrieve_docstring);
 
         // Ignore function without #[no_mangle].
         if !no_mangle {
@@ -309,125 +315,201 @@ impl Lang for LangCSharp {
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
         self.resolve_aliases();
-        self.ignored_functions.clear();
 
-        let mut output = String::new();
+        if !self.functions.is_empty() {
+            // Functions
+            let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
-        {
-            let mut output = IndentedOutput::new(&mut output, INDENT_WIDTH);
+            emit!(writer, "using System;\n");
+            emit!(writer, "using System.Runtime.InteropServices;\n");
+            emit!(writer, "using System.Threading.Tasks;\n\n");
+            emit!(writer, "namespace {} {{\n", self.context.namespace);
+            writer.indent();
 
-            // Using declarations.
-            emit_using_decls(&mut output, &self.using_decls);
-            self.using_decls = default_using_decls();
+            emit!(
+                writer,
+                "public partial class {} : I{} {{\n",
+                self.context.class_name,
+                self.context.class_name
+            );
+            writer.indent();
 
-            if !self.namespace.is_empty() {
-                emit!(output, "namespace {} {{\n", self.namespace);
-                output.indent();
+            // Define constant with the native library name, to be used in
+            // the [DllImport] attributes.
+            emit!(writer, "#if __IOS__\n");
+            emit!(writer, "internal const String DLL_NAME = \"__Internal\";\n");
+            emit!(writer, "#else\n");
+            emit!(
+                writer,
+                "internal const String DLL_NAME = \"{}\";\n",
+                self.context.lib_name
+            );
+            emit!(writer, "#endif\n\n");
+
+            for snippet in &self.functions {
+                emit_docs(&mut writer, &self.context, &snippet.docs);
+                emit_function(&mut writer, &self.context, &snippet.name, &snippet.item);
             }
+
+            // Callback delegates and wrappers.
+            {
+                let callbacks = collect_callbacks(&self.functions);
+                if !callbacks.is_empty() {
+                    emit!(writer, "#region Callbacks\n");
+
+                    for (callback, single) in callbacks {
+                        emit_callback_delegate(&mut writer, &self.context, callback);
+
+                        if single {
+                            emit_callback_wrapper(&mut writer, &self.context, callback);
+                        }
+                    }
+
+                    emit!(writer, "#endregion\n\n");
+                }
+            }
+
+            writer.unindent();
+            emit!(writer, "}}\n");
+
+            writer.unindent();
+            emit!(writer, "}}\n");
+
+            outputs.insert(
+                PathBuf::from(format!("{}.cs", self.context.class_name)),
+                writer.into_inner(),
+            );
+
+            // Interface
+            let mut writer = IndentedWriter::new(INDENT_WIDTH);
+
+            emit!(writer, "using System;\n");
+            emit!(writer, "using System.Runtime.InteropServices;\n");
+            emit!(writer, "using System.Threading.Tasks;\n\n");
+            emit!(writer, "namespace {} {{\n", self.context.namespace);
+            writer.indent();
+
+            emit!(
+                writer,
+                "public partial interface I{} {{\n",
+                self.context.class_name
+            );
+            writer.indent();
+
+            for snippet in &self.functions {
+                if num_callbacks(&snippet.item.inputs) <= 1 {
+                    emit_wrapper_function_decl(
+                        &mut writer,
+                        &self.context,
+                        "",
+                        &snippet.name,
+                        &snippet.item,
+                    );
+                    emit!(writer, ";\n");
+                }
+            }
+
+            writer.unindent();
+            emit!(writer, "}}\n");
+
+            writer.unindent();
+            emit!(writer, "}}\n");
+
+            outputs.insert(
+                PathBuf::from(format!("I{}.cs", self.context.class_name)),
+                writer.into_inner(),
+            );
+
+            self.functions.clear();
+        }
+
+        // Constants
+        if !self.consts.is_empty() || !self.custom_consts.is_empty() {
+            let mut writer = IndentedWriter::new(INDENT_WIDTH);
+            emit!(writer, "using System;\n\n");
+            emit!(writer, "namespace {} {{\n", self.context.namespace);
+            writer.indent();
+
+            emit!(
+                writer,
+                "public static class {} {{\n",
+                self.context.consts_class_name
+            );
+            writer.indent();
+
+            for snippet in self.consts.drain(..) {
+                emit_docs(&mut writer, &self.context, &snippet.docs);
+                emit_const(&mut writer, &self.context, &snippet.name, &snippet.item);
+            }
+
+            if !self.custom_consts.is_empty() {
+                for decl in self.custom_consts.drain(..) {
+                    emit!(writer, "{}\n", decl);
+                }
+            }
+
+            writer.unindent();
+            emit!(writer, "}}\n");
+
+            writer.unindent();
+            emit!(writer, "}}\n");
+
+            outputs.insert(
+                PathBuf::from(format!("{}.cs", self.context.consts_class_name)),
+                writer.into_inner(),
+            );
+
+        }
+
+        // Types
+        if !self.enums.is_empty() || !self.structs.is_empty() ||
+            !self.context.opaque_types.is_empty()
+        {
+            let mut writer = IndentedWriter::new(INDENT_WIDTH);
+
+            emit!(writer, "using System;\n");
+            emit!(writer, "using System.Runtime.InteropServices;\n\n");
+
+            emit!(writer, "namespace {} {{\n", self.context.namespace);
+            writer.indent();
 
             // Enums
             for snippet in self.enums.drain(..) {
-                emit!(output, "{}", snippet.docs);
-                emit_enum(&mut output, &snippet.name, &snippet.item);
+                emit_docs(&mut writer, &self.context, &snippet.docs);
+                emit_enum(&mut writer, &self.context, &snippet.name, &snippet.item);
             }
 
             // Structs
             for snippet in self.structs.drain(..) {
-                emit!(output, "{}", snippet.docs);
-                emit_struct(&mut output, &self.context, &snippet.name, &snippet.item);
+                emit_docs(&mut writer, &self.context, &snippet.docs);
+                emit_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
             }
 
             // Opaque types.
-            for name in &self.opaque_types {
-                emit_opaque_type(&mut output, name);
-            }
-            self.opaque_types.clear();
-
-            if !self.functions.is_empty() || !self.consts.is_empty() {
-                emit!(output, "public class {} {{\n", self.context.class_name);
-                output.indent();
-
-                // Define constant with the native library name, to be used in
-                // the [DllImport] attributes.
-                emit!(output, "#if __IOS__\n");
-                emit!(output, "internal const String DLL_NAME = \"__Internal\";\n");
-                emit!(output, "#else\n");
-                emit!(
-                    output,
-                    "internal const String DLL_NAME = \"{}\";\n",
-                    self.context.lib_name
-                );
-                emit!(output, "#endif\n\n");
-
-                // Custom declarations.
-                if !self.custom_decls.is_empty() {
-                    emit!(output, "#region custom declarations\n");
-                    for decl in self.custom_decls.drain(..) {
-                        emit!(output, "{}\n", decl);
-                    }
-                    emit!(output, "#endregion\n\n");
-                }
-
-                // Consts
-                for snippet in &self.consts {
-                    emit!(output, "{}", snippet.docs);
-                    emit_const(&mut output, &snippet.name, &snippet.item);
-                }
-
-                if !self.consts.is_empty() {
-                    emit!(output, "\n");
-                    self.consts.clear();
-                }
-
-                // Functions
-                for snippet in &self.functions {
-                    emit!(output, "{}", snippet.docs);
-                    emit_function(&mut output, &self.context, &snippet.name, &snippet.item);
-                }
-
-                {
-                    for (callback, single) in collect_callbacks(&self.functions) {
-                        emit_callback_delegate(&mut output, callback);
-
-                        if single {
-                            emit_callback_wrapper(&mut output, callback);
-                        }
-                    }
-                }
-
-                self.functions.clear();
-
-                output.unindent();
-                emit!(output, "}}\n");
+            for name in self.context.opaque_types.drain() {
+                emit_opaque_type(&mut writer, &name);
             }
 
-            if !self.namespace.is_empty() {
-                output.unindent();
-                emit!(output, "}}\n");
-            }
+            writer.unindent();
+            emit!(writer, "}}\n");
+
+            outputs.insert(
+                PathBuf::from(format!("{}.cs", self.context.types_file_name)),
+                writer.into_inner(),
+            );
         }
-
-        outputs.insert(
-            PathBuf::from(format!("{}.cs", self.context.class_name)),
-            output,
-        );
 
         // Utilities
-        let mut output = String::new();
-        {
-            let mut output = IndentedOutput::new(&mut output, INDENT_WIDTH);
-            emit_utilities(&mut output, &self.using_decls, &self.namespace);
-        }
+        let mut writer = IndentedWriter::new(INDENT_WIDTH);
+        emit_utilities(&mut writer, &self.context);
 
-        outputs.insert(PathBuf::from("Utilities.cs"), output);
+        outputs.insert(
+            PathBuf::from(format!("{}.cs", self.context.utils_class_name)),
+            writer.into_inner(),
+        );
 
         Ok(())
     }
-}
-
-pub struct Context {
-    lib_name: String,
-    class_name: String,
 }
 
 fn resolve_alias(aliases: &HashMap<String, Type>, new_ty: &mut Type) {
@@ -470,14 +552,6 @@ fn lookup_alias<'a>(aliases: &'a HashMap<String, Type>, name: &str) -> Option<&'
     }
 }
 
-fn default_using_decls() -> BTreeSet<String> {
-    let mut result = BTreeSet::default();
-    let _ = result.insert("System".to_string());
-    let _ = result.insert("System.Runtime.InteropServices".to_string());
-    let _ = result.insert("System.Threading.Tasks".to_string());
-    result
-}
-
 fn collect_callbacks(functions: &[Snippet<Function>]) -> Vec<(&Function, bool)> {
     let mut stash = BTreeMap::new();
 
@@ -505,13 +579,9 @@ fn collect_callbacks(functions: &[Snippet<Function>]) -> Vec<(&Function, bool)> 
 }
 
 fn callback_wrapper_name(callback: &Function) -> String {
-    let mut output = String::new();
-    {
-        let mut output = IndentedOutput::new(&mut output, INDENT_WIDTH);
-        emit_callback_wrapper_name(&mut output, callback);
-    }
-
-    output
+    let mut writer = IndentedWriter::new(INDENT_WIDTH);
+    emit_callback_wrapper_name(&mut writer, callback);
+    writer.into_inner()
 }
 
 fn unsupported_generics_error(item: &ast::Item, name: &str) -> Error {

@@ -1,21 +1,25 @@
 use std::fmt::{self, Write};
 use std::ops::Deref;
 
-pub struct IndentedOutput<'a> {
-    inner: &'a mut String,
+pub struct IndentedWriter {
+    inner: String,
     indent: bool,
     indent_level: usize,
     indent_width: usize,
 }
 
-impl<'a> IndentedOutput<'a> {
-    pub fn new(inner: &'a mut String, width: usize) -> Self {
-        IndentedOutput {
-            inner: inner,
+impl IndentedWriter {
+    pub fn new(width: usize) -> Self {
+        IndentedWriter {
+            inner: String::new(),
             indent: true,
             indent_level: 0,
             indent_width: width,
         }
+    }
+
+    pub fn into_inner(self) -> String {
+        self.inner
     }
 
     pub fn indent(&mut self) {
@@ -35,7 +39,7 @@ impl<'a> IndentedOutput<'a> {
     }
 }
 
-impl<'a> Write for IndentedOutput<'a> {
+impl Write for IndentedWriter {
     fn write_str(&mut self, s: &str) -> Result<(), fmt::Error> {
         if s.is_empty() {
             return Ok(());
@@ -69,11 +73,11 @@ impl<'a> Write for IndentedOutput<'a> {
     }
 }
 
-impl<'a> Deref for IndentedOutput<'a> {
+impl Deref for IndentedWriter {
     type Target = String;
 
     fn deref(&self) -> &Self::Target {
-        self.inner
+        &self.inner
     }
 }
 
@@ -83,8 +87,7 @@ mod tests {
 
     #[test]
     fn smoke() {
-        let mut output = String::new();
-        let mut output = IndentedOutput::new(&mut output, 4);
+        let mut output = IndentedWriter::new(4);
 
         write!(output, "pub struct Foo {{\n").unwrap();
         output.indent();
@@ -100,8 +103,7 @@ mod tests {
 
     #[test]
     fn does_not_indent_empty_lines() {
-        let mut output = String::new();
-        let mut output = IndentedOutput::new(&mut output, 4);
+        let mut output = IndentedWriter::new(4);
         output.indent();
 
         write!(output, "foo\n\n\nbar").unwrap();
