@@ -12,11 +12,112 @@ macro_rules! emit {
     }
 }
 
-pub fn emit_function(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Function) {
-    if num_callbacks(&item.inputs) <= 1 {
-        emit_wrapper_function(writer, context, &name, item);
+pub fn emit_wrapper_function_decl(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    modifiers: &str,
+    name: &str,
+    fun: &Function,
+) {
+    if !modifiers.is_empty() {
+        emit!(writer, "{} ", modifiers);
     }
-    emit_function_extern_decl(writer, context, &name, item);
+
+    if let Some(callback) = extract_first_callback(&fun.inputs) {
+        emit_task(writer, context, &callback.inputs);
+    } else {
+        emit_type(writer, context, &fun.output, PointerMode::Ref);
+    }
+
+    emit!(writer, " {}(", name.to_pascal_case());
+    emit_wrapper_function_params(writer, context, &fun.inputs, true);
+    emit!(writer, ")");
+}
+
+pub fn emit_wrapper_function(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    name: &str,
+    fun: &Function,
+) {
+    let callback = extract_first_callback(&fun.inputs);
+
+    emit_wrapper_function_decl(writer, context, "public", name, fun);
+    emit!(writer, " {{\n");
+    writer.indent();
+
+    if let Some(callback) = callback {
+        emit!(
+            writer,
+            "var (task, userData) = {}.PrepareTask",
+            &context.utils_class_name
+        );
+        emit_task_generic_args(writer, context, &callback.inputs);
+        emit!(writer, "();\n");
+    } else {
+        match fun.output {
+            Type::Unit => (),
+            _ => emit!(writer, "return "),
+        }
+    }
+
+    emit!(writer, "{}(", extern_function_name(name));
+
+    for (index, &(ref name, ref ty)) in fun.inputs.iter().enumerate() {
+        if index > 0 {
+            emit!(writer, ", ");
+        }
+
+        if let Some(callback) = extract_callback(ty) {
+            emit!(writer, "On");
+            emit_callback_wrapper_name(writer, &callback);
+        } else {
+            let name = param_name(name, index);
+
+            if let Type::Array(_, ArraySize::Dynamic) = *ty {
+                emit!(writer, "{}, (ulong) {}.Length", name, name)
+            } else if let Type::Pointer(ref ty) = *ty {
+                emit_pointer_use(
+                    writer,
+                    context,
+                    &**ty,
+                    &name.to_camel_case(),
+                    PointerMode::Ref,
+                )
+            } else {
+                emit!(writer, "{}", name)
+            }
+        }
+    }
+
+    emit!(writer, ");\n");
+
+    if callback.is_some() {
+        emit!(writer, "return task;\n");
+    }
+
+    writer.unindent();
+    emit!(writer, "}}\n\n");
+}
+
+pub fn emit_function_extern_decl(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    native_name: &str,
+    fun: &Function,
+) {
+    let name = extern_function_name(native_name);
+
+    emit!(
+        writer,
+        "[DllImport(DLL_NAME, EntryPoint = \"{}\")]\n",
+        native_name
+    );
+    emit!(writer, "internal static extern ");
+    emit_type(writer, context, &fun.output, PointerMode::Ref);
+    emit!(writer, " {}(", name);
+    emit_native_function_params(writer, context, &fun.inputs);
+    emit!(writer, ");\n\n");
 }
 
 pub fn emit_callback_delegate(writer: &mut IndentedWriter, context: &Context, callback: &Function) {
@@ -144,113 +245,6 @@ pub fn emit_docs(writer: &mut IndentedWriter, context: &Context, docs: &str) {
     }
 }
 
-pub fn emit_wrapper_function_decl(
-    writer: &mut IndentedWriter,
-    context: &Context,
-    modifiers: &str,
-    name: &str,
-    fun: &Function,
-) {
-    if !modifiers.is_empty() {
-        emit!(writer, "{} ", modifiers);
-    }
-
-    if let Some(callback) = extract_first_callback(&fun.inputs) {
-        emit_task(writer, context, &callback.inputs);
-    } else {
-        emit_type(writer, context, &fun.output, PointerMode::Ref);
-    }
-
-    emit!(writer, " {}(", name.to_pascal_case());
-    emit_wrapper_function_params(writer, context, &fun.inputs, true);
-    emit!(writer, ")");
-}
-
-fn emit_wrapper_function(
-    writer: &mut IndentedWriter,
-    context: &Context,
-    name: &str,
-    fun: &Function,
-) {
-    let callback = extract_first_callback(&fun.inputs);
-
-    emit_wrapper_function_decl(writer, context, "public", name, fun);
-    emit!(writer, " {{\n");
-    writer.indent();
-
-    if let Some(callback) = callback {
-        emit!(
-            writer,
-            "var (task, userData) = {}.PrepareTask",
-            &context.utils_class_name
-        );
-        emit_task_generic_args(writer, context, &callback.inputs);
-        emit!(writer, "();\n");
-    } else {
-        match fun.output {
-            Type::Unit => (),
-            _ => emit!(writer, "return "),
-        }
-    }
-
-    emit!(writer, "{}(", extern_function_name(name));
-
-    for (index, &(ref name, ref ty)) in fun.inputs.iter().enumerate() {
-        if index > 0 {
-            emit!(writer, ", ");
-        }
-
-        if let Some(callback) = extract_callback(ty) {
-            emit!(writer, "On");
-            emit_callback_wrapper_name(writer, &callback);
-        } else {
-            let name = param_name(name, index);
-
-            if let Type::Array(_, ArraySize::Dynamic) = *ty {
-                emit!(writer, "{}, (ulong) {}.Length", name, name)
-            } else if let Type::Pointer(ref ty) = *ty {
-                emit_pointer_use(
-                    writer,
-                    context,
-                    &**ty,
-                    &name.to_camel_case(),
-                    PointerMode::Ref,
-                )
-            } else {
-                emit!(writer, "{}", name)
-            }
-        }
-    }
-
-    emit!(writer, ");\n");
-
-    if callback.is_some() {
-        emit!(writer, "return task;\n");
-    }
-
-    writer.unindent();
-    emit!(writer, "}}\n\n");
-}
-
-fn emit_function_extern_decl(
-    writer: &mut IndentedWriter,
-    context: &Context,
-    native_name: &str,
-    fun: &Function,
-) {
-    let name = extern_function_name(native_name);
-
-    emit!(
-        writer,
-        "[DllImport(DLL_NAME, EntryPoint = \"{}\")]\n",
-        native_name
-    );
-    emit!(writer, "internal static extern ");
-    emit_type(writer, context, &fun.output, PointerMode::Ref);
-    emit!(writer, " {}(", name);
-    emit_native_function_params(writer, context, &fun.inputs);
-    emit!(writer, ");\n\n");
-}
 
 fn extern_function_name(name: &str) -> String {
     let mut name = name.to_pascal_case();
@@ -520,18 +514,26 @@ fn emit_type(writer: &mut IndentedWriter, context: &Context, ty: &Type, mode: Po
         Type::USize => emit!(writer, "ulong"),
         Type::String => emit!(writer, "String"),
         Type::Pointer(ref ty) => {
-            if let Type::User(ref name) = **ty {
-                if context.opaque_types.contains(name) {
-                    emit!(writer, "{}", name)
-                } else {
-                    match mode {
-                        PointerMode::Opaque => emit!(writer, "IntPtr"),
-                        PointerMode::Ref => emit!(writer, "ref {}", name),
-                        PointerMode::Deref => emit!(writer, "{}", name),
+            match **ty {
+                Type::User(ref name) => {
+                    if context.opaque_types.contains(name) {
+                        emit!(writer, "{}", name)
+                    } else {
+                        match mode {
+                            PointerMode::Opaque => emit!(writer, "IntPtr"),
+                            PointerMode::Ref => emit!(writer, "ref {}", name),
+                            PointerMode::Deref => emit!(writer, "{}", name),
+                        }
                     }
                 }
-            } else {
-                emit!(writer, "IntPtr")
+                Type::Pointer(_) => {
+                    if mode == PointerMode::Ref {
+                        emit!(writer, "out IntPtr")
+                    } else {
+                        emit!(writer, "IntPtr")
+                    }
+                }
+                _ => emit!(writer, "IntPtr"),
             }
         }
         Type::Array(ref ty, ..) => {
@@ -582,14 +584,16 @@ fn emit_pointer_use(
     name: &str,
     mode: PointerMode,
 ) {
-    if let Type::User(ref pointee) = *ty {
-        if mode == PointerMode::Ref && !context.opaque_types.contains(pointee) {
+    match *ty {
+        Type::User(ref pointee)
+            if mode == PointerMode::Ref && !context.opaque_types.contains(pointee) => {
             emit!(writer, "ref {}", name);
-            return;
         }
+        Type::Pointer(_) if mode == PointerMode::Ref => {
+            emit!(writer, "out {}", name);
+        }
+        _ => emit!(writer, "{}", name),
     }
-
-    emit!(writer, "{}", name);
 }
 
 fn emit_delegate_base_name(writer: &mut IndentedWriter, fun: &Function) {

@@ -8,7 +8,7 @@ use self::emit::*;
 use self::intermediate::*;
 use Error;
 use Level;
-use common::{self, Lang, Outputs};
+use common::{self, FilterMode, Lang, Outputs};
 use output::IndentedWriter;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::btree_map::Entry;
@@ -21,13 +21,16 @@ use syntax::print::pprust;
 const INDENT_WIDTH: usize = 4;
 
 pub struct LangCSharp {
-    custom_consts: Vec<String>,
+    filter: HashSet<String>,
+    filter_mode: FilterMode,
+    wrapper_function_blacklist: HashSet<String>,
+    utils_enabled: bool,
     context: Context,
+    custom_consts: Vec<String>,
     consts: Vec<Snippet<Const>>,
     enums: Vec<Snippet<Enum>>,
     structs: Vec<Snippet<Struct>>,
     functions: Vec<Snippet<Function>>,
-
     aliases: HashMap<String, Type>,
 }
 
@@ -45,7 +48,10 @@ pub struct Context {
 impl LangCSharp {
     pub fn new() -> Self {
         LangCSharp {
-            custom_consts: Vec::new(),
+            filter_mode: FilterMode::Blacklist,
+            filter: Default::default(),
+            wrapper_function_blacklist: Default::default(),
+            utils_enabled: true,
             context: Context {
                 lib_name: "backend".to_string(),
                 namespace: "Backend".to_string(),
@@ -56,6 +62,7 @@ impl LangCSharp {
                 preserve_comments: false,
                 opaque_types: Default::default(),
             },
+            custom_consts: Vec::new(),
             consts: Vec::new(),
             enums: Vec::new(),
             structs: Vec::new(),
@@ -85,16 +92,6 @@ impl LangCSharp {
         let _ = self.context.opaque_types.insert(name.into());
     }
 
-    /// Add constant definition.
-    pub fn add_const<T: Display>(&mut self, ty: &str, name: &str, value: T) {
-        self.custom_consts.push(format!(
-            "public const {} {} = {};",
-            ty,
-            name,
-            value
-        ));
-    }
-
     /// Set the name of the class containing all constants.
     pub fn set_consts_class_name<T: Into<String>>(&mut self, name: T) {
         self.context.consts_class_name = name.into();
@@ -114,6 +111,44 @@ impl LangCSharp {
     /// Set the name of the utils class.
     pub fn set_utils_class_name<T: Into<String>>(&mut self, name: T) {
         self.context.utils_class_name = name.into();
+    }
+
+    /// Enable/disable generation of the utils class.
+    pub fn set_utils_enabled(&mut self, enabled: bool) {
+        self.utils_enabled = enabled;
+    }
+
+    /// Add constant definition.
+    pub fn add_const<T: Display>(&mut self, ty: &str, name: &str, value: T) {
+        self.custom_consts.push(format!(
+            "public const {} {} = {};",
+            ty,
+            name,
+            value
+        ));
+    }
+
+    /// Clears the current filter and sets the filter mode.
+    pub fn reset_filter(&mut self, filter_mode: FilterMode) {
+        self.filter.clear();
+        self.filter_mode = filter_mode;
+    }
+
+    /// Add the identifier to the filter.
+    /// If the filter mode is `Blacklist` (the default), the identifiers in the
+    /// filter are ignored.
+    /// If it is `Whitelist`, the identifiers not in the filter are ignored.
+    pub fn filter<T: Into<String>>(&mut self, ident: T) {
+        let _ = self.filter.insert(ident.into());
+    }
+
+    /// Do not generate wrapper function for the given function.
+    pub fn blacklist_wrapper_function<T: Into<String>>(&mut self, ident: T) {
+        let _ = self.wrapper_function_blacklist.insert(ident.into());
+    }
+
+    pub fn reset_wrapper_function_blacklist(&mut self) {
+        self.wrapper_function_blacklist.clear();
     }
 
     fn resolve_aliases(&mut self) {
@@ -139,10 +174,26 @@ impl LangCSharp {
             }
         }
     }
+
+    fn is_ignored(&self, ident: &str) -> bool {
+        match self.filter_mode {
+            FilterMode::Blacklist => self.filter.contains(ident),
+            FilterMode::Whitelist => !self.filter.contains(ident),
+        }
+    }
+
+    fn is_interface_function(&self, name: &str, item: &Function) -> bool {
+        !self.wrapper_function_blacklist.contains(name) && num_callbacks(&item.inputs) <= 1
+    }
 }
 
 impl Lang for LangCSharp {
     fn parse_ty(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        let name = item.ident.name.as_str();
+        if self.is_ignored(&name) {
+            return Ok(());
+        }
+
         if let ast::ItemKind::Ty(ref ty, ref generics) = item.node {
             if generics.is_parameterized() {
                 println!("parameterized type aliases not supported. Skipping.");
@@ -159,19 +210,22 @@ impl Lang for LangCSharp {
                     ),
                 }
             })?;
-            let name = item.ident.name.as_str().to_string();
 
-            self.aliases.insert(name, ty);
+            self.aliases.insert(name.to_string(), ty);
         }
 
         Ok(())
     }
 
     fn parse_const(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        let name = item.ident.name.as_str();
+        if self.is_ignored(&name) {
+            return Ok(());
+        }
+
         let docs = common::parse_attr(&item.attrs, |_| true, retrieve_docstring).1;
 
         if let ast::ItemKind::Const(ref ty, ref expr) = item.node {
-            let name = item.ident.name.as_str().to_string();
             let item = transform_const(ty, expr).ok_or_else(|| {
                 Error {
                     level: Level::Error,
@@ -182,6 +236,7 @@ impl Lang for LangCSharp {
                     ),
                 }
             })?;
+            let name = name.to_string();
 
             self.consts.push(Snippet { docs, name, item });
         }
@@ -190,6 +245,11 @@ impl Lang for LangCSharp {
     }
 
     fn parse_enum(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        let name = item.ident.name.as_str();
+        if self.is_ignored(&name) {
+            return Ok(());
+        }
+
         let (repr_c, docs) =
             common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring);
 
@@ -198,13 +258,11 @@ impl Lang for LangCSharp {
             return Ok(());
         }
 
-
         if let ast::ItemKind::Enum(ast::EnumDef { ref variants }, ref generics) = item.node {
             if generics.is_parameterized() {
                 return Err(unsupported_generics_error(item, "enums"));
             }
 
-            let name = item.ident.name.as_str().to_string();
             let item = transform_enum(variants).ok_or_else(|| {
                 Error {
                     level: Level::Error,
@@ -215,6 +273,7 @@ impl Lang for LangCSharp {
                     ),
                 }
             })?;
+            let name = name.to_string();
 
             self.enums.push(Snippet { docs, name, item });
         }
@@ -223,6 +282,11 @@ impl Lang for LangCSharp {
     }
 
     fn parse_struct(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+        let name = item.ident.name.as_str();
+        if self.is_ignored(&name) {
+            return Ok(());
+        }
+
         let (repr_c, docs) =
             common::parse_attr(&item.attrs, common::check_repr_c, retrieve_docstring);
 
@@ -230,8 +294,6 @@ impl Lang for LangCSharp {
         if !repr_c {
             return Ok(());
         }
-
-        let name = item.ident.name.as_str();
 
         if let ast::ItemKind::Struct(ref variants, ref generics) = item.node {
             if generics.is_parameterized() {
@@ -273,6 +335,10 @@ impl Lang for LangCSharp {
 
     fn parse_fn(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
         let name = item.ident.name.as_str();
+        if self.is_ignored(&name) {
+            return Ok(());
+        }
+
         let (no_mangle, docs) =
             common::parse_attr(&item.attrs, common::check_no_mangle, retrieve_docstring);
 
@@ -348,7 +414,10 @@ impl Lang for LangCSharp {
 
             for snippet in &self.functions {
                 emit_docs(&mut writer, &self.context, &snippet.docs);
-                emit_function(&mut writer, &self.context, &snippet.name, &snippet.item);
+                if self.is_interface_function(&snippet.name, &snippet.item) {
+                    emit_wrapper_function(&mut writer, &self.context, &snippet.name, &snippet.item);
+                }
+                emit_function_extern_decl(&mut writer, &self.context, &snippet.name, &snippet.item);
             }
 
             // Callback delegates and wrappers.
@@ -381,46 +450,54 @@ impl Lang for LangCSharp {
             );
 
             // Interface
-            let mut writer = IndentedWriter::new(INDENT_WIDTH);
+            let functions: Vec<_> = mem::replace(&mut self.functions, Vec::new());
+            let mut functions = functions
+                .into_iter()
+                .filter(|snippet| {
+                    self.is_interface_function(&snippet.name, &snippet.item)
+                })
+                .peekable();
 
-            emit!(writer, "using System;\n");
-            emit!(writer, "using System.Runtime.InteropServices;\n");
-            emit!(writer, "using System.Threading.Tasks;\n\n");
-            emit!(writer, "namespace {} {{\n", self.context.namespace);
-            writer.indent();
+            if functions.peek().is_some() {
+                let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
-            emit!(
-                writer,
-                "public partial interface I{} {{\n",
-                self.context.class_name
-            );
-            writer.indent();
+                emit!(writer, "using System;\n");
+                emit!(writer, "using System.Runtime.InteropServices;\n");
+                emit!(writer, "using System.Threading.Tasks;\n\n");
+                emit!(writer, "namespace {} {{\n", self.context.namespace);
+                writer.indent();
 
-            for snippet in &self.functions {
-                if num_callbacks(&snippet.item.inputs) <= 1 {
-                    emit_wrapper_function_decl(
-                        &mut writer,
-                        &self.context,
-                        "",
-                        &snippet.name,
-                        &snippet.item,
-                    );
-                    emit!(writer, ";\n");
+                emit!(
+                    writer,
+                    "public partial interface I{} {{\n",
+                    self.context.class_name
+                );
+                writer.indent();
+
+                for snippet in functions {
+                    if num_callbacks(&snippet.item.inputs) <= 1 {
+                        emit_wrapper_function_decl(
+                            &mut writer,
+                            &self.context,
+                            "",
+                            &snippet.name,
+                            &snippet.item,
+                        );
+                        emit!(writer, ";\n");
+                    }
                 }
+
+                writer.unindent();
+                emit!(writer, "}}\n");
+
+                writer.unindent();
+                emit!(writer, "}}\n");
+
+                outputs.insert(
+                    PathBuf::from(format!("I{}.cs", self.context.class_name)),
+                    writer.into_inner(),
+                );
             }
-
-            writer.unindent();
-            emit!(writer, "}}\n");
-
-            writer.unindent();
-            emit!(writer, "}}\n");
-
-            outputs.insert(
-                PathBuf::from(format!("I{}.cs", self.context.class_name)),
-                writer.into_inner(),
-            );
-
-            self.functions.clear();
         }
 
         // Constants
@@ -486,8 +563,12 @@ impl Lang for LangCSharp {
             }
 
             // Opaque types.
-            for name in self.context.opaque_types.drain() {
-                emit_opaque_type(&mut writer, &name);
+            if !self.context.opaque_types.is_empty() {
+                emit!(writer, "#pragma warning disable CS0169\n");
+                for name in self.context.opaque_types.drain() {
+                    emit_opaque_type(&mut writer, &name);
+                }
+                emit!(writer, "#pragma warning restore CS0169\n");
             }
 
             writer.unindent();
@@ -500,13 +581,15 @@ impl Lang for LangCSharp {
         }
 
         // Utilities
-        let mut writer = IndentedWriter::new(INDENT_WIDTH);
-        emit_utilities(&mut writer, &self.context);
+        if self.utils_enabled {
+            let mut writer = IndentedWriter::new(INDENT_WIDTH);
+            emit_utilities(&mut writer, &self.context);
 
-        outputs.insert(
-            PathBuf::from(format!("{}.cs", self.context.utils_class_name)),
-            writer.into_inner(),
-        );
+            outputs.insert(
+                PathBuf::from(format!("{}.cs", self.context.utils_class_name)),
+                writer.into_inner(),
+            );
+        }
 
         Ok(())
     }

@@ -7,6 +7,12 @@ use syntax::abi::Abi;
 use syntax::ast;
 use syntax::print::pprust;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum FilterMode {
+    Blacklist,
+    Whitelist,
+}
+
 /// Outputs several files as a result of an AST transformation.
 pub type Outputs = HashMap<PathBuf, String>;
 

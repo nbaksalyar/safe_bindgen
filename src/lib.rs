@@ -26,6 +26,7 @@ extern crate diff;
 extern crate indoc;
 
 use common::{Lang, Outputs};
+pub use common::FilterMode;
 pub use csharp::LangCSharp;
 pub use errors::Level;
 pub use java::LangJava;

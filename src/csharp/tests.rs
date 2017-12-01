@@ -736,10 +736,12 @@ fn functions_with_opaque_params() {
          using System.Runtime.InteropServices;
 
          namespace Backend {
+             #pragma warning disable CS0169
              public struct Handle {
                  private IntPtr _value;
              }
 
+             #pragma warning restore CS0169
          }
         "
     );
@@ -777,7 +779,7 @@ fn functions_with_opaque_params() {
 fn functions_with_return_values() {
     let outputs = compile!(None, {
         #[no_mangle]
-        pub extern "C" fn fun0(arg: i32) -> bool {}
+        pub extern "C" fn fun(arg: i32) -> bool {}
     });
 
     let actual = fetch(&outputs, "Backend.cs");
@@ -794,18 +796,53 @@ fn functions_with_return_values() {
                  internal const String DLL_NAME = \"backend\";
                  #endif
 
-                 public bool Fun0(int arg) {
-                     return Fun0Native(arg);
+                 public bool Fun(int arg) {
+                     return FunNative(arg);
                  }
 
-                 [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-                 internal static extern bool Fun0Native(int arg);
+                 [DllImport(DLL_NAME, EntryPoint = \"fun\")]
+                 internal static extern bool FunNative(int arg);
 
              }
          }
         "
     );
 
+    assert_multiline_eq!(actual, expected);
+}
+
+#[test]
+fn functions_taking_out_param() {
+    let outputs = compile!(None, {
+        #[no_mangle]
+        pub extern "C" fn fun(o_app: *mut *mut App) {}
+    });
+
+    let actual = fetch(&outputs, "Backend.cs");
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
+
+         namespace Backend {
+             public partial class Backend : IBackend {
+                 #if __IOS__
+                 internal const String DLL_NAME = \"__Internal\";
+                 #else
+                 internal const String DLL_NAME = \"backend\";
+                 #endif
+
+                 public void Fun(out IntPtr oApp) {
+                     FunNative(out oApp);
+                 }
+
+                 [DllImport(DLL_NAME, EntryPoint = \"fun\")]
+                 internal static extern void FunNative(out IntPtr oApp);
+
+             }
+         }
+        "
+    );
     assert_multiline_eq!(actual, expected);
 }
 
