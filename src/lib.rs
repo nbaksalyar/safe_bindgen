@@ -3,6 +3,8 @@
 
 #![cfg_attr(not(feature = "with-syntex"), feature(rustc_private))]
 
+#![recursion_limit="128"]
+
 #[cfg(feature = "with-syntex")]
 extern crate syntex_errors as errors;
 #[cfg(not(feature = "with-syntex"))]

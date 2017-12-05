@@ -1,12 +1,14 @@
 //! Functions to generate JNI bindings
 
 use common::{is_array_arg, is_user_data_arg};
-use std::collections::HashMap;
+use inflector::Inflector;
+use java::callback_name;
+use jni::signature::{self, JavaType, TypeSignature};
+use quote;
+use std::collections::{BTreeSet, HashMap};
 use syntax::ast;
 use syntax::print::pprust;
-use java::callback_name;
-use jni::signature::{self, TypeSignature, JavaType};
-use quote;
+use syntax::symbol;
 
 fn to_jni_arg(arg: &ast::Arg, ty_name: &str) -> quote::Tokens {
     let pat = quote::Ident::new(pprust::pat_to_string(&*arg.pat));
@@ -198,6 +200,7 @@ fn transform_opaque_ptr(arg_name: &str, ty: &str) -> JniArgResult {
     JniArgResult { stmt, call_args }
 }
 
+/// Generates JNI function binding based on a native function
 pub fn generate_jni_function(
     args: Vec<ast::Arg>,
     native_name: &str,
@@ -279,7 +282,7 @@ pub fn generate_jni_function(
         quote! {
             #[no_mangle]
             pub unsafe extern "system" fn #func_name(env: JNIEnv, _class: JClass, #(#jni_fn_inputs),*) {
-                #(#stmts)*;
+                #(#stmts);*
                 ffi::#native_name(#(#call_args),*);
             }
         };
@@ -295,6 +298,7 @@ fn transform_arg(arg: &ast::Arg) -> (quote::Ident, quote::Ident) {
     )
 }
 
+/// Generates a JNI callback function based on a native callback type
 pub fn generate_jni_callback(
     cb: &ast::BareFnTy,
     cb_class: &str,
@@ -383,10 +387,12 @@ pub fn generate_jni_callback(
         quote! {
         extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
             unsafe {
-                let env = JVM.attach_current_thread_as_daemon().unwrap();
-                let cb = GlobalRef::from_raw_ptr(&env, ctx);
+                let env = JVM.as_ref()
+                    .map(|vm| vm.attach_current_thread_as_daemon().unwrap())
+                    .unwrap();
+                let cb = convert_cb_from_java(&env, ctx);
 
-                #(#stmts)*;
+                #(#stmts);*
 
                 env.call_method(
                     cb.as_obj(),
@@ -397,6 +403,413 @@ pub fn generate_jni_callback(
             }
         }
     };
+
+    tokens.to_string()
+}
+
+enum StructField {
+    Primitive(ast::StructField),
+    Array {
+        field: ast::StructField,
+        len_field: String,
+        cap_field: Option<String>,
+    },
+    String(ast::StructField),
+    StructPtr {
+        field: ast::StructField,
+        ty: ast::MutTy,
+    },
+    LenField(ast::StructField),
+}
+
+impl StructField {
+    fn struct_field(&self) -> &ast::StructField {
+        match *self {
+            StructField::Primitive(ref f) => f,
+            StructField::Array { field: ref f, .. } => f,
+            StructField::StructPtr { field: ref f, .. } => f,
+            StructField::String(ref f) => f,
+            StructField::LenField(ref f) => f,
+        }
+    }
+
+    fn name(&self) -> symbol::InternedString {
+        self.struct_field().ident.unwrap().name.as_str()
+    }
+}
+
+fn transform_struct_fields(fields: &[ast::StructField]) -> Vec<StructField> {
+    let mut results = Vec::new();
+    let field_names: BTreeSet<_> = fields
+        .iter()
+        .map(|f| f.ident.unwrap().name.as_str().to_string())
+        .collect();
+
+    for f in fields {
+        let mut field_name: String = f.ident.unwrap().name.as_str().to_string();
+
+        match f.ty.node {
+            // Pointers
+            ast::TyKind::Ptr(ref ptr) => {
+                if field_name.ends_with("_ptr") {
+                    field_name = field_name.chars().take(field_name.len() - 4).collect();
+                }
+
+                let len_field = format!("{}_len", field_name);
+                let cap_field = format!("{}_cap", field_name);
+
+                if field_names.contains(&len_field) {
+                    results.push(StructField::Array {
+                        field: f.clone(),
+                        len_field,
+                        cap_field: if field_names.contains(&cap_field) {
+                            Some(cap_field)
+                        } else {
+                            None
+                        },
+                    });
+                } else {
+                    match pprust::ty_to_string(&ptr.ty).as_str() {
+                        // Strings
+                        "c_char" => {
+                            results.push(StructField::String(f.clone()));
+                        }
+                        // Other ptrs, most likely structs
+                        _ => {
+                            results.push(StructField::StructPtr {
+                                field: f.clone(),
+                                ty: ptr.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            ast::TyKind::Path(None, ref _path) => {
+                results.push(if is_array_meta_field(f) {
+                    StructField::LenField(f.clone())
+                } else {
+                    StructField::Primitive(f.clone())
+                });
+            }
+
+            _ => results.push(StructField::Primitive(f.clone())),
+        }
+    }
+
+    results
+}
+
+fn is_array_meta_field(field: &ast::StructField) -> bool {
+    let str_name = field.ident.unwrap().name.as_str();
+
+    if let ast::TyKind::Path(None, ref path) = field.ty.node {
+        let (ty, _module) = path.segments.split_last().expect(
+            "already checked that there were at least two elements",
+        );
+        let ty: &str = &ty.identifier.name.as_str();
+
+        ty == "usize" && (str_name.ends_with("_len") || str_name.ends_with("_cap"))
+    } else {
+        false
+    }
+}
+
+fn generate_struct_to_java(
+    struct_ident: &quote::Ident,
+    java_class_name: &str,
+    fields: &[ast::StructField],
+) -> quote::Tokens {
+    let fields = transform_struct_fields(fields);
+    let mut stmts = Vec::new();
+
+    for f in fields {
+        let field_name_str: &str = &f.name();
+        let field_name = quote::Ident::new(field_name_str);
+        let java_field_name = field_name_str.to_camel_case();
+
+        let stmt = match f {
+            StructField::Array { len_field, field, .. } => {
+                if let ast::TyKind::Ptr(ref ptr) = field.ty.node {
+                    let len_field_ident = quote::Ident::new(len_field.clone());
+                    let len_field = len_field.to_camel_case();
+                    let ty_str = pprust::ty_to_string(&ptr.ty);
+
+                    if ty_str.as_str() == "u8" || ty_str.as_str() == "i8" {
+                        // Byte array
+                        quote! {
+                            let arr = env.new_byte_array(self.#len_field_ident as jni::sys::jsize).unwrap();
+                            let slice = unsafe { slice::from_raw_parts(self.#field_name as *const i8, self.#len_field_ident) };
+                            env.set_byte_array_region(arr, 0, slice).unwrap();
+                            env.set_field(output, #java_field_name, "[B", JObject::from(arr).into()).unwrap();
+                            env.set_field(output, #len_field, "J", self.#len_field_ident.to_java(&env).into()).unwrap();
+                        }
+                    } else {
+                        // Struct array
+                        quote! {
+                            let arr = env.new_object_array(self.#len_field_ident as jni::sys::jsize, #ty_str, JObject::null()).unwrap();
+                            let items = unsafe { slice::from_raw_parts(self.#field_name, self.#len_field_ident) };
+                            for (idx, item) in items.iter().enumerate() {
+                                env.set_object_array_element(arr, idx as jni::sys::jsize, item.to_java(env)).unwrap();
+                            }
+                            env.set_field(output, #java_field_name, "[Ljava/lang/Object;", JObject::from(arr).into()).unwrap();
+                            env.set_field(output, #len_field, "J", self.#len_field_ident.to_java(&env).into()).unwrap();
+                        }
+                    }
+                } else {
+                    quote!{}
+                }
+            }
+            StructField::String(ref _f) => {
+                quote! {
+                    let #field_name: JObject = self.#field_name.to_java(&env).into();
+                    env.set_field(output, #java_field_name, "Ljava/lang/String;", #field_name.into())
+                        .unwrap();
+                }
+            }
+            StructField::StructPtr { .. } => {
+                quote! {
+                    env.set_field(output, #field_name_str, "Ljava/lang/Object;", self.#field_name.to_java(&env).into()).unwrap();
+                }
+            }
+            StructField::LenField(ref _f) => {
+                // Skip len/cap fields transformation - it's covered by `ArrayField`
+                quote!{}
+            }
+            StructField::Primitive(ref f) => {
+                match f.ty.node {
+                    ast::TyKind::Path(None, ref path) => {
+                        let (ty, _module) = path.segments.split_last().expect(
+                            "already checked that there were at least two elements",
+                        );
+                        let ty: &str = &ty.identifier.name.as_str();
+
+                        let conv = match ty {
+                            "c_byte" | "i8" | "u8" => Some("B"),
+                            "c_short" | "u16" | "i16" => Some("S"),
+                            "c_int" | "u32" | "i32" => Some("I"),
+                            "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some("J"),
+                            "c_bool" | "bool" => Some("Z"),
+                            _ => None,
+                        };
+
+                        if let Some(signature) = conv {
+                            quote! {
+                                env.set_field(output, #java_field_name, #signature, self.#field_name.to_java(&env).into()).unwrap();
+                            }
+                        } else {
+                            quote!{
+                                env.set_field(output, #java_field_name, "Ljava/lang/Object;", self.#field_name.to_java(&env).into()).unwrap();
+                            }
+                        }
+                    }
+                    _ => quote!{},
+                }
+            }
+        };
+
+        stmts.push(stmt);
+    }
+
+    quote! {
+        impl<'a> ToJava<'a, JObject<'a>> for #struct_ident {
+            fn to_java(&self, env: &'a JNIEnv) -> JObject<'a> {
+                let output = env.new_object(#java_class_name, "()V", &[]).unwrap();
+                #(#stmts)*
+                output
+            }
+        }
+    }
+}
+
+fn generate_struct_from_java(
+    struct_ident: &quote::Ident,
+    fields: &[ast::StructField],
+    type_map: &HashMap<&'static str, &'static str>,
+) -> quote::Tokens {
+    let fields = transform_struct_fields(fields);
+    let mut fields_values = Vec::new();
+    let mut conversions = Vec::new();
+
+    for f in fields {
+        let field_name_str: &str = &f.name();
+        let field_name = quote::Ident::new(field_name_str);
+        let java_field_name = field_name_str.to_camel_case();
+
+        fields_values.push(quote! {
+            #field_name
+        });
+
+        let conv = match f {
+            StructField::Array {
+                len_field,
+                cap_field,
+                field,
+            } => {
+                let len_field = quote::Ident::new(len_field);
+
+                let cap = if let Some(cap_field) = cap_field {
+                    // If there's a capacity field in the struct, just get it from the
+                    // generated Vec itself.
+                    let cap_field = quote::Ident::new(cap_field);
+                    quote! {
+                        let #cap_field = vec.capacity();
+                    }
+                } else {
+                    quote!{}
+                };
+
+                if let ast::TyKind::Ptr(ref ptr) = field.ty.node {
+                    let ty_str = pprust::ty_to_string(&ptr.ty);
+
+                    let ptr_mutability = if let ast::Mutability::Mutable = ptr.mutbl {
+                        quote! { as_mut_ptr }
+                    } else {
+                        quote! { as_ptr }
+                    };
+
+                    if ty_str.as_str() == "u8" {
+                        // Byte array
+                        quote! {
+                            let arr = env.get_field(input, #field_name_str, "[Ljava/lang/Object;").unwrap().l().unwrap().into_inner() as jni::sys::jbyteArray;
+                            let mut vec = env.convert_byte_array(arr).unwrap();
+                            let #len_field = vec.len();
+                            #cap
+                            let #field_name = vec.#ptr_mutability();
+                            ::std::mem::forget(vec);
+                        }
+                    } else {
+                        // Struct array
+                        let ty = quote::Ident::new(ty_str);
+
+                        quote! {
+                            let arr = env.get_field(input, #field_name_str, "[Ljava/lang/Object;").unwrap().l().unwrap().into_inner() as jni::sys::jarray;
+                            let #len_field = env.get_array_length(arr).unwrap() as usize;
+
+                            let mut vec = Vec::with_capacity(#len_field);
+
+                            for idx in 0..#len_field {
+                                let item = env.get_object_array_element(arr, idx as jni::sys::jsize);
+                                let item = #ty::from_java(&env, item.unwrap());
+                                vec.push(item);
+                            }
+
+                            #cap
+                            let #field_name = vec.#ptr_mutability();
+                            ::std::mem::forget(vec);
+                        }
+                    }
+                } else {
+                    quote!{}
+                }
+            }
+            StructField::StructPtr { ty, .. } => {
+                let ty_str = pprust::ty_to_string(&ty.ty);
+                let ty = quote::Ident::new(ty_str);
+
+                quote! {
+                    let #field_name = env.get_field(input, #field_name_str, "Ljava/lang/Object;").unwrap().l().unwrap();
+                    let #field_name = #ty::from_java(&env, #field_name);
+                }
+            }
+            StructField::LenField(ref _f) => {
+                // Skip len/cap fields transformation - it's covered by `ArrayField`
+                quote!{}
+            }
+            StructField::String(ref _f) => {
+                quote! {
+                    let #field_name = env.get_field(input, #field_name_str, "Ljava/lang/String;")
+                        .unwrap()
+                        .l()
+                        .unwrap()
+                        .into();
+                    let #field_name = <*mut _>::from_java(env, #field_name);
+                }
+            }
+            StructField::Primitive(ref f) => {
+                match f.ty.node {
+                    ast::TyKind::Path(None, ref path) => {
+                        let (ty, _module) = path.segments.split_last().expect(
+                            "already checked that there were at least two elements",
+                        );
+                        let mut ty: &str = &ty.identifier.name.as_str();
+
+                        if let Some(rewrite_ty) = type_map.get(ty) {
+                            // Rewrite type (it could be e.g. a handle)
+                            ty = match *rewrite_ty {
+                                "long" => "u64",
+                                _ => ty,
+                            };
+                        }
+
+                        let rust_ty = quote::Ident::new(ty);
+
+                        let conv = match ty {
+                            "c_byte" | "i8" | "u8" => Some(("B", quote! { b() })),
+                            "c_short" | "u16" | "i16" => Some(("S", quote! { s() })),
+                            "c_int" | "u32" | "i32" => Some(("I", quote! { i() })),
+                            "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some((
+                                "J",
+                                quote! { j() },
+                            )),
+                            "c_bool" | "bool" => Some(("Z", quote! { z() })),
+                            _ => None,
+                        };
+
+                        if let Some(conv) = conv {
+                            let signature = conv.0;
+                            let unwrap_method = conv.1;
+
+                            quote! {
+                                let #field_name = env.get_field(input, #java_field_name, #signature).unwrap().#unwrap_method.unwrap() as #rust_ty;
+                            }
+                        } else {
+                            quote!{
+                                let #field_name = env.get_field(input, #java_field_name, "Ljava/lang/Object;").unwrap().l().unwrap();
+                                let #field_name = #rust_ty::from_java(&env, #field_name);
+                            }
+                        }
+                    }
+                    _ => quote!{},
+                }
+            }
+        };
+
+        conversions.push(conv);
+    }
+
+    quote! {
+        impl<'a> FromJava<JObject<'a>> for #struct_ident {
+            fn from_java(env: &JNIEnv, input: JObject) -> Self {
+                #(#conversions)*
+
+                #struct_ident {
+                    #(#fields_values),*
+                }
+            }
+        }
+    }
+
+}
+
+/// Generates JNI struct binding based on a native struct
+pub fn generate_struct(
+    fields: &[ast::StructField],
+    native_name: &str,
+    java_class_name: &str,
+    type_map: &HashMap<&'static str, &'static str>,
+) -> String {
+    let struct_ident = quote::Ident::new(native_name);
+
+    let from_java = generate_struct_from_java(&struct_ident, fields, type_map);
+    let to_java = generate_struct_to_java(&struct_ident, java_class_name, fields);
+
+    let tokens =
+        quote! {
+            #from_java
+
+            #to_java
+        };
 
     tokens.to_string()
 }

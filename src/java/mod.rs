@@ -84,7 +84,8 @@ impl common::Lang for LangJava {
         let mut buffer = String::new();
         buffer.push_str(&docs);
 
-        let name = item.ident.name.as_str().to_class_case();
+        let orig_name = item.ident.name.as_str();
+        let name = orig_name.to_class_case();
         buffer.push_str(&format!("public class {}", name));
 
         if let ast::ItemKind::Struct(ref variants, ref generics) = item.node {
@@ -100,23 +101,35 @@ impl common::Lang for LangJava {
                 buffer.push_str(" {\n");
 
                 for field in variants.fields() {
-                    let (_, docs) = parse_attr(
-                        &field.attrs,
-                        |_| true,
-                        |attr| retrieve_docstring(attr, "\t"),
-                    );
-                    buffer.push_str(&docs);
-
                     let name = match field.ident {
                         Some(name) => name.name.as_str().to_camel_case(),
                         None => unreachable!("a tuple struct snuck through"),
                     };
                     let ty = rust_to_java(&*field.ty, &self.type_map)?
                         .unwrap_or_default();
-                    buffer.push_str(&format!("\tpublic {} {};\n", ty, name));
+
+                    buffer.push_str(&format!("\tprivate {} {};\n\n", ty, name));
+
+                    buffer.push_str(&format!(
+                        "\tpublic {ty} get{capitalized}() {{\n\t\treturn {name};\n\t}}\n\n",
+                        ty = ty,
+                        name = name,
+                        capitalized = name.to_class_case(),
+                    ));
+                    buffer.push_str(&format!(
+                        "\tpublic void set{capitalized}(final {ty} val) {{\n\t\t{name} = val;\n\t}}\n\n",
+                        ty = ty,
+                        name = name,
+                        capitalized = name.to_class_case(),
+                    ));
                 }
 
                 buffer.push_str("}");
+
+                println!(
+                    "{}\n",
+                    jni::generate_struct(variants.fields(), &orig_name, &name, &self.type_map)
+                );
             } else if variants.is_tuple() && variants.fields().len() == 1 {
                 // #[repr(C)] pub struct Foo(Bar);  =>  typedef struct Foo Foo;
             } else {
@@ -136,7 +149,7 @@ impl common::Lang for LangJava {
             });
         }
 
-        buffer.push_str(";\n\n");
+        buffer.push_str("\n\n");
 
         outputs.insert(From::from(format!("{}.java", name)), buffer);
 
