@@ -447,7 +447,7 @@ fn anon_rust_to_java(
             if pprust::ty_to_string(&ptr.ty) == "c_char" {
                 return Ok(Some("String".into()));
             }
-            anon_rust_to_java(&ptr.ty, type_map)
+            anon_rust_to_java(&ptr.ty, type_map).map(|s| s.map(|s| s.to_class_case()))
         }
 
         // Plain old types.
@@ -521,6 +521,7 @@ fn path_to_java(
 /// Most map straight over but some have to be converted.
 fn libc_ty_to_java<'a, 'b: 'a>(ty: &'a str, type_map: &HashMap<&'b str, &'b str>) -> &'a str {
     match ty {
+        "c_bool" => "boolean",
         "c_void" => "void",
         "c_float" => "float",
         "c_double" => "double",
@@ -561,7 +562,7 @@ fn osraw_ty_to_java(ty: &str) -> &str {
         "c_uint" => "int",
         "c_ulong" => "long",
         "c_ushort" => "short",
-        // All other types should map over to C.
+        // All other types should map as-is
         ty => ty,
     }
 }
@@ -573,6 +574,7 @@ fn osraw_ty_to_java(ty: &str) -> &str {
 fn rust_ty_to_java<'a, 'b: 'a>(ty: &'a str, type_map: &HashMap<&'b str, &'b str>) -> &'a str {
     match ty {
         "()" => "void",
+        "bool" => "boolean",
         "f32" => "float",
         "f64" => "double",
         "u8" | "i8" => "byte",
@@ -580,8 +582,6 @@ fn rust_ty_to_java<'a, 'b: 'a>(ty: &'a str, type_map: &HashMap<&'b str, &'b str>
         "u32" | "i32" => "int",
         "u64" | "i64" => "long",
         "usize" | "isize" => "long",
-        // This is why we write out structs and enums as `typedef ...`.
-        // We `#include <stdbool.h>` so bool is handled.
         ty => libc_ty_to_java(ty, type_map),
     }
 }

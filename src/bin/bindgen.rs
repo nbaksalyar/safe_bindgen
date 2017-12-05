@@ -62,29 +62,33 @@ fn main() {
             bindgen.run_build(&mut lang, &output_dir)
         }
         "java" => {
-	    let mut type_map = HashMap::new();
-	    type_map.insert("XorNameArray", "byte[]");
-	    type_map.insert("SignSecretKey", "byte[]");
-	    type_map.insert("SignPublicKey", "byte[]");
-	    type_map.insert("SymSecretKey", "byte[]");
-	    type_map.insert("SymNonce", "byte[]");
-	    type_map.insert("AsymPublicKey", "byte[]");
-	    type_map.insert("AsymSecretKey", "byte[]");
-	    type_map.insert("AsymNonce", "byte[]");
-	    type_map.insert("CipherOptHandle", "long");
-	    type_map.insert("EncryptPubKeyHandle", "long");
-	    type_map.insert("EncryptSecKeyHandle", "long");
-	    type_map.insert("MDataEntriesHandle", "long");
-	    type_map.insert("MDataEntryActionsHandle", "long");
-	    type_map.insert("MDataPermissionsHandle", "long");
-	    type_map.insert("SelfEncryptorReaderHandle", "long");
-	    type_map.insert("SelfEncryptorWriterHandle", "long");
-	    type_map.insert("SignPubKeyHandle", "long");
-	    type_map.insert("SignSecKeyHandle", "long");
-	    type_map.insert("FileContextHandle", "long");
+            let mut type_map = HashMap::new();
+            type_map.insert("XorNameArray", "byte[]");
+            type_map.insert("SignSecretKey", "byte[]");
+            type_map.insert("SignPublicKey", "byte[]");
+            type_map.insert("SymSecretKey", "byte[]");
+            type_map.insert("SymNonce", "byte[]");
+            type_map.insert("AsymPublicKey", "byte[]");
+            type_map.insert("AsymSecretKey", "byte[]");
+            type_map.insert("AsymNonce", "byte[]");
+            type_map.insert("CipherOptHandle", "long");
+            type_map.insert("EncryptPubKeyHandle", "long");
+            type_map.insert("EncryptSecKeyHandle", "long");
+            type_map.insert("MDataEntriesHandle", "long");
+            type_map.insert("MDataEntryActionsHandle", "long");
+            type_map.insert("MDataPermissionsHandle", "long");
+            type_map.insert("SelfEncryptorReaderHandle", "long");
+            type_map.insert("SelfEncryptorWriterHandle", "long");
+            type_map.insert("SEReaderHandle", "long");
+            type_map.insert("SEWriterHandle", "long");
+            type_map.insert("SignPubKeyHandle", "long");
+            type_map.insert("SignSecKeyHandle", "long");
+            type_map.insert("FileContextHandle", "long");
+            type_map.insert("App", "long");
+            type_map.insert("Authenticator", "long");
 
-	    let mut java = LangJava::new(type_map);
-	    bindgen.run_build(&mut java, &output_dir);
+            let mut java = LangJava::new(type_map);
+            bindgen.run_build(&mut java, &output_dir);
         }
         _ => unreachable!(),
     }
