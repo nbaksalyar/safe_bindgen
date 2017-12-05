@@ -6,7 +6,7 @@ use Level;
 use common::{self, Outputs, check_no_mangle, is_array_arg, is_result_arg, is_user_data_arg,
              parse_attr, retrieve_docstring};
 use inflector::Inflector;
-use std::collections::hash_map::{HashMap, Entry};
+use std::collections::hash_map::{Entry, HashMap};
 use std::path::PathBuf;
 use syntax::abi::Abi;
 use syntax::ast;
@@ -314,7 +314,7 @@ pub fn transform_callback<S: AsRef<str>>(
 ) -> Result<Option<String>, Error> {
     match ty.node {
         ast::TyKind::BareFn(ref bare_fn) => Ok(Some(format!(
-            "public interface {name} {{\n    public call({types});\n}}\n",
+            "public interface {name} {{\n    public void call({types});\n}}\n",
             name = class_name.as_ref(),
             types = try_some!(callback_to_java(bare_fn, ty.span, type_map)),
         ))),
