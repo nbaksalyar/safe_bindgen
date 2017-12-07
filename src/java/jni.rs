@@ -65,6 +65,11 @@ fn java_ty_to_signature(s: &str) -> Option<JavaType> {
     }
 }
 
+// Produces a fully qualified class name (i.e. with a Java package)
+fn fully_qualified(ty: &str, context: &Context) -> String {
+    format!("{}/{}", context.namespace.replace(".", "/"), ty)
+}
+
 fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
     match ty.node {
         // Callback
@@ -89,10 +94,10 @@ fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
                 _ => {
                     if let Some(mapped) = context.type_map.get(ty) {
                         java_ty_to_signature(mapped).or_else(|| {
-                            Some(JavaType::Object(From::from(ty)))
+                            Some(JavaType::Object(From::from(fully_qualified(ty, context))))
                         })
                     } else {
-                        Some(JavaType::Object(From::from(ty)))
+                        Some(JavaType::Object(From::from(fully_qualified(ty, context))))
                     }
                 }
             }
@@ -161,11 +166,14 @@ fn transform_array_arg(arg_name: &str) -> JniArgResult {
     JniArgResult { stmt, call_args }
 }
 
-fn transform_callbacks_arg(cb_idents: Vec<(quote::Ident, quote::Ident)>) -> JniArgResult {
+fn transform_callbacks_arg(
+    cb_idents: &[(ast::BareFnTy, quote::Ident)],
+    cb_base_name: &str,
+) -> JniArgResult {
     // statements
     let cb_ids: Vec<quote::Ident> = cb_idents
         .iter()
-        .map(|&(ref ident, _)| ident.clone())
+        .map(|&(_, ref ident)| ident.clone())
         .collect();
 
     let stmt =
@@ -174,9 +182,19 @@ fn transform_callbacks_arg(cb_idents: Vec<(quote::Ident, quote::Ident)>) -> JniA
         };
 
     // call arg value(s)
+    let multi_callback = cb_idents.len() > 1;
+
     let call_args = cb_idents
         .iter()
-        .map(|&(_, ref cb_fn)| quote! { #cb_fn })
+        .enumerate()
+        .map(|(idx, _)| {
+            let cb_fn = if multi_callback {
+                quote::Ident::new(format!("{}_{}", cb_base_name, idx))
+            } else {
+                quote::Ident::new(cb_base_name)
+            };
+            quote! { #cb_fn }
+        })
         .collect();
 
     JniArgResult { stmt, call_args }
@@ -202,13 +220,14 @@ pub fn generate_jni_function(
     args: Vec<ast::Arg>,
     native_name: &str,
     func_name: &str,
-    context: &Context,
+    context: &mut Context,
 ) -> String {
     let func_name = quote::Ident::new(format!(
         "Java_{}_NativeBindings_{}",
-        context.namespace.replace(".", "_"),
+        context.namespace.replace("_", "_1").replace(".", "_"),
         func_name
     ));
+    let native_name_str = native_name;
     let native_name = quote::Ident::new(native_name);
 
     // Generate inputs
@@ -217,25 +236,21 @@ pub fn generate_jni_function(
     let mut callbacks = Vec::new();
     let mut jni_fn_inputs = Vec::new();
 
-    let mut args_iter = args.iter().filter(|arg| !is_user_data_arg(arg)).peekable();
+    let mut args_iter = args.into_iter()
+        .filter(|arg| !is_user_data_arg(arg))
+        .peekable();
 
     while let Some(arg) = args_iter.next() {
         let arg_name = pprust::pat_to_string(&*arg.pat);
 
-        let res = if is_array_arg(&arg, args_iter.peek().cloned()) {
+        let res = if is_array_arg(&arg, args_iter.peek()) {
             args_iter.next();
             Some(transform_array_arg(&arg_name))
         } else {
             match arg.ty.node {
                 // Callback
                 ast::TyKind::BareFn(ref bare_fn) => {
-                    let cb_class = format!(
-                        "call_{}",
-                        callback_name(&*bare_fn.decl.inputs, context).unwrap()
-                    );
-
-                    callbacks.push((quote::Ident::new(arg_name), quote::Ident::new(cb_class)));
-
+                    callbacks.push((bare_fn.clone().unwrap(), quote::Ident::new(arg_name)));
                     None
                 }
 
@@ -273,18 +288,45 @@ pub fn generate_jni_function(
     }
 
     if callbacks.len() > 0 {
-        let cb_arg_res = transform_callbacks_arg(callbacks);
+        let cb_base_name = if callbacks.len() > 1 {
+            format!("call_{}", native_name_str)
+        } else {
+            let &(ref cb, _) = &callbacks[0];
+            format!("call_{}", callback_name(&*cb.decl.inputs, context).unwrap())
+        };
+
+        let cb_arg_res = transform_callbacks_arg(&callbacks, &cb_base_name);
         call_args.push(quote! { ctx });
         call_args.extend(cb_arg_res.call_args);
         stmts.push(cb_arg_res.stmt);
     }
 
+    if callbacks.len() > 1 {
+        // Generate extra callbacks for multi-callback functions
+        let count = callbacks.len();
+
+        for (idx, &(ref cb, _)) in callbacks.iter().enumerate() {
+            let full_cb_name = format!("call_{}_{}", native_name_str, idx);
+            eprintln!("Generating JNI CB {}", full_cb_name);
+
+            if !context.generated_jni_cbs.contains(&full_cb_name) {
+                println!(
+                    "{}",
+                    generate_multi_jni_callback(cb, &full_cb_name, idx, count, context)
+                );
+                context.generated_jni_cbs.insert(full_cb_name);
+            }
+        }
+    }
+
+    let native_lib = quote::Ident::new(context.lib_name.clone());
+
     let tokens =
         quote! {
             #[no_mangle]
             pub unsafe extern "system" fn #func_name(env: JNIEnv, _class: JClass, #(#jni_fn_inputs),*) {
-                #(#stmts);*
-                ffi::#native_name(#(#call_args),*);
+                #(#stmts)*
+                #native_lib::#native_name(#(#call_args),*);
             }
         };
 
@@ -299,14 +341,22 @@ fn transform_arg(arg: &ast::Arg) -> (quote::Ident, quote::Ident) {
     )
 }
 
-/// Generates a JNI callback function based on a native callback type
-pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str, context: &Context) -> String {
-    let cb_name = quote::Ident::new(format!("call_{}", cb_class));
+struct JniCallback {
+    // Native function call parameters
+    args: Vec<quote::Tokens>,
+    // Callback function statements
+    stmts: Vec<quote::Tokens>,
+    // Arguments for the callback function
+    jni_cb_inputs: Vec<quote::Tokens>,
+    // String Java type signature constructor
+    arg_ty_str: String,
+}
 
-    let mut args: Vec<quote::Tokens> = Vec::new(); // Native function call parameters
-    let mut stmts: Vec<quote::Tokens> = Vec::new(); // Callback function statements
-    let mut jni_cb_inputs = Vec::new(); // Arguments for the callback function
-    let mut arg_java_ty = Vec::new(); // String Java type signature constructor
+fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
+    let mut args: Vec<quote::Tokens> = Vec::new();
+    let mut stmts: Vec<quote::Tokens> = Vec::new();
+    let mut jni_cb_inputs = Vec::new();
+    let mut arg_java_ty = Vec::new();
 
     let mut args_iter = (&*cb.decl)
         .inputs
@@ -349,8 +399,8 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str, context: &Conte
                         // Strings
                         "c_char" => {
                             quote! {
-                            let #arg_name: JObject = #arg_name.to_java(&env).into();
-                        }
+                                let #arg_name: JObject = #arg_name.to_java(&env).into();
+                            }
                         }
                         // Other ptrs
                         _ => {
@@ -379,6 +429,72 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str, context: &Conte
             ret: JavaType::Primitive(signature::Primitive::Void),
         }
     );
+
+    JniCallback {
+        args,
+        stmts,
+        jni_cb_inputs,
+        arg_ty_str,
+    }
+}
+
+fn generate_multi_jni_callback(
+    cb: &ast::BareFnTy,
+    cb_name: &str,
+    callback_index: usize,
+    callbacks_count: usize,
+    context: &mut Context,
+) -> String {
+    let cb_name = quote::Ident::new(cb_name);
+
+    let JniCallback {
+        args,
+        jni_cb_inputs,
+        stmts,
+        arg_ty_str,
+    } = generate_callback(cb, context);
+
+    let tokens =
+        quote! {
+        extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
+            unsafe {
+                let env = JVM.as_ref()
+                    .map(|vm| vm.attach_current_thread_as_daemon().unwrap())
+                    .unwrap();
+
+                let mut cbs = Box::from_raw(ctx as *mut [Option<GlobalRef>; #callbacks_count]);
+
+                if let Some(cb) = cbs[#callback_index].take() {
+                    #(#stmts);*
+
+                    env.call_method(
+                        cb.as_obj(),
+                        "call",
+                        #arg_ty_str,
+                        &[ #(#args),* ],
+                    ).unwrap();
+                }
+
+                if cbs.iter().any(|cb| cb.is_some()) {
+                    mem::forget(cbs);
+                }
+            }
+        }
+    };
+
+    tokens.to_string()
+}
+
+/// Generates a JNI callback function based on a native callback type
+pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_name: &str, context: &mut Context) -> String {
+    let cb_name = quote::Ident::new(cb_name);
+
+    let JniCallback {
+        args,
+        jni_cb_inputs,
+        stmts,
+        arg_ty_str,
+    } = generate_callback(cb, context);
 
     let tokens =
         quote! {
@@ -516,6 +632,7 @@ fn generate_struct_to_java(
     struct_ident: &quote::Ident,
     java_class_name: &str,
     fields: &[ast::StructField],
+    context: &Context,
 ) -> quote::Tokens {
     let fields = transform_struct_fields(fields);
     let mut stmts = Vec::new();
@@ -559,9 +676,11 @@ fn generate_struct_to_java(
             }
             StructField::String(ref _f) => {
                 quote! {
-                    let #field_name: JObject = self.#field_name.to_java(&env).into();
-                    env.set_field(output, #java_field_name, "Ljava/lang/String;", #field_name.into())
-                        .unwrap();
+                    if !self.#field_name.is_null() {
+                        let #field_name: JObject = self.#field_name.to_java(&env).into();
+                        env.set_field(output, #java_field_name, "Ljava/lang/String;", #field_name.into())
+                            .unwrap();
+                    }
                 }
             }
             StructField::StructPtr { .. } => {
@@ -608,10 +727,12 @@ fn generate_struct_to_java(
         stmts.push(stmt);
     }
 
+    let fully_qualified_name = fully_qualified(java_class_name, context);
+
     quote! {
         impl<'a> ToJava<'a, JObject<'a>> for #struct_ident {
             fn to_java(&self, env: &'a JNIEnv) -> JObject<'a> {
-                let output = env.new_object(#java_class_name, "()V", &[]).unwrap();
+                let output = env.new_object(#fully_qualified_name, "()V", &[]).unwrap();
                 #(#stmts)*
                 output
             }
@@ -799,7 +920,7 @@ pub fn generate_struct(
     let struct_ident = quote::Ident::new(native_name);
 
     let from_java = generate_struct_from_java(&struct_ident, fields, context);
-    let to_java = generate_struct_to_java(&struct_ident, java_class_name, fields);
+    let to_java = generate_struct_to_java(&struct_ident, java_class_name, fields, context);
 
     let tokens =
         quote! {
