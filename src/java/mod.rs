@@ -154,10 +154,14 @@ impl common::Lang for LangJava {
 
                 buffer.push_str("}");
 
-                println!(
-                    "{}\n",
-                    jni::generate_struct(variants.fields(), &orig_name, &name, &self.context)
-                );
+                let jni = jni::generate_struct(variants.fields(), &orig_name, &name, &self.context);
+
+                match outputs.entry(From::from("jni.rs")) {
+                    Entry::Occupied(o) => o.into_mut().push_str(&jni),
+                    Entry::Vacant(v) => {
+                        let _ = v.insert(jni);
+                    }
+                }
             } else if variants.is_tuple() && variants.fields().len() == 1 {
                 // #[repr(C)] pub struct Foo(Bar);  =>  typedef struct Foo Foo;
             } else {
@@ -297,10 +301,15 @@ pub fn transform_native_fn(
                 // Generate JNI callback fn
                 let jni_cb_name = format!("call_{}", cb_class);
                 if !context.generated_jni_cbs.contains(&jni_cb_name) {
-                    println!(
-                        "{}\n",
-                        jni::generate_jni_callback(bare_fn, &jni_cb_name, context)
-                    );
+                    let jni = jni::generate_jni_callback(bare_fn, &jni_cb_name, context);
+
+                    match outputs.entry(From::from("jni.rs")) {
+                        Entry::Occupied(o) => o.into_mut().push_str(&jni),
+                        Entry::Vacant(v) => {
+                            let _ = v.insert(jni);
+                        }
+                    }
+
                     context.generated_jni_cbs.insert(jni_cb_name);
                 }
             }
@@ -342,10 +351,15 @@ pub fn transform_native_fn(
         }
     }
 
-    println!(
-        "{}\n",
-        jni::generate_jni_function(fn_decl.inputs.clone(), name, &java_name, context)
-    );
+    let jni =
+        jni::generate_jni_function(fn_decl.inputs.clone(), name, &java_name, context, outputs);
+
+    match outputs.entry(From::from("jni.rs")) {
+        Entry::Occupied(o) => o.into_mut().push_str(&jni),
+        Entry::Vacant(v) => {
+            let _ = v.insert(jni);
+        }
+    }
 
     Ok(())
 }

@@ -2,10 +2,11 @@
 
 use common::{is_array_arg, is_user_data_arg};
 use inflector::Inflector;
-use java::{Context, callback_name};
+use java::{Context, Outputs, callback_name};
 use jni::signature::{self, JavaType, TypeSignature};
 use quote;
 use std::collections::BTreeSet;
+use std::collections::hash_map::Entry;
 use syntax::ast;
 use syntax::print::pprust;
 use syntax::symbol;
@@ -221,6 +222,7 @@ pub fn generate_jni_function(
     native_name: &str,
     func_name: &str,
     context: &mut Context,
+    outputs: &mut Outputs,
 ) -> String {
     let func_name = quote::Ident::new(format!(
         "Java_{}_NativeBindings_{}",
@@ -310,10 +312,15 @@ pub fn generate_jni_function(
             eprintln!("Generating JNI CB {}", full_cb_name);
 
             if !context.generated_jni_cbs.contains(&full_cb_name) {
-                println!(
-                    "{}",
-                    generate_multi_jni_callback(cb, &full_cb_name, idx, count, context)
-                );
+                let jni = generate_multi_jni_callback(cb, &full_cb_name, idx, count, context);
+
+                match outputs.entry(From::from("jni.rs")) {
+                    Entry::Occupied(o) => o.into_mut().push_str(&jni),
+                    Entry::Vacant(v) => {
+                        let _ = v.insert(jni);
+                    }
+                }
+
                 context.generated_jni_cbs.insert(full_cb_name);
             }
         }
