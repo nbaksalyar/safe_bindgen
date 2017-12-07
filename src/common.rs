@@ -1,7 +1,7 @@
 //! Functions common for all target languages.
 
 use Error;
-use std::collections::HashMap;
+use std::collections::hash_map::{Entry, HashMap};
 use std::path::PathBuf;
 use syntax::abi::Abi;
 use syntax::ast;
@@ -47,6 +47,16 @@ pub trait Lang {
     /// Add extra and custom code after the code generation part is done.
     fn finalise_output(&mut self, _outputs: &mut Outputs) -> Result<(), Error> {
         Ok(())
+    }
+}
+
+/// Append or create new output file
+pub fn append_output(text: String, file: &str, o: &mut Outputs) {
+    match o.entry(From::from(file)) {
+        Entry::Occupied(o) => o.into_mut().push_str(&text),
+        Entry::Vacant(v) => {
+            let _ = v.insert(text);
+        }
     }
 }
 

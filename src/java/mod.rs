@@ -3,11 +3,10 @@
 
 use Error;
 use Level;
-use common::{self, Outputs, check_no_mangle, is_array_arg, is_result_arg, is_user_data_arg,
-             parse_attr, retrieve_docstring};
+use common::{self, Outputs, append_output, check_no_mangle, is_array_arg, is_result_arg,
+             is_user_data_arg, parse_attr, retrieve_docstring};
 use inflector::Inflector;
-use std::collections::BTreeSet;
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use syntax::abi::Abi;
 use syntax::ast;
@@ -155,13 +154,7 @@ impl common::Lang for LangJava {
                 buffer.push_str("}");
 
                 let jni = jni::generate_struct(variants.fields(), &orig_name, &name, &self.context);
-
-                match outputs.entry(From::from("jni.rs")) {
-                    Entry::Occupied(o) => o.into_mut().push_str(&jni),
-                    Entry::Vacant(v) => {
-                        let _ = v.insert(jni);
-                    }
-                }
+                append_output(jni, "jni.rs", outputs);
             } else if variants.is_tuple() && variants.fields().len() == 1 {
                 // #[repr(C)] pub struct Foo(Bar);  =>  typedef struct Foo Foo;
             } else {
@@ -301,15 +294,10 @@ pub fn transform_native_fn(
                 // Generate JNI callback fn
                 let jni_cb_name = format!("call_{}", cb_class);
                 if !context.generated_jni_cbs.contains(&jni_cb_name) {
-                    let jni = jni::generate_jni_callback(bare_fn, &jni_cb_name, context);
+                    let mut jni = jni::generate_jni_callback(bare_fn, &jni_cb_name, context);
+                    jni.push_str("\n");
 
-                    match outputs.entry(From::from("jni.rs")) {
-                        Entry::Occupied(o) => o.into_mut().push_str(&jni),
-                        Entry::Vacant(v) => {
-                            let _ = v.insert(jni);
-                        }
-                    }
-
+                    append_output(jni, "jni.rs", outputs);
                     context.generated_jni_cbs.insert(jni_cb_name);
                 }
             }
@@ -344,22 +332,12 @@ pub fn transform_native_fn(
     buffer.push_str(&func_decl);
     buffer.push_str(";\n\n");
 
-    match outputs.entry(From::from("NativeBindings.java")) {
-        Entry::Occupied(o) => o.into_mut().push_str(&buffer),
-        Entry::Vacant(v) => {
-            let _ = v.insert(buffer);
-        }
-    }
+    append_output(buffer, "NativeBindings.java", outputs);
 
-    let jni =
+    let mut jni =
         jni::generate_jni_function(fn_decl.inputs.clone(), name, &java_name, context, outputs);
-
-    match outputs.entry(From::from("jni.rs")) {
-        Entry::Occupied(o) => o.into_mut().push_str(&jni),
-        Entry::Vacant(v) => {
-            let _ = v.insert(jni);
-        }
-    }
+    jni.push_str("\n");
+    append_output(jni, "jni.rs", outputs);
 
     Ok(())
 }
