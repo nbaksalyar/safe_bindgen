@@ -187,15 +187,20 @@ impl common::Lang for LangJava {
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
         match outputs.get_mut(&PathBuf::from("NativeBindings.java")) {
             Some(funcs) => {
+                // Indent lines
+                let lines = funcs.lines().fold(String::new(), |mut s, line| {
+                    s.push_str(&format!("\t{}\n", line));
+                    return s;
+                });
                 *funcs = format!(
-                    "package {};\n\npublic class NativeBindings {{\n{}\n}}",
-                    self.context.namespace,
-
-                    // Indent lines
-                    funcs.lines().fold(String::new(), |mut s, line| {
-                        s.push_str(&format!("\t{}\n", line));
-                        return s;
-                    })
+                    "package {namespace};\n\n
+                         public class NativeBindings {{\n
+                         \tstatic {{ System.loadLibrary(\"{library}\"); }}\n
+                         {lines}\n
+                         }}",
+                    namespace = self.context.namespace,
+                    library = self.context.lib_name,
+                    lines = lines
                 );
                 Ok(())
             }
