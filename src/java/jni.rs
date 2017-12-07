@@ -320,14 +320,12 @@ pub fn generate_jni_function(
         }
     }
 
-    let native_lib = quote::Ident::new(context.lib_name.clone());
-
     let tokens =
         quote! {
             #[no_mangle]
             pub unsafe extern "system" fn #func_name(env: JNIEnv, _class: JClass, #(#jni_fn_inputs),*) {
                 #(#stmts)*
-                #native_lib::#native_name(#(#call_args),*);
+                #native_name(#(#call_args),*);
             }
         };
 

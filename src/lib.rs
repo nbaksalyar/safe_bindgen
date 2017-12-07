@@ -241,9 +241,13 @@ impl Bindgen {
     /// This does not add any include-guards, includes, or extern declarations. It is mainly
     /// intended for internal use, but may be of interest to people who wish to embed
     /// moz-cheddar's generated code in another file.
-    pub fn compile<L: Lang>(&self, lang: &mut L, finalize: bool) -> Result<Outputs, Vec<Error>> {
+    pub fn compile<L: Lang>(
+        &self,
+        lang: &mut L,
+        mut outputs: &mut Outputs,
+        finalise: bool,
+    ) -> Result<(), Vec<Error>> {
         let base_path = self.input.parent().unwrap();
-        let mut outputs = HashMap::new();
 
         // Parse the top level mod.
         let krate = syntax::parse::parse_crate_from_file(&self.input, &self.session).unwrap();
@@ -273,14 +277,15 @@ impl Bindgen {
             // .map(|source| format!("{}\n\n{}", self.custom_code, source))
         }
 
-        if finalize {
+        if finalise {
             lang.finalise_output(&mut outputs)?;
         }
 
-        Ok(outputs)
+        Ok(())
     }
 
-    fn write_outputs<P: AsRef<Path>>(&self, root: P, outputs: &Outputs) -> Result<(), IoError> {
+    /// Writes virtual files to the file system
+    pub fn write_outputs<P: AsRef<Path>>(&self, root: P, outputs: &Outputs) -> Result<(), IoError> {
         let root = root.as_ref();
 
         for (path, contents) in outputs {
@@ -307,14 +312,16 @@ impl Bindgen {
     ///
     /// Panics on any compilation error so that the build script exits and prints output.
     pub fn run_build<P: AsRef<path::Path>, L: Lang>(&self, lang: &mut L, output_dir: P) {
-        match self.compile(lang, true) {
+        let mut outputs = HashMap::new();
+
+        match self.compile(lang, &mut outputs, true) {
             Err(errors) => {
                 for error in &errors {
                     self.print_error(error);
                 }
                 panic!("errors compiling header file");
             }
-            Ok(outputs) => {
+            Ok(()) => {
                 if let Err(err) = self.write_outputs(output_dir, &outputs) {
                     self.print_error(&From::from(err));
                     panic!("errors writing output");
