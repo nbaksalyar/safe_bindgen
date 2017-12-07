@@ -16,13 +16,30 @@ use syntax::print::pprust;
 mod jni;
 
 pub struct LangJava {
+    context: Context,
+}
+
+pub struct Context {
+    // Namespace
+    namespace: String,
+
     // Maps types from Rust to Java
     type_map: HashMap<&'static str, &'static str>,
 }
 
 impl LangJava {
     pub fn new(type_map: HashMap<&'static str, &'static str>) -> Self {
-        LangJava { type_map }
+        LangJava {
+            context: Context {
+                type_map,
+                namespace: "net.maidsafe.bindings".to_owned(),
+            },
+        }
+    }
+
+    /// Set the namespace to put all the generated code in.
+    pub fn set_namespace<T: Into<String>>(&mut self, namespace: T) {
+        self.context.namespace = namespace.into();
     }
 }
 
@@ -58,7 +75,7 @@ impl common::Lang for LangJava {
                 &docs,
                 &format!("{}", name),
                 outputs,
-                &self.type_map,
+                &self.context,
             )?;
 
             Ok(())
@@ -82,6 +99,7 @@ impl common::Lang for LangJava {
         }
 
         let mut buffer = String::new();
+        buffer.push_str(&format!("package {};\n\n", self.context.namespace));
         buffer.push_str(&docs);
 
         let orig_name = item.ident.name.as_str();
@@ -105,8 +123,7 @@ impl common::Lang for LangJava {
                         Some(name) => name.name.as_str().to_camel_case(),
                         None => unreachable!("a tuple struct snuck through"),
                     };
-                    let ty = rust_to_java(&*field.ty, &self.type_map)?
-                        .unwrap_or_default();
+                    let ty = rust_to_java(&*field.ty, &self.context)?.unwrap_or_default();
 
                     buffer.push_str(&format!("\tprivate {} {};\n\n", ty, name));
 
@@ -128,7 +145,7 @@ impl common::Lang for LangJava {
 
                 println!(
                     "{}\n",
-                    jni::generate_struct(variants.fields(), &orig_name, &name, &self.type_map)
+                    jni::generate_struct(variants.fields(), &orig_name, &name, &self.context)
                 );
             } else if variants.is_tuple() && variants.fields().len() == 1 {
                 // #[repr(C)] pub struct Foo(Bar);  =>  typedef struct Foo Foo;
@@ -159,7 +176,16 @@ impl common::Lang for LangJava {
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
         match outputs.get_mut(&PathBuf::from("NativeBindings.java")) {
             Some(funcs) => {
-                *funcs = format!("public class NativeBindings {{\n{}\n}}", funcs);
+                *funcs = format!(
+                    "package {};\n\npublic class NativeBindings {{\n{}\n}}",
+                    self.context.namespace,
+
+                    // Indent lines
+                    funcs.lines().fold(String::new(), |mut s, line| {
+                        s.push_str(&format!("\t{}\n", line));
+                        return s;
+                    })
+                );
                 Ok(())
             }
             None => Err(Error {
@@ -172,10 +198,7 @@ impl common::Lang for LangJava {
 }
 
 /// Get the Java interface name for the callback based on its types
-pub fn callback_name(
-    inputs: &[ast::Arg],
-    _type_map: &HashMap<&'static str, &'static str>,
-) -> Result<String, Error> {
+pub fn callback_name(inputs: &[ast::Arg], context: &Context) -> Result<String, Error> {
     let mut components = Vec::new();
     let mut inputs = inputs.iter().peekable();
 
@@ -191,7 +214,7 @@ pub fn callback_name(
             continue;
         }
 
-        let mut arg_type = rust_ty_to_java_class_name(&*arg.ty)?
+        let mut arg_type = rust_ty_to_java_class_name(&*arg.ty, context)?
             .map(|s| s.to_class_case())
             .unwrap_or_default();
 
@@ -216,7 +239,7 @@ pub fn transform_native_fn(
     docs: &str,
     name: &str,
     outputs: &mut Outputs,
-    type_map: &HashMap<&'static str, &'static str>,
+    context: &Context,
 ) -> Result<(), Error> {
     let mut args_str = Vec::new();
 
@@ -230,7 +253,7 @@ pub fn transform_native_fn(
         let arg_name = pprust::pat_to_string(&*arg.pat);
 
         // Generate function arguments
-        let mut java_type = rust_to_java(&arg.ty, type_map)?.unwrap_or_default();
+        let mut java_type = rust_to_java(&arg.ty, context)?.unwrap_or_default();
 
         if is_array_arg(&arg, fn_args.peek().cloned()) {
             // This is an array, so add it to the type description
@@ -245,7 +268,7 @@ pub fn transform_native_fn(
 
         // Generate a callback class - if it wasn't generated already
         if let ast::TyKind::BareFn(ref bare_fn) = arg.ty.node {
-            let cb_class = callback_name(&*bare_fn.decl.inputs, type_map)?;
+            let cb_class = callback_name(&*bare_fn.decl.inputs, context)?;
             let cb_file = PathBuf::from(format!("{}.java", cb_class));
 
             if let None = outputs.get(&cb_file) {
@@ -253,10 +276,10 @@ pub fn transform_native_fn(
 
                 println!(
                     "{}\n",
-                    jni::generate_jni_callback(bare_fn, &cb_class, type_map)
+                    jni::generate_jni_callback(bare_fn, &cb_class, context)
                 );
 
-                let cb_output = transform_callback(&*arg.ty, &cb_class, type_map)?
+                let cb_output = transform_callback(&*arg.ty, &cb_class, context)?
                     .unwrap_or_default();
                 let _ = outputs.insert(cb_file, cb_output);
             }
@@ -273,7 +296,7 @@ pub fn transform_native_fn(
             });
         }
         ast::FunctionRetTy::Default(..) => String::from("public static native void"),
-        ast::FunctionRetTy::Ty(ref ty) => rust_to_java(&*ty, type_map)?.unwrap_or_default(),
+        ast::FunctionRetTy::Ty(ref ty) => rust_to_java(&*ty, context)?.unwrap_or_default(),
     };
 
     let java_name = name.to_camel_case();
@@ -300,7 +323,7 @@ pub fn transform_native_fn(
 
     println!(
         "{}\n",
-        jni::generate_jni_function(fn_decl.inputs.clone(), name, &java_name, type_map)
+        jni::generate_jni_function(fn_decl.inputs.clone(), name, &java_name, context)
     );
 
     Ok(())
@@ -310,13 +333,16 @@ pub fn transform_native_fn(
 pub fn transform_callback<S: AsRef<str>>(
     ty: &ast::Ty,
     class_name: S,
-    type_map: &HashMap<&'static str, &'static str>,
+    context: &Context,
 ) -> Result<Option<String>, Error> {
     match ty.node {
         ast::TyKind::BareFn(ref bare_fn) => Ok(Some(format!(
-            "public interface {name} {{\n    public void call({types});\n}}\n",
+            "package {namespace};\n\n\
+             public interface {name} {{\n\
+             \tpublic void call({types});\n}}\n",
+            namespace = context.namespace,
             name = class_name.as_ref(),
-            types = try_some!(callback_to_java(bare_fn, ty.span, type_map)),
+            types = try_some!(callback_to_java(bare_fn, ty.span, context)),
         ))),
         // All other types just have a name associated with them.
         _ => Err(Error {
@@ -331,7 +357,7 @@ pub fn transform_callback<S: AsRef<str>>(
 fn callback_to_java(
     fn_ty: &ast::BareFnTy,
     fn_span: codemap::Span,
-    type_map: &HashMap<&'static str, &'static str>,
+    context: &Context,
 ) -> Result<Option<String>, Error> {
     match fn_ty.abi {
         // If it doesn't have a C ABI it can't be called from C.
@@ -358,7 +384,7 @@ fn callback_to_java(
 
     while let Some(arg) = args_iter.next() {
         let arg_name = pprust::pat_to_string(&*arg.pat);
-        let mut java_type = try_some!(rust_to_java(&*arg.ty, type_map));
+        let mut java_type = try_some!(rust_to_java(&*arg.ty, context));
 
         if is_array_arg(&arg, args_iter.peek().cloned()) {
             // Detect array ptrs: skip the length args and add array to the type sig
@@ -376,7 +402,7 @@ fn callback_to_java(
 fn callback_arg_to_java(
     fn_ty: &ast::BareFnTy,
     fn_span: codemap::Span,
-    type_map: &HashMap<&'static str, &'static str>,
+    context: &Context,
 ) -> Result<Option<String>, Error> {
     match fn_ty.abi {
         // If it doesn't have a C ABI it can't be called from C.
@@ -392,45 +418,39 @@ fn callback_arg_to_java(
         });
     }
 
-    Ok(Some(callback_name(&*fn_ty.decl.inputs, type_map)?))
+    Ok(Some(callback_name(&*fn_ty.decl.inputs, context)?))
 }
 
 /// Turn a Rust type with an associated name or type into a C type.
-pub fn rust_to_java(
-    ty: &ast::Ty,
-    type_map: &HashMap<&'static str, &'static str>,
-) -> Result<Option<String>, Error> {
+pub fn rust_to_java(ty: &ast::Ty, context: &Context) -> Result<Option<String>, Error> {
     match ty.node {
         // This is a callback ref taken as a function argument
-        ast::TyKind::BareFn(ref bare_fn) => callback_arg_to_java(bare_fn, ty.span, type_map),
+        ast::TyKind::BareFn(ref bare_fn) => callback_arg_to_java(bare_fn, ty.span, context),
 
         // All other types just have a name associated with them.
-        _ => anon_rust_to_java(ty, type_map),
+        _ => anon_rust_to_java(ty, context),
     }
 }
 
 /// Turn a Rust type into a part of the Java class name.
 /// Handles the size types in a special way because Rust has to distinguish
 /// between usize and u64, that's required for JNI bindings to work properly.
-fn rust_ty_to_java_class_name(ty: &ast::Ty) -> Result<Option<String>, Error> {
+fn rust_ty_to_java_class_name(ty: &ast::Ty, context: &Context) -> Result<Option<String>, Error> {
     match ty.node {
         ast::TyKind::Path(None, ref path) => {
             let primitive_type: &str = &path.segments[0].identifier.name.as_str();
             if primitive_type == "usize" || primitive_type == "isize" {
                 Ok(Some(From::from("size")))
             } else {
-                path_to_java(path, &HashMap::default())
+                path_to_java(path, context)
             }
         }
-        _ => anon_rust_to_java(ty, &HashMap::default()),
+        _ => anon_rust_to_java(ty, context),
     }
 }
 
 /// Turn a Rust type into a Java type signature.
-fn anon_rust_to_java(
-    ty: &ast::Ty,
-    type_map: &HashMap<&'static str, &'static str>,
-) -> Result<Option<String>, Error> {
+fn anon_rust_to_java(ty: &ast::Ty, context: &Context) -> Result<Option<String>, Error> {
     match ty.node {
         // Function pointers should not be in this function.
         ast::TyKind::BareFn(..) => Err(Error {
@@ -447,11 +467,11 @@ fn anon_rust_to_java(
             if pprust::ty_to_string(&ptr.ty) == "c_char" {
                 return Ok(Some("String".into()));
             }
-            anon_rust_to_java(&ptr.ty, type_map).map(|s| s.map(|s| s.to_class_case()))
+            anon_rust_to_java(&ptr.ty, context).map(|s| s.map(|s| s.to_class_case()))
         }
 
         // Plain old types.
-        ast::TyKind::Path(None, ref path) => path_to_java(path, type_map),
+        ast::TyKind::Path(None, ref path) => path_to_java(path, context),
 
         // Possibly void, likely not.
         _ => {
@@ -473,10 +493,7 @@ fn anon_rust_to_java(
 ///
 /// Types hidden behind modules are almost certainly custom types (which wouldn't work) except
 /// types in `libc` which we special case.
-fn path_to_java(
-    path: &ast::Path,
-    type_map: &HashMap<&'static str, &'static str>,
-) -> Result<Option<String>, Error> {
+fn path_to_java(path: &ast::Path, context: &Context) -> Result<Option<String>, Error> {
     // I don't think this is possible.
     if path.segments.is_empty() {
         Err(Error {
@@ -496,7 +513,7 @@ fn path_to_java(
         }
         let module = segments.join("::");
         match &*module {
-            "libc" => Ok(Some(libc_ty_to_java(ty, type_map).into())),
+            "libc" => Ok(Some(libc_ty_to_java(ty, context).into())),
             "std::os::raw" => Ok(Some(osraw_ty_to_java(ty).into())),
             _ => Err(Error {
                 level: Level::Error,
@@ -510,7 +527,7 @@ fn path_to_java(
         Ok(Some(
             rust_ty_to_java(
                 &path.segments[0].identifier.name.as_str(),
-                type_map,
+                context,
             ).into(),
         ))
     }
@@ -519,7 +536,7 @@ fn path_to_java(
 /// Convert a Rust type from `libc` into a C type.
 ///
 /// Most map straight over but some have to be converted.
-fn libc_ty_to_java<'a, 'b: 'a>(ty: &'a str, type_map: &HashMap<&'b str, &'b str>) -> &'a str {
+fn libc_ty_to_java<'a>(ty: &'a str, context: &Context) -> &'a str {
     match ty {
         "c_bool" => "boolean",
         "c_void" => "void",
@@ -536,7 +553,7 @@ fn libc_ty_to_java<'a, 'b: 'a>(ty: &'a str, type_map: &HashMap<&'b str, &'b str>
         "c_ulong" => "long",
         // All other types should map over to C or explicitly defined mapping.
         ty => {
-            if let Some(mapping) = type_map.get(ty) {
+            if let Some(mapping) = context.type_map.get(ty) {
                 mapping
             } else {
                 ty
@@ -571,7 +588,7 @@ fn osraw_ty_to_java(ty: &str) -> &str {
 ///
 /// This includes user-defined types. We currently trust the user not to use types which we don't
 /// know the structure of (like String).
-fn rust_ty_to_java<'a, 'b: 'a>(ty: &'a str, type_map: &HashMap<&'b str, &'b str>) -> &'a str {
+fn rust_ty_to_java<'a>(ty: &'a str, context: &Context) -> &'a str {
     match ty {
         "()" => "void",
         "bool" => "boolean",
@@ -582,6 +599,6 @@ fn rust_ty_to_java<'a, 'b: 'a>(ty: &'a str, type_map: &HashMap<&'b str, &'b str>
         "u32" | "i32" => "int",
         "u64" | "i64" => "long",
         "usize" | "isize" => "long",
-        ty => libc_ty_to_java(ty, type_map),
+        ty => libc_ty_to_java(ty, context),
     }
 }

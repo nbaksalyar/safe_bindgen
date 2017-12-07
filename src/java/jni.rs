@@ -2,10 +2,10 @@
 
 use common::{is_array_arg, is_user_data_arg};
 use inflector::Inflector;
-use java::callback_name;
+use java::{Context, callback_name};
 use jni::signature::{self, JavaType, TypeSignature};
 use quote;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use syntax::ast;
 use syntax::print::pprust;
 use syntax::symbol;
@@ -65,10 +65,7 @@ fn java_ty_to_signature(s: &str) -> Option<JavaType> {
     }
 }
 
-fn rust_ty_to_signature(
-    ty: &ast::Ty,
-    type_map: &HashMap<&'static str, &'static str>,
-) -> Option<JavaType> {
+fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
     match ty.node {
         // Callback
         ast::TyKind::BareFn(ref _bare_fn) => Some(JavaType::Object(From::from("java/lang/Object"))),
@@ -90,7 +87,7 @@ fn rust_ty_to_signature(
                 ),
                 "c_bool" | "bool" => Some(JavaType::Object(From::from("java/lang/Boolean"))),
                 _ => {
-                    if let Some(mapped) = type_map.get(ty) {
+                    if let Some(mapped) = context.type_map.get(ty) {
                         java_ty_to_signature(mapped).or_else(|| {
                             Some(JavaType::Object(From::from(ty)))
                         })
@@ -107,7 +104,7 @@ fn rust_ty_to_signature(
             if pprust::ty_to_string(&ptr.ty) == "c_char" {
                 Some(JavaType::Object(From::from("java/lang/String")))
             } else {
-                rust_ty_to_signature(&ptr.ty, type_map)
+                rust_ty_to_signature(&ptr.ty, context)
             }
         }
 
@@ -205,9 +202,13 @@ pub fn generate_jni_function(
     args: Vec<ast::Arg>,
     native_name: &str,
     func_name: &str,
-    type_map: &HashMap<&'static str, &'static str>,
+    context: &Context,
 ) -> String {
-    let func_name = quote::Ident::new(format!("Java_NativeBindings_{}", func_name));
+    let func_name = quote::Ident::new(format!(
+        "Java_{}_NativeBindings_{}",
+        context.namespace.replace(".", "_"),
+        func_name
+    ));
     let native_name = quote::Ident::new(native_name);
 
     // Generate inputs
@@ -230,7 +231,7 @@ pub fn generate_jni_function(
                 ast::TyKind::BareFn(ref bare_fn) => {
                     let cb_class = format!(
                         "call_{}",
-                        callback_name(&*bare_fn.decl.inputs, type_map).unwrap()
+                        callback_name(&*bare_fn.decl.inputs, context).unwrap()
                     );
 
                     callbacks.push((quote::Ident::new(arg_name), quote::Ident::new(cb_class)));
@@ -299,11 +300,7 @@ fn transform_arg(arg: &ast::Arg) -> (quote::Ident, quote::Ident) {
 }
 
 /// Generates a JNI callback function based on a native callback type
-pub fn generate_jni_callback(
-    cb: &ast::BareFnTy,
-    cb_class: &str,
-    type_map: &HashMap<&'static str, &'static str>,
-) -> String {
+pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_class: &str, context: &Context) -> String {
     let cb_name = quote::Ident::new(format!("call_{}", cb_class));
 
     let mut args: Vec<quote::Tokens> = Vec::new(); // Native function call parameters
@@ -325,7 +322,7 @@ pub fn generate_jni_callback(
 
         if is_array_arg(&arg, args_iter.peek().cloned()) {
             // Handle array arguments
-            let val_java_type = rust_ty_to_signature(&arg.ty, type_map).unwrap();
+            let val_java_type = rust_ty_to_signature(&arg.ty, context).unwrap();
             arg_java_ty.push(JavaType::Array(Box::new(val_java_type)));
 
             if let Some(len_arg) = args_iter.next() {
@@ -370,7 +367,7 @@ pub fn generate_jni_callback(
                 }
             };
 
-            arg_java_ty.push(rust_ty_to_signature(&arg.ty, type_map).unwrap());
+            arg_java_ty.push(rust_ty_to_signature(&arg.ty, context).unwrap());
             stmts.push(stmt);
         }
     }
@@ -625,7 +622,7 @@ fn generate_struct_to_java(
 fn generate_struct_from_java(
     struct_ident: &quote::Ident,
     fields: &[ast::StructField],
-    type_map: &HashMap<&'static str, &'static str>,
+    context: &Context,
 ) -> quote::Tokens {
     let fields = transform_struct_fields(fields);
     let mut fields_values = Vec::new();
@@ -734,7 +731,7 @@ fn generate_struct_from_java(
                         );
                         let mut ty: &str = &ty.identifier.name.as_str();
 
-                        if let Some(rewrite_ty) = type_map.get(ty) {
+                        if let Some(rewrite_ty) = context.type_map.get(ty) {
                             // Rewrite type (it could be e.g. a handle)
                             ty = match *rewrite_ty {
                                 "long" => "u64",
@@ -797,11 +794,11 @@ pub fn generate_struct(
     fields: &[ast::StructField],
     native_name: &str,
     java_class_name: &str,
-    type_map: &HashMap<&'static str, &'static str>,
+    context: &Context,
 ) -> String {
     let struct_ident = quote::Ident::new(native_name);
 
-    let from_java = generate_struct_from_java(&struct_ident, fields, type_map);
+    let from_java = generate_struct_from_java(&struct_ident, fields, context);
     let to_java = generate_struct_to_java(&struct_ident, java_class_name, fields);
 
     let tokens =
