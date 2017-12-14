@@ -32,15 +32,15 @@ doc = false
 path = "src/bin/bindgen.rs"
 
 [dependencies]
-syntex_errors = {version = "0.58.1", optional = true}
-syntex_syntax = {version = "0.58.1", optional = true}
-toml = "0.3.2"
-clap = "2"
-Inflector = "0.10.1"
-jni = "0.7.2"
-quote = "0.3.15"
+syntex_errors = {version = "~0.58.1", optional = true}
+syntex_syntax = {version = "~0.58.1", optional = true}
+toml = "~0.3.2"
+clap = "~2.25.1"
+Inflector = "~0.11.1"
+jni = "~0.7.2"
+quote = "~0.3.15"
 
 [dev-dependencies]
-colored = "1.6.0"
-diff = "0.1.11"
-indoc = "0.2.3"
+colored = "~1.6.0"
+diff = "~0.1.11"
+indoc = "~0.2.3"
