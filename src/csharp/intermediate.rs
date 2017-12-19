@@ -2,7 +2,7 @@
 //! and the target language code.
 
 use common;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use syntax::ast;
 use syntax::print::pprust;
 use syntax::ptr;
@@ -42,10 +42,23 @@ pub enum Type {
     User(String),
 }
 
+impl Type {
+    pub fn is_dynamic_array(&self) -> bool {
+        if let Type::Array(_, ArraySize::Dynamic) = *self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ArraySize {
+    /// Static size given as literal number.
     Lit(usize),
+    /// Static size given as named constant.
     Const(String),
+    // Dynamic size.
     Dynamic,
 }
 
@@ -80,10 +93,12 @@ pub struct Struct {
     pub fields: Vec<StructField>,
 }
 
+#[derive(Debug)]
 pub struct StructField {
     pub docs: String,
     pub name: String,
     pub ty: Type,
+    pub has_cap: bool,
 }
 
 pub struct Enum {
@@ -96,26 +111,6 @@ pub struct EnumVariant {
     pub value: Option<i64>,
 }
 
-impl Struct {
-    /// "native" in this context means that it contains raw pointers, so a
-    /// wrapper for it has to be generated to provide more natural inteface.
-    pub fn is_native(&self, opaque_types: &HashSet<String>) -> bool {
-        self.fields.iter().any(
-            |field| if let Type::Pointer(ref ty) =
-                field.ty
-            {
-                if let Type::User(ref name) = **ty {
-                    // Pointers to opaque types don't need wrapping.
-                    !opaque_types.contains(name)
-                } else {
-                    true
-                }
-            } else {
-                false
-            },
-        )
-    }
-}
 
 pub fn transform_type(input: &ast::Ty) -> Option<Type> {
     match input.node {
@@ -234,11 +229,16 @@ pub fn transform_struct(fields: &[ast::StructField]) -> Option<Struct> {
             let name = field.ident.unwrap().name.as_str().to_string();
             let ty = try_opt!(transform_type(&field.ty));
 
-            Some(StructField { docs, name, ty })
+            Some(StructField {
+                docs,
+                name,
+                ty,
+                has_cap: false,
+            })
         })
         .collect();
 
-    fields.map(|fields| Struct { fields })
+    fields.map(|fields| Struct { fields: process_struct_fields(fields) })
 }
 
 /// Is the given parameter an `user_data` for a callback?
@@ -498,5 +498,69 @@ fn extract_int_literal(lit: &ast::Lit) -> Option<i64> {
         Some(val as i64)
     } else {
         None
+    }
+}
+
+fn process_struct_fields(mut input: Vec<StructField>) -> Vec<StructField> {
+    let mut output = Vec::with_capacity(input.len());
+
+    let mut iter = input.drain(..);
+    let mut field0 = if let Some(field) = iter.next() {
+        field
+    } else {
+        return output;
+    };
+
+    loop {
+        if let Some(field1) = iter.next() {
+            if let Some((name, ty)) = transform_ptr_and_len_to_array(
+                &field0.name,
+                &field0.ty,
+                &field1.name,
+                &field1.ty,
+            )
+            {
+                output.push(StructField {
+                    docs: String::new(),
+                    name,
+                    ty,
+                    has_cap: false,
+                });
+
+                let last = output.last_mut().unwrap();
+
+                if let Some(field) = iter.next() {
+                    if is_capacity(&field, &last.name) {
+                        last.has_cap = true;
+
+                        if let Some(field) = iter.next() {
+                            field0 = field;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        field0 = field;
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                output.push(field0);
+                field0 = field1;
+            }
+        } else {
+            output.push(field0);
+            break;
+        }
+    }
+
+    output
+}
+
+fn is_capacity(field: &StructField, base_name: &str) -> bool {
+    if let Type::USize = field.ty {
+        &field.name[0..base_name.len()] == base_name && &field.name[base_name.len()..] == "_cap"
+    } else {
+        false
     }
 }

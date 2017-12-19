@@ -92,21 +92,37 @@ fn structs() {
 }
 
 #[test]
-fn structs_with_dynamic_array_field() {
-    // It should append "Native" to the struct name, to allow writing custom
-    // wrappers.
-
+fn native_structs() {
     let outputs = compile!(None, {
         #[repr(C)]
         pub struct Entry {
+            id: u32,
             key_ptr: *const u8,
             key_len: usize,
             records_ptr: *const Record,
             records_len: usize,
+            records_cap: usize,
+        }
+
+        #[repr(C)]
+        pub struct Wrapper {
+            entry: Entry,
         }
 
         #[no_mangle]
-        pub extern "C" fn fun(entry: Entry) {}
+        pub extern "C" fn fun0(entry: Entry) {}
+
+        #[no_mangle]
+        pub extern "C" fn fun1(entry: *const Entry) {}
+
+        #[no_mangle]
+        pub extern "C" fn fun2(
+            user_data: *mut c_void,
+            cb: extern "C" fn(user_data: *mut c_void,
+                              result: *const FfiResult,
+                              entry: *const Entry),
+        ) {
+        }
     });
 
     let actual = fetch(&outputs, "Types.cs");
@@ -115,11 +131,64 @@ fn structs_with_dynamic_array_field() {
          using System.Runtime.InteropServices;
 
          namespace Backend {
-             public struct EntryNative {
+             internal struct EntryNative {
+                 public uint Id;
                  public IntPtr KeyPtr;
                  public IntPtr KeyLen;
                  public IntPtr RecordsPtr;
                  public IntPtr RecordsLen;
+                 public IntPtr RecordsCap;
+
+                 internal void Free() {
+                     Utils.FreeArray(ref KeyPtr, ref KeyLen);
+                     Utils.FreeArray(ref RecordsPtr, ref RecordsLen);
+                 }
+             }
+
+             public struct Entry {
+                 public uint Id;
+                 public byte[] Key;
+                 public Record[] Records;
+
+                 internal Entry(EntryNative native) {
+                     Id = native.Id;
+                     Key = Utils.CopyToByteArray(native.KeyPtr, native.KeyLen);
+                     Records = Utils.CopyToObjectArray<Record>(native.RecordsPtr, \
+                                                               native.RecordsLen);
+                 }
+
+                 internal EntryNative ToNative() {
+                     return new EntryNative() {
+                         Id = Id,
+                         KeyPtr = Utils.CopyFromByteArray(Key),
+                         KeyLen = (IntPtr) Key.Length,
+                         RecordsPtr = Utils.CopyFromObjectArray(Records),
+                         RecordsLen = (IntPtr) Records.Length,
+                         RecordsCap = (IntPtr) 0
+                     };
+                 }
+             }
+
+             internal struct WrapperNative {
+                 public EntryNative Entry;
+
+                 internal void Free() {
+                     Entry.Free();
+                 }
+             }
+
+             public struct Wrapper {
+                 public Entry Entry;
+
+                 internal Wrapper(WrapperNative native) {
+                     Entry = Entry(native.Entry);
+                 }
+
+                 internal WrapperNative ToNative() {
+                     return new WrapperNative() {
+                         Entry = Entry.ToNative()
+                     };
+                 }
              }
 
          }
@@ -141,12 +210,49 @@ fn structs_with_dynamic_array_field() {
                  internal const string DLL_NAME = \"backend\";
                  #endif
 
-                 public void Fun(EntryNative entry) {
-                     FunNative(entry);
+                 public void Fun0(Entry entry) {
+                     var entryNative = entry.ToNative();
+                     Fun0Native(entryNative);
+                     entryNative.Free();
                  }
 
-                 [DllImport(DLL_NAME, EntryPoint = \"fun\")]
-                 internal static extern void FunNative(EntryNative entry);
+                 [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
+                 internal static extern void Fun0Native(EntryNative entry);
+
+                 public void Fun1(ref Entry entry) {
+                     var entryNative = entry.ToNative();
+                     Fun1Native(ref entryNative);
+                     entryNative.Free();
+                 }
+
+                 [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
+                 internal static extern void Fun1Native(ref EntryNative entry);
+
+                 public Task<Entry> Fun2Async() {
+                     var (ret, userData) = Utils.PrepareTask<Entry>();
+                     Fun2Native(userData, OnFfiResultEntryCb);
+                     return ret;
+                 }
+
+                 [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
+                 internal static extern void Fun2Native(IntPtr userData, \
+                                                        FfiResultEntryCb cb);
+
+                 #region Callbacks
+                 internal delegate void FfiResultEntryCb(IntPtr userData, \
+                                                         ref FfiResult result, \
+                                                         ref EntryNative entry);
+
+                 #if __IOS__
+                 [MonoPInvokeCallback(typeof(FfiResultEntryCb))]
+                 #endif
+                 private static void OnFfiResultEntryCb(IntPtr userData, \
+                                                        ref FfiResult result, \
+                                                        ref EntryNative entry) {
+                     Utils.CompleteTask(userData, ref result, new Entry(entry));
+                 }
+
+                 #endregion
 
              }
          }
@@ -211,9 +317,9 @@ fn type_aliases() {
                  #endif
 
                  public Task<ulong> FunAsync(ulong id) {
-                     var (task, userData) = Utils.PrepareTask<ulong>();
+                     var (ret, userData) = Utils.PrepareTask<ulong>();
                      FunNative(id, userData, OnFfiResultULongCb);
-                     return task;
+                     return ret;
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun\")]
@@ -362,9 +468,9 @@ fn functions_taking_one_callback() {
                  #endif
 
                  public Task Fun1Async(int num, string name) {
-                     var (task, userData) = Utils.PrepareTask();
+                     var (ret, userData) = Utils.PrepareTask();
                      Fun1Native(num, name, userData, OnFfiResultCb);
-                     return task;
+                     return ret;
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
@@ -553,9 +659,9 @@ fn functions_taking_callback_taking_const_size_array() {
                  #endif
 
                  public Task<byte[]> Fun2Async() {
-                     var (task, userData) = Utils.PrepareTask<byte[]>();
+                     var (ret, userData) = Utils.PrepareTask<byte[]>();
                      Fun2Native(userData, OnFfiResultByteArray32Cb);
-                     return task;
+                     return ret;
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
@@ -563,9 +669,9 @@ fn functions_taking_callback_taking_const_size_array() {
                                                         FfiResultByteArray32Cb cb);
 
                  public Task<byte[]> Fun3Async() {
-                     var (task, userData) = Utils.PrepareTask<byte[]>();
+                     var (ret, userData) = Utils.PrepareTask<byte[]>();
                      Fun3Native(userData, OnFfiResultByteArrayNonceLenCb);
-                     return task;
+                     return ret;
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun3\")]
@@ -654,9 +760,9 @@ fn functions_taking_callback_taking_dynamic_array() {
                  #endif
 
                  public Task<byte[]> Fun0Async() {
-                     var (task, userData) = Utils.PrepareTask<byte[]>();
+                     var (ret, userData) = Utils.PrepareTask<byte[]>();
                      Fun0Native(userData, OnFfiResultByteListCb);
-                     return task;
+                     return ret;
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
@@ -664,9 +770,9 @@ fn functions_taking_callback_taking_dynamic_array() {
                                                         FfiResultByteListCb cb);
 
                  public Task<Record[]> Fun1Async() {
-                     var (task, userData) = Utils.PrepareTask<Record[]>();
+                     var (ret, userData) = Utils.PrepareTask<Record[]>();
                      Fun1Native(userData, OnFfiResultRecordListCb);
-                     return task;
+                     return ret;
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
@@ -677,7 +783,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                  internal delegate void FfiResultByteListCb(IntPtr userData, \
                                                             ref FfiResult result, \
                                                             IntPtr dataPtr, \
-                                                            ulong dataLen);
+                                                            IntPtr dataLen);
 
                  #if __IOS__
                  [MonoPInvokeCallback(typeof(FfiResultByteListCb))]
@@ -685,7 +791,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                  private static void OnFfiResultByteListCb(IntPtr userData, \
                                                            ref FfiResult result, \
                                                            IntPtr dataPtr, \
-                                                           ulong dataLen) {
+                                                           IntPtr dataLen) {
                      Utils.CompleteTask(userData, \
                                         ref result, \
                                         Utils.CopyToByteArray(dataPtr, dataLen));
@@ -694,7 +800,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                  internal delegate void FfiResultRecordListCb(IntPtr userData, \
                                                               ref FfiResult result, \
                                                               IntPtr recordsPtr, \
-                                                              ulong recordsLen);
+                                                              IntPtr recordsLen);
 
                  #if __IOS__
                  [MonoPInvokeCallback(typeof(FfiResultRecordListCb))]
@@ -702,7 +808,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                  private static void OnFfiResultRecordListCb(IntPtr userData, \
                                                              ref FfiResult result, \
                                                              IntPtr recordsPtr, \
-                                                             ulong recordsLen) {
+                                                             IntPtr recordsLen) {
                      Utils.CompleteTask(userData, \
                                         ref result, \
                                         Utils.CopyToObjectArray<Record>(\
@@ -742,7 +848,8 @@ fn functions_with_return_values() {
                  #endif
 
                  public bool Fun(int arg) {
-                     return FunNative(arg);
+                     var ret = FunNative(arg);
+                     return ret;
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun\")]

@@ -67,20 +67,47 @@ namespace @Namespace {
             CompleteTask(userData, ref result, true);
         }
 
-        public static byte[] CopyToByteArray(IntPtr ptr, ulong len) {
-            var array = new byte[len];
+        public static byte[] CopyToByteArray(IntPtr ptr, IntPtr len) {
+            var array = new byte[(int) len];
             Marshal.Copy(ptr, array, 0, (int) len);
 
             return array;
         }
 
-        public static T[] CopyToObjectArray<T>(IntPtr ptr, ulong len) {
-            var array = new T[len];
+        public static T[] CopyToObjectArray<T>(IntPtr ptr, IntPtr len) {
+            var array = new T[(int) len];
             for (int i = 0; i < (int) len; ++i) {
                 array[i] = Marshal.PtrToStructure<T>(IntPtr.Add(ptr, Marshal.SizeOf<T>() * i));
             }
 
             return array;
+        }
+
+        public static IntPtr CopyFromByteArray(byte[] array) {
+            var size = Marshal.SizeOf(array[0]) * array.Length;
+            var ptr  = Marshal.AllocHGlobal(size);
+            Marshal.Copy(array, 0, ptr, array.Length);
+
+            return ptr;
+        }
+
+        public static T[] CopyFromObjectArray<T>(T[] array) {
+            var size = Marshal.SizeOf(array[0]) * array.Length;
+            var ptr  = Marshal.AllocHGlobal(size);
+            for (int i = 0; i < array.Length; ++i) {
+                Marshal.StructureToPtr(array[i], IntPtr.Add(ptr, Marshal.SizeOf<T>() * i), false);
+            }
+
+            return array;
+        }
+
+        public static void FreeArray(ref IntPtr ptr, ref IntPtr len) {
+            if (ptr != IntPtr.Zero) {
+                Marshal.FreeHGlobal(ptr);
+            }
+
+            ptr = IntPtr.Zero;
+            len = IntPtr.Zero;
         }
 
     }

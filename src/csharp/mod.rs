@@ -44,6 +44,25 @@ pub struct Context {
     utils_class_name: String,
     preserve_comments: bool,
     opaque_types: HashSet<String>,
+    native_types: HashSet<String>,
+}
+
+impl Context {
+    pub fn is_opaque(&self, name: &str) -> bool {
+        self.opaque_types.contains(name)
+    }
+
+    pub fn is_native_name(&self, name: &str) -> bool {
+        self.native_types.contains(name)
+    }
+
+    pub fn is_native_type(&self, ty: &Type) -> bool {
+        match *ty {
+            Type::Pointer(ref ty) => self.is_native_type(&*ty),
+            Type::User(ref name) => self.is_native_name(name),
+            _ => false,
+        }
+    }
 }
 
 impl LangCSharp {
@@ -62,6 +81,7 @@ impl LangCSharp {
                 utils_class_name: "Utils".to_string(),
                 preserve_comments: false,
                 opaque_types: Default::default(),
+                native_types: Default::default(),
             },
             custom_consts: Vec::new(),
             consts: Vec::new(),
@@ -152,17 +172,6 @@ impl LangCSharp {
         self.wrapper_function_blacklist.clear();
     }
 
-    fn detect_native_structs(&mut self) {
-        for snippet in &self.structs {
-            if snippet.item.is_native(&self.context.opaque_types) {
-                let _ = self.aliases.insert(
-                    snippet.name.clone(),
-                    Type::User(format!("{}Native", snippet.name)),
-                );
-            }
-        }
-    }
-
     fn resolve_aliases(&mut self) {
         for snippet in &mut self.consts {
             resolve_alias(&self.aliases, &mut snippet.item.ty);
@@ -183,6 +192,31 @@ impl LangCSharp {
 
             for &mut (_, ref mut ty) in &mut snippet.item.inputs {
                 resolve_alias(&self.aliases, ty)
+            }
+        }
+    }
+
+    fn resolve_native_types(&mut self) {
+        let mut run = true;
+        while run {
+            run = false;
+
+            for snippet in &self.structs {
+                // If the struct is already marked as native, proceed to the next one.
+                if self.context.is_native_name(&snippet.name) {
+                    continue;
+                }
+
+                // Otherwise, check it one of its fields is native, and if it is,
+                // mark the struct as native and reprocess the whole thing again,
+                // to detect structs with newly identified native fields.
+                if snippet.item.fields.iter().any(|field| {
+                    field.ty.is_dynamic_array() || self.context.is_native_type(&field.ty)
+                })
+                {
+                    let _ = self.context.native_types.insert(snippet.name.clone());
+                    run = true;
+                }
             }
         }
     }
@@ -331,8 +365,8 @@ impl Lang for LangCSharp {
                 }
             })?;
             let name = name.to_string();
-
             self.structs.push(Snippet { docs, name, item });
+            self.resolve_native_types();
         }
 
         Ok(())
@@ -385,7 +419,6 @@ impl Lang for LangCSharp {
     }
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
-        self.detect_native_structs();
         self.resolve_aliases();
 
         if !self.functions.is_empty() {
@@ -588,6 +621,7 @@ impl Lang for LangCSharp {
 
         // Other cleanup.
         self.context.opaque_types.clear();
+        self.context.native_types.clear();
 
         Ok(())
     }
