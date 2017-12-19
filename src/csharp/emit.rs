@@ -25,11 +25,12 @@ pub fn emit_wrapper_function_decl(
 
     if let Some(callback) = extract_first_callback(&fun.inputs) {
         emit_task(writer, context, &callback.inputs);
+        emit!(writer, " {}Async(", name.to_pascal_case());
     } else {
         emit_type(writer, context, &fun.output, PointerMode::Ref);
+        emit!(writer, " {}(", name.to_pascal_case());
     }
 
-    emit!(writer, " {}(", name.to_pascal_case());
     emit_wrapper_function_params(writer, context, &fun.inputs, true);
     emit!(writer, ")");
 }
@@ -75,7 +76,7 @@ pub fn emit_wrapper_function(
             let name = param_name(name, index);
 
             if let Type::Array(_, ArraySize::Dynamic) = *ty {
-                emit!(writer, "{}, (ulong) {}.Length", name, name)
+                emit!(writer, "{}, (IntPtr) {}.Length", name, name)
             } else if let Type::Pointer(ref ty) = *ty {
                 emit_pointer_use(
                     writer,
@@ -186,7 +187,7 @@ pub fn emit_const(writer: &mut IndentedWriter, context: &Context, name: &str, it
     }
 
     emit_type(writer, context, &item.ty, PointerMode::Opaque);
-    emit!(writer, " {} = ", name.to_screaming_snake_case());
+    emit!(writer, " {} = ", name.to_pascal_case());
     emit_const_value(writer, context, Some(&item.ty), &item.value);
     emit!(writer, ";\n");
 }
@@ -219,14 +220,6 @@ pub fn emit_struct(writer: &mut IndentedWriter, context: &Context, name: &str, i
         emit_struct_field(writer, context, &field.ty, &field.name);
     }
 
-    writer.unindent();
-    emit!(writer, "}}\n\n");
-}
-
-pub fn emit_opaque_type(writer: &mut IndentedWriter, name: &str) {
-    emit!(writer, "public struct {} {{\n", name);
-    writer.indent();
-    emit!(writer, "private IntPtr _value;\n");
     writer.unindent();
     emit!(writer, "}}\n\n");
 }
@@ -339,7 +332,12 @@ fn emit_const_value(
 }
 
 fn emit_const_use(writer: &mut IndentedWriter, context: &Context, name: &str) {
-    emit!(writer, "{}.{}", context.consts_class_name, name);
+    emit!(
+        writer,
+        "{}.{}",
+        context.consts_class_name,
+        name.to_pascal_case()
+    );
 }
 
 fn emit_struct_field(writer: &mut IndentedWriter, context: &Context, ty: &Type, name: &str) {
@@ -405,7 +403,7 @@ fn emit_native_function_params(
         emit!(writer, " {}", name);
 
         if let Type::Array(_, ArraySize::Dynamic) = *ty {
-            emit!(writer, ", ulong {}Len", name);
+            emit!(writer, ", IntPtr {}Len", name);
         }
 
         index += 1;
@@ -506,18 +504,18 @@ fn emit_type(writer: &mut IndentedWriter, context: &Context, ty: &Type, mode: Po
         Type::I16 => emit!(writer, "short"),
         Type::I32 => emit!(writer, "int"),
         Type::I64 => emit!(writer, "long"),
-        Type::ISize => emit!(writer, "long"),
+        Type::ISize => emit!(writer, "IntPtr"),
         Type::U8 => emit!(writer, "byte"),
         Type::U16 => emit!(writer, "ushort"),
         Type::U32 => emit!(writer, "uint"),
         Type::U64 => emit!(writer, "ulong"),
-        Type::USize => emit!(writer, "ulong"),
-        Type::String => emit!(writer, "String"),
+        Type::USize => emit!(writer, "IntPtr"),
+        Type::String => emit!(writer, "string"),
         Type::Pointer(ref ty) => {
             match **ty {
                 Type::User(ref name) => {
                     if context.opaque_types.contains(name) {
-                        emit!(writer, "{}", name)
+                        emit!(writer, "IntPtr")
                     } else {
                         match mode {
                             PointerMode::Opaque => emit!(writer, "IntPtr"),

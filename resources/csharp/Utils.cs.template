@@ -15,7 +15,7 @@ namespace @Namespace {
         }
     }
 
-    internal struct FfiResult {
+    public struct FfiResult {
         public int ErrorCode;
         [MarshalAs(UnmanagedType.LPStr)]
         public String Description;

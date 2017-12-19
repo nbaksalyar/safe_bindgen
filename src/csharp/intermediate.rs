@@ -2,7 +2,7 @@
 //! and the target language code.
 
 use common;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use syntax::ast;
 use syntax::print::pprust;
 use syntax::ptr;
@@ -97,14 +97,23 @@ pub struct EnumVariant {
 }
 
 impl Struct {
-    pub fn has_pointer_fields(&self) -> bool {
-        self.fields.iter().any(|field| if let Type::Pointer(_) =
-            field.ty
-        {
-            true
-        } else {
-            false
-        })
+    /// "native" in this context means that it contains raw pointers, so a
+    /// wrapper for it has to be generated to provide more natural inteface.
+    pub fn is_native(&self, opaque_types: &HashSet<String>) -> bool {
+        self.fields.iter().any(
+            |field| if let Type::Pointer(ref ty) =
+                field.ty
+            {
+                if let Type::User(ref name) = **ty {
+                    // Pointers to opaque types don't need wrapping.
+                    !opaque_types.contains(name)
+                } else {
+                    true
+                }
+            } else {
+                false
+            },
+        )
     }
 }
 

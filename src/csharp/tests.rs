@@ -76,7 +76,7 @@ fn structs() {
                  [MarshalAs(UnmanagedType.U1)]
                  public bool Enabled;
                  [MarshalAs(UnmanagedType.LPStr)]
-                 public String Name;
+                 public string Name;
                  [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
                  public int[] RandomNumbers;
                  public Widget Widget;
@@ -117,9 +117,9 @@ fn structs_with_dynamic_array_field() {
          namespace Backend {
              public struct EntryNative {
                  public IntPtr KeyPtr;
-                 public ulong KeyLen;
+                 public IntPtr KeyLen;
                  public IntPtr RecordsPtr;
-                 public ulong RecordsLen;
+                 public IntPtr RecordsLen;
              }
 
          }
@@ -136,9 +136,9 @@ fn structs_with_dynamic_array_field() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
                  public void Fun(EntryNative entry) {
@@ -205,12 +205,12 @@ fn type_aliases() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
-                 public Task<ulong> Fun(ulong id) {
+                 public Task<ulong> FunAsync(ulong id) {
                      var (task, userData) = Utils.PrepareTask<ulong>();
                      FunNative(id, userData, OnFfiResultULongCb);
                      return task;
@@ -314,9 +314,9 @@ fn functions_taking_no_callbacks() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
                  public void Fun0(ref Engine engine) {
@@ -356,12 +356,12 @@ fn functions_taking_one_callback() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
-                 public Task Fun1(int num, String name) {
+                 public Task Fun1Async(int num, string name) {
                      var (task, userData) = Utils.PrepareTask();
                      Fun1Native(num, name, userData, OnFfiResultCb);
                      return task;
@@ -370,7 +370,7 @@ fn functions_taking_one_callback() {
                  [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
                  internal static extern void Fun1Native(\
                     int num, \
-                    [MarshalAs(UnmanagedType.LPStr)] String name, \
+                    [MarshalAs(UnmanagedType.LPStr)] string name, \
                     IntPtr userData, \
                     FfiResultCb cb);
 
@@ -420,9 +420,9 @@ fn functions_taking_multiple_callbacks() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun\")]
@@ -473,38 +473,38 @@ fn functions_taking_array() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
                  public void Fun0(byte[] data) {
-                     Fun0Native(data, (ulong) data.Length);
+                     Fun0Native(data, (IntPtr) data.Length);
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
                  internal static extern void Fun0Native(\
                     [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
-                    ulong dataLen\
+                    IntPtr dataLen\
                  );
 
                  public void Fun1(ulong id, byte[] data) {
-                     Fun1Native(id, data, (ulong) data.Length);
+                     Fun1Native(id, data, (IntPtr) data.Length);
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
                  internal static extern void Fun1Native(\
                     ulong id, \
                     [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] data, \
-                    ulong dataLen\
+                    IntPtr dataLen\
                  );
 
-                 public void Fun2(ref FfiResult result, ulong len) {
+                 public void Fun2(ref FfiResult result, IntPtr len) {
                      Fun2Native(ref result, len);
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
-                 internal static extern void Fun2Native(ref FfiResult result, ulong len);
+                 internal static extern void Fun2Native(ref FfiResult result, IntPtr len);
 
              }
          }
@@ -547,12 +547,12 @@ fn functions_taking_callback_taking_const_size_array() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
-                 public Task<byte[]> Fun2() {
+                 public Task<byte[]> Fun2Async() {
                      var (task, userData) = Utils.PrepareTask<byte[]>();
                      Fun2Native(userData, OnFfiResultByteArray32Cb);
                      return task;
@@ -562,7 +562,7 @@ fn functions_taking_callback_taking_const_size_array() {
                  internal static extern void Fun2Native(IntPtr userData, \
                                                         FfiResultByteArray32Cb cb);
 
-                 public Task<byte[]> Fun3() {
+                 public Task<byte[]> Fun3Async() {
                      var (task, userData) = Utils.PrepareTask<byte[]>();
                      Fun3Native(userData, OnFfiResultByteArrayNonceLenCb);
                      return task;
@@ -600,7 +600,7 @@ fn functions_taking_callback_taking_const_size_array() {
                                                                     IntPtr noncePtr) {
                      Utils.CompleteTask(userData, \
                                         ref result, \
-                                        Utils.CopyToByteArray(noncePtr, Constants.NONCE_LEN));
+                                        Utils.CopyToByteArray(noncePtr, Constants.NonceLen));
                  }
 
                  #endregion
@@ -648,12 +648,12 @@ fn functions_taking_callback_taking_dynamic_array() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
-                 public Task<byte[]> Fun0() {
+                 public Task<byte[]> Fun0Async() {
                      var (task, userData) = Utils.PrepareTask<byte[]>();
                      Fun0Native(userData, OnFfiResultByteListCb);
                      return task;
@@ -663,7 +663,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                  internal static extern void Fun0Native(IntPtr userData, \
                                                         FfiResultByteListCb cb);
 
-                 public Task<Record[]> Fun1() {
+                 public Task<Record[]> Fun1Async() {
                      var (task, userData) = Utils.PrepareTask<Record[]>();
                      Fun1Native(userData, OnFfiResultRecordListCb);
                      return task;
@@ -721,61 +721,6 @@ fn functions_taking_callback_taking_dynamic_array() {
 }
 
 #[test]
-fn functions_with_opaque_params() {
-    let mut lang = LangCSharp::new();
-    lang.add_opaque_type("Handle");
-
-    let outputs = compile!(lang, {
-        #[no_mangle]
-        pub extern "C" fn fun0(handle: *const Handle) {}
-    });
-
-    let actual = fetch(&outputs, "Types.cs");
-    let expected = indoc!(
-        "using System;
-         using System.Runtime.InteropServices;
-
-         namespace Backend {
-             #pragma warning disable CS0169
-             public struct Handle {
-                 private IntPtr _value;
-             }
-
-             #pragma warning restore CS0169
-         }
-        "
-    );
-    assert_multiline_eq!(actual, expected);
-
-    let actual = fetch(&outputs, "Backend.cs");
-    let expected = indoc!(
-        "using System;
-         using System.Runtime.InteropServices;
-         using System.Threading.Tasks;
-
-         namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
-                 #else
-                 internal const String DLL_NAME = \"backend\";
-                 #endif
-
-                 public void Fun0(Handle handle) {
-                     Fun0Native(handle);
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-                 internal static extern void Fun0Native(Handle handle);
-
-             }
-         }
-        "
-    );
-    assert_multiline_eq!(actual, expected);
-}
-
-#[test]
 fn functions_with_return_values() {
     let outputs = compile!(None, {
         #[no_mangle]
@@ -791,9 +736,9 @@ fn functions_with_return_values() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
                  public bool Fun(int arg) {
@@ -827,9 +772,9 @@ fn functions_taking_out_param() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
                  public void Fun(out IntPtr oApp) {
@@ -849,7 +794,7 @@ fn functions_taking_out_param() {
 #[test]
 fn constants() {
     let mut lang = LangCSharp::new();
-    lang.add_const("byte", "CUSTOM", 45);
+    lang.add_const("byte", "Custom", 45);
 
     let outputs = compile!(lang, {
         pub const NUMBER: i32 = 123;
@@ -875,15 +820,15 @@ fn constants() {
 
          namespace Backend {
              public static class Constants {
-                 public const int NUMBER = 123;
-                 public const String STRING = \"hello world\";
-                 public static readonly byte[] ARRAY = new byte[] { 0, 1, 2, 3 };
-                 public static readonly Record STRUCT_VALUE = new Record { \
+                 public const int Number = 123;
+                 public const string String = \"hello world\";
+                 public static readonly byte[] Array = new byte[] { 0, 1, 2, 3 };
+                 public static readonly Record StructValue = new Record { \
                      id = 0, secretCode = \"xyz\" };
-                 public static readonly Record STRUCT_REF = new Record { \
+                 public static readonly Record StructRef = new Record { \
                      id = 1, secretCode = \"xyz\" };
-                 public const String EMPTY_STR = \"\";
-                 public const byte CUSTOM = 45;
+                 public const string EmptyStr = \"\";
+                 public const byte Custom = 45;
              }
          }
         "
@@ -910,9 +855,9 @@ fn arrays() {
          namespace Backend {
              public partial class Backend : IBackend {
                  #if __IOS__
-                 internal const String DLL_NAME = \"__Internal\";
+                 internal const string DLL_NAME = \"__Internal\";
                  #else
-                 internal const String DLL_NAME = \"backend\";
+                 internal const string DLL_NAME = \"backend\";
                  #endif
 
                  public void Fun(byte[] a, byte[] b) {
@@ -923,7 +868,7 @@ fn arrays() {
                  internal static extern void FunNative(\
                      [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)] \
                      byte[] a, \
-                     [MarshalAs(UnmanagedType.ByValArray, SizeConst = (int) Constants.ARRAY_SIZE)] \
+                     [MarshalAs(UnmanagedType.ByValArray, SizeConst = (int) Constants.ArraySize)] \
                      byte[] b);
 
              }
@@ -931,6 +876,64 @@ fn arrays() {
         "
     );
 
+    assert_multiline_eq!(actual, expected);
+}
+
+#[test]
+fn opaque_types() {
+    let mut lang = LangCSharp::new();
+    lang.add_opaque_type("Handle");
+
+    let outputs = compile!(lang, {
+        #[no_mangle]
+        pub extern "C" fn fun0(handle: *const Handle) {}
+
+        #[repr(C)]
+        pub struct Context {
+            handle: *const Handle,
+        }
+    });
+
+    let actual = fetch(&outputs, "Types.cs");
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+
+         namespace Backend {
+             public struct Context {
+                 public IntPtr Handle;
+             }
+
+         }
+        "
+    );
+    assert_multiline_eq!(actual, expected);
+
+    let actual = fetch(&outputs, "Backend.cs");
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+         using System.Threading.Tasks;
+
+         namespace Backend {
+             public partial class Backend : IBackend {
+                 #if __IOS__
+                 internal const string DLL_NAME = \"__Internal\";
+                 #else
+                 internal const string DLL_NAME = \"backend\";
+                 #endif
+
+                 public void Fun0(IntPtr handle) {
+                     Fun0Native(handle);
+                 }
+
+                 [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
+                 internal static extern void Fun0Native(IntPtr handle);
+
+             }
+         }
+        "
+    );
     assert_multiline_eq!(actual, expected);
 }
 
@@ -954,7 +957,7 @@ fn interface() {
 
          namespace Backend {
              public partial interface IBackend {
-                 Task Fun(bool enabled);
+                 Task FunAsync(bool enabled);
              }
          }
         "

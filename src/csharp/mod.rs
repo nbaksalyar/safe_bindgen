@@ -9,6 +9,7 @@ use self::intermediate::*;
 use Error;
 use Level;
 use common::{self, FilterMode, Lang, Outputs};
+use inflector::Inflector;
 use output::IndentedWriter;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::btree_map::Entry;
@@ -123,7 +124,7 @@ impl LangCSharp {
         self.custom_consts.push(format!(
             "public const {} {} = {};",
             ty,
-            name,
+            name.to_pascal_case(),
             value
         ));
     }
@@ -149,6 +150,17 @@ impl LangCSharp {
 
     pub fn reset_wrapper_function_blacklist(&mut self) {
         self.wrapper_function_blacklist.clear();
+    }
+
+    fn detect_native_structs(&mut self) {
+        for snippet in &self.structs {
+            if snippet.item.is_native(&self.context.opaque_types) {
+                let _ = self.aliases.insert(
+                    snippet.name.clone(),
+                    Type::User(format!("{}Native", snippet.name)),
+                );
+            }
+        }
     }
 
     fn resolve_aliases(&mut self) {
@@ -320,13 +332,6 @@ impl Lang for LangCSharp {
             })?;
             let name = name.to_string();
 
-            if item.has_pointer_fields() {
-                let _ = self.aliases.insert(
-                    name.clone(),
-                    Type::User(format!("{}Native", name)),
-                );
-            }
-
             self.structs.push(Snippet { docs, name, item });
         }
 
@@ -380,6 +385,7 @@ impl Lang for LangCSharp {
     }
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
+        self.detect_native_structs();
         self.resolve_aliases();
 
         if !self.functions.is_empty() {
@@ -403,11 +409,11 @@ impl Lang for LangCSharp {
             // Define constant with the native library name, to be used in
             // the [DllImport] attributes.
             emit!(writer, "#if __IOS__\n");
-            emit!(writer, "internal const String DLL_NAME = \"__Internal\";\n");
+            emit!(writer, "internal const string DLL_NAME = \"__Internal\";\n");
             emit!(writer, "#else\n");
             emit!(
                 writer,
-                "internal const String DLL_NAME = \"{}\";\n",
+                "internal const string DLL_NAME = \"{}\";\n",
                 self.context.lib_name
             );
             emit!(writer, "#endif\n\n");
@@ -539,9 +545,7 @@ impl Lang for LangCSharp {
         }
 
         // Types
-        if !self.enums.is_empty() || !self.structs.is_empty() ||
-            !self.context.opaque_types.is_empty()
-        {
+        if !self.enums.is_empty() || !self.structs.is_empty() {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
             emit!(writer, "using System;\n");
@@ -560,15 +564,6 @@ impl Lang for LangCSharp {
             for snippet in self.structs.drain(..) {
                 emit_docs(&mut writer, &self.context, &snippet.docs);
                 emit_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
-            }
-
-            // Opaque types.
-            if !self.context.opaque_types.is_empty() {
-                emit!(writer, "#pragma warning disable CS0169\n");
-                for name in self.context.opaque_types.drain() {
-                    emit_opaque_type(&mut writer, &name);
-                }
-                emit!(writer, "#pragma warning restore CS0169\n");
             }
 
             writer.unindent();
@@ -590,6 +585,9 @@ impl Lang for LangCSharp {
                 writer.into_inner(),
             );
         }
+
+        // Other cleanup.
+        self.context.opaque_types.clear();
 
         Ok(())
     }
