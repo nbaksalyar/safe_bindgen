@@ -81,9 +81,8 @@ pub fn is_result_arg(arg: &ast::Arg) -> bool {
 }
 
 /// Check the function argument is a length argument for a *const u8 pointer
-pub fn is_ptr_len_arg(arg: &ast::Arg) -> bool {
-    let arg_name = pprust::pat_to_string(&*arg.pat);
-    pprust::ty_to_string(&*arg.ty) == "usize" &&
+pub fn is_ptr_len_arg(ty: &ast::Ty, arg_name: &str) -> bool {
+    pprust::ty_to_string(ty) == "usize" &&
         (arg_name.ends_with("_len") || arg_name == "len" || arg_name == "size")
 }
 
@@ -92,7 +91,12 @@ pub fn is_ptr_len_arg(arg: &ast::Arg) -> bool {
 /// `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
 pub fn is_array_arg(arg: &ast::Arg, next_arg: Option<&ast::Arg>) -> bool {
     if let ast::TyKind::Ptr(..) = arg.ty.node {
-        !is_result_arg(arg) && next_arg.map(is_ptr_len_arg).unwrap_or(false)
+        !is_result_arg(arg) &&
+            next_arg
+                .map(|arg| {
+                    is_ptr_len_arg(&*arg.ty, &pprust::pat_to_string(&*arg.pat))
+                })
+                .unwrap_or(false)
     } else {
         false
     }

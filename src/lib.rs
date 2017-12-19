@@ -54,6 +54,7 @@ mod csharp;
 mod java;
 mod output;
 mod parse;
+mod struct_field;
 
 /// Describes an error encountered by the compiler.
 ///

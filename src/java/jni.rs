@@ -5,10 +5,9 @@ use inflector::Inflector;
 use java::{Context, Outputs, callback_name};
 use jni::signature::{self, JavaType, TypeSignature};
 use quote;
-use std::collections::BTreeSet;
+use struct_field::StructField;
 use syntax::ast;
 use syntax::print::pprust;
-use syntax::symbol;
 
 fn to_jni_arg(arg: &ast::Arg, ty_name: &str) -> quote::Tokens {
     let pat = quote::Ident::new(pprust::pat_to_string(&*arg.pat));
@@ -519,121 +518,12 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_name: &str, context: &mut Co
     tokens.to_string()
 }
 
-enum StructField {
-    Primitive(ast::StructField),
-    Array {
-        field: ast::StructField,
-        len_field: String,
-        cap_field: Option<String>,
-    },
-    String(ast::StructField),
-    StructPtr {
-        field: ast::StructField,
-        ty: ast::MutTy,
-    },
-    LenField(ast::StructField),
-}
-
-impl StructField {
-    fn struct_field(&self) -> &ast::StructField {
-        match *self {
-            StructField::Primitive(ref f) => f,
-            StructField::Array { field: ref f, .. } => f,
-            StructField::StructPtr { field: ref f, .. } => f,
-            StructField::String(ref f) => f,
-            StructField::LenField(ref f) => f,
-        }
-    }
-
-    fn name(&self) -> symbol::InternedString {
-        self.struct_field().ident.unwrap().name.as_str()
-    }
-}
-
-fn transform_struct_fields(fields: &[ast::StructField]) -> Vec<StructField> {
-    let mut results = Vec::new();
-    let field_names: BTreeSet<_> = fields
-        .iter()
-        .map(|f| f.ident.unwrap().name.as_str().to_string())
-        .collect();
-
-    for f in fields {
-        let mut field_name: String = f.ident.unwrap().name.as_str().to_string();
-
-        match f.ty.node {
-            // Pointers
-            ast::TyKind::Ptr(ref ptr) => {
-                if field_name.ends_with("_ptr") {
-                    field_name = field_name.chars().take(field_name.len() - 4).collect();
-                }
-
-                let len_field = format!("{}_len", field_name);
-                let cap_field = format!("{}_cap", field_name);
-
-                if field_names.contains(&len_field) {
-                    results.push(StructField::Array {
-                        field: f.clone(),
-                        len_field,
-                        cap_field: if field_names.contains(&cap_field) {
-                            Some(cap_field)
-                        } else {
-                            None
-                        },
-                    });
-                } else {
-                    match pprust::ty_to_string(&ptr.ty).as_str() {
-                        // Strings
-                        "c_char" => {
-                            results.push(StructField::String(f.clone()));
-                        }
-                        // Other ptrs, most likely structs
-                        _ => {
-                            results.push(StructField::StructPtr {
-                                field: f.clone(),
-                                ty: ptr.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-
-            ast::TyKind::Path(None, ref _path) => {
-                results.push(if is_array_meta_field(f) {
-                    StructField::LenField(f.clone())
-                } else {
-                    StructField::Primitive(f.clone())
-                });
-            }
-
-            _ => results.push(StructField::Primitive(f.clone())),
-        }
-    }
-
-    results
-}
-
-fn is_array_meta_field(field: &ast::StructField) -> bool {
-    let str_name = field.ident.unwrap().name.as_str();
-
-    if let ast::TyKind::Path(None, ref path) = field.ty.node {
-        let (ty, _module) = path.segments.split_last().expect(
-            "already checked that there were at least two elements",
-        );
-        let ty: &str = &ty.identifier.name.as_str();
-
-        ty == "usize" && (str_name.ends_with("_len") || str_name.ends_with("_cap"))
-    } else {
-        false
-    }
-}
-
 fn generate_struct_to_java(
     struct_ident: &quote::Ident,
     java_class_name: &str,
-    fields: &[ast::StructField],
+    fields: &[StructField],
     context: &Context,
 ) -> quote::Tokens {
-    let fields = transform_struct_fields(fields);
     let mut stmts = Vec::new();
 
     for f in fields {
@@ -641,8 +531,12 @@ fn generate_struct_to_java(
         let field_name = quote::Ident::new(field_name_str);
         let java_field_name = field_name_str.to_camel_case();
 
-        let stmt = match f {
-            StructField::Array { len_field, field, .. } => {
+        let stmt = match *f {
+            StructField::Array {
+                ref len_field,
+                ref field,
+                ..
+            } => {
                 if let ast::TyKind::Ptr(ref ptr) = field.ty.node {
                     let len_field_ident = quote::Ident::new(len_field.clone());
                     let len_field = len_field.to_camel_case();
@@ -741,10 +635,9 @@ fn generate_struct_to_java(
 
 fn generate_struct_from_java(
     struct_ident: &quote::Ident,
-    fields: &[ast::StructField],
+    fields: &[StructField],
     context: &Context,
 ) -> quote::Tokens {
-    let fields = transform_struct_fields(fields);
     let mut fields_values = Vec::new();
     let mut conversions = Vec::new();
 
@@ -757,18 +650,18 @@ fn generate_struct_from_java(
             #field_name
         });
 
-        let conv = match f {
+        let conv = match *f {
             StructField::Array {
-                len_field,
-                cap_field,
-                field,
+                ref len_field,
+                ref cap_field,
+                ref field,
             } => {
-                let len_field = quote::Ident::new(len_field);
+                let len_field = quote::Ident::new(len_field.clone());
 
-                let cap = if let Some(cap_field) = cap_field {
+                let cap = if let Some(ref cap_field) = *cap_field {
                     // If there's a capacity field in the struct, just get it from the
                     // generated Vec itself.
-                    let cap_field = quote::Ident::new(cap_field);
+                    let cap_field = quote::Ident::new(cap_field.clone());
                     quote! {
                         let #cap_field = vec.capacity();
                     }
@@ -820,7 +713,7 @@ fn generate_struct_from_java(
                     quote!{}
                 }
             }
-            StructField::StructPtr { ty, .. } => {
+            StructField::StructPtr { ref ty, .. } => {
                 let ty_str = pprust::ty_to_string(&ty.ty);
                 let ty = quote::Ident::new(ty_str);
 
@@ -911,7 +804,7 @@ fn generate_struct_from_java(
 
 /// Generates JNI struct binding based on a native struct
 pub fn generate_struct(
-    fields: &[ast::StructField],
+    fields: &[StructField],
     native_name: &str,
     java_class_name: &str,
     context: &Context,

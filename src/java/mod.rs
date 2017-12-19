@@ -8,6 +8,7 @@ use common::{self, Outputs, append_output, check_no_mangle, is_array_arg, is_res
 use inflector::Inflector;
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use struct_field::{StructField, transform_struct_fields};
 use syntax::abi::Abi;
 use syntax::ast;
 use syntax::codemap;
@@ -133,12 +134,18 @@ impl common::Lang for LangJava {
                 // Default constructor
                 buffer.push_str(&format!("\tpublic {name}() {{ }}\n", name = name));
 
-                for field in variants.fields() {
-                    let name = match field.ident {
-                        Some(name) => name.name.as_str().to_camel_case(),
-                        None => unreachable!("a tuple struct snuck through"),
-                    };
-                    let ty = rust_to_java(&*field.ty, &self.context)?.unwrap_or_default();
+                let fields = transform_struct_fields(variants.fields());
+
+                for field in fields.iter() {
+                    let name = field.name().to_camel_case();
+                    let struct_field = field.struct_field();
+                    let mut ty = rust_to_java(&*struct_field.ty, &self.context)?
+                        .unwrap_or_default();
+
+                    if let &StructField::Array { .. } = field {
+                        // Detect array ptrs: skip the length args and add array to the type sig
+                        ty.push_str("[]");
+                    }
 
                     buffer.push_str(&format!("\tprivate {} {};\n\n", ty, name));
 
@@ -167,7 +174,7 @@ impl common::Lang for LangJava {
 
                 buffer.push_str("}");
 
-                let jni = jni::generate_struct(variants.fields(), &orig_name, &name, &self.context);
+                let jni = jni::generate_struct(&fields, &orig_name, &name, &self.context);
                 append_output(jni, "jni.rs", outputs);
             } else if variants.is_tuple() && variants.fields().len() == 1 {
                 // #[repr(C)] pub struct Foo(Bar);  =>  typedef struct Foo Foo;
@@ -209,7 +216,6 @@ impl common::Lang for LangJava {
                          {lines}\n
                          }}",
                     namespace = self.context.namespace,
-                    library = self.context.lib_name,
                     lines = lines
                 );
                 Ok(())
