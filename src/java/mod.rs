@@ -113,7 +113,7 @@ impl common::Lang for LangJava {
         buffer.push_str(&docs);
 
         let orig_name = item.ident.name.as_str();
-        let name = orig_name.to_class_case();
+        let name = struct_to_java_classname(&*orig_name);
         buffer.push_str(&format!("public class {}", name));
 
         if let ast::ItemKind::Struct(ref variants, ref generics) = item.node {
@@ -126,7 +126,12 @@ impl common::Lang for LangJava {
             }
 
             if variants.is_struct() {
+                let mut constructor_fields = Vec::new();
+
                 buffer.push_str(" {\n");
+
+                // Default constructor
+                buffer.push_str(&format!("\tpublic {name}() {{ }}\n", name = name));
 
                 for field in variants.fields() {
                     let name = match field.ident {
@@ -149,7 +154,16 @@ impl common::Lang for LangJava {
                         name = name,
                         capitalized = name.to_class_case(),
                     ));
+
+                    constructor_fields.push(format!("{} {}", ty, name));
                 }
+
+                // Parametrised constructor
+                buffer.push_str(&format!(
+                    "\tpublic {name}({constructor_fields}) {{ }}\n",
+                    name = name,
+                    constructor_fields = constructor_fields.join(", ")
+                ));
 
                 buffer.push_str("}");
 
@@ -210,6 +224,12 @@ impl common::Lang for LangJava {
     }
 }
 
+/// Transform a struct name into a Java class name
+pub fn struct_to_java_classname<S: AsRef<str>>(s: S) -> String {
+    // s.as_ref().to_class_case()
+    s.as_ref().to_string()
+}
+
 /// Get the Java interface name for the callback based on its types
 pub fn callback_name(inputs: &[ast::Arg], context: &Context) -> Result<String, Error> {
     let mut components = Vec::new();
@@ -228,7 +248,7 @@ pub fn callback_name(inputs: &[ast::Arg], context: &Context) -> Result<String, E
         }
 
         let mut arg_type = rust_ty_to_java_class_name(&*arg.ty, context)?
-            .map(|s| s.to_class_case())
+            .map(struct_to_java_classname)
             .unwrap_or_default();
 
         if is_array_arg(&arg, inputs.peek().cloned()) {
@@ -550,7 +570,7 @@ fn path_to_java(
 
         Ok(Some(if mapped == ty {
             // Capitalise custom types, which are structs (most likely)
-            ty.to_class_case()
+            struct_to_java_classname(ty)
         } else {
             mapped.into()
         }))
