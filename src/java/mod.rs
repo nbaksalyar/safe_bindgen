@@ -206,7 +206,6 @@ impl common::Lang for LangJava {
                 *funcs = format!(
                     "package {namespace};\n\n
                          public class NativeBindings {{\n
-                         \tstatic {{ System.loadLibrary(\"{library}\"); }}\n
                          {lines}\n
                          }}",
                     namespace = self.context.namespace,
