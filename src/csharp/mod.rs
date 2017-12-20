@@ -582,7 +582,8 @@ impl Lang for LangCSharp {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
             emit!(writer, "using System;\n");
-            emit!(writer, "using System.Runtime.InteropServices;\n\n");
+            emit!(writer, "using System.Runtime.InteropServices;\n");
+            emit!(writer, "using JetBrains.Annotations;\n\n");
 
             emit!(writer, "namespace {} {{\n", self.context.namespace);
             writer.indent();

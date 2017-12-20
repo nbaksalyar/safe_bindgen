@@ -233,6 +233,7 @@ pub fn emit_const(writer: &mut IndentedWriter, context: &Context, name: &str, it
 }
 
 pub fn emit_enum(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Enum) {
+    emit!(writer, "[PublicAPI]\n");
     emit!(writer, "public enum {} {{\n", name);
     writer.indent();
 
@@ -272,7 +273,6 @@ pub fn emit_docs(writer: &mut IndentedWriter, context: &Context, docs: &str) {
         emit!(writer, "{}", docs);
     }
 }
-
 
 fn extern_function_name(name: &str) -> String {
     let mut name = name.to_pascal_case();
@@ -376,6 +376,7 @@ fn emit_const_use(writer: &mut IndentedWriter, context: &Context, name: &str) {
 }
 
 fn emit_normal_struct(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Struct) {
+    emit!(writer, "[PublicAPI]\n");
     emit!(writer, "public struct {} {{\n", name);
     writer.indent();
 
@@ -425,6 +426,7 @@ fn emit_native_struct(writer: &mut IndentedWriter, context: &Context, name: &str
 }
 
 fn emit_wrapper_struct(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Struct) {
+    emit!(writer, "[PublicAPI]\n");
     emit!(writer, "public struct {} {{\n", name);
     writer.indent();
 

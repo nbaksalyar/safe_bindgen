@@ -69,8 +69,10 @@ fn structs() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using JetBrains.Annotations;
 
          namespace Backend {
+             [PublicAPI]
              public struct Record {
                  public ulong Id;
                  [MarshalAs(UnmanagedType.U1)]
@@ -129,6 +131,7 @@ fn native_structs() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using JetBrains.Annotations;
 
          namespace Backend {
              internal struct EntryNative {
@@ -145,6 +148,7 @@ fn native_structs() {
                  }
              }
 
+             [PublicAPI]
              public struct Entry {
                  public uint Id;
                  public byte[] Key;
@@ -177,6 +181,7 @@ fn native_structs() {
                  }
              }
 
+             [PublicAPI]
              public struct Wrapper {
                  public Entry Entry;
 
@@ -288,8 +293,10 @@ fn type_aliases() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using JetBrains.Annotations;
 
          namespace Backend {
+             [PublicAPI]
              public struct Message {
                  public ulong Id;
                  public ulong SenderId;
@@ -371,14 +378,17 @@ fn enums() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using JetBrains.Annotations;
 
          namespace Backend {
+             [PublicAPI]
              public enum Mode {
                  ReadOnly,
                  WriteOnly,
                  ReadAndWrite,
              }
 
+             [PublicAPI]
              public enum Binary {
                  Zero = 0,
                  One = 1,
@@ -560,14 +570,18 @@ fn functions_taking_array() {
         #[no_mangle]
         pub extern "C" fn fun0(data_ptr: *const u8, data_len: usize) {}
 
+        // Different naming convention
+        #[no_mangle]
+        pub extern "C" fn fun1(data: *const u8, data_len: usize) {}
+
         // Params before and/or after the array
         #[no_mangle]
-        pub extern "C" fn fun1(id: u64, data_ptr: *const u8, data_len: usize) {}
+        pub extern "C" fn fun2(id: u64, data_ptr: *const u8, data_len: usize) {}
 
         // This one does not follow the naming convention and thus is not transformed
         // to array.
         #[no_mangle]
-        pub extern "C" fn fun2(result: *const FfiResult, len: usize) {}
+        pub extern "C" fn fun3(result: *const FfiResult, len: usize) {}
     });
 
     let actual = fetch(&outputs, "Backend.cs");
@@ -594,23 +608,33 @@ fn functions_taking_array() {
                     IntPtr dataLen\
                  );
 
-                 public void Fun1(ulong id, byte[] data) {
-                     Fun1Native(id, data, (IntPtr) data.Length);
+                 public void Fun1(byte[] data) {
+                     Fun1Native(data, (IntPtr) data.Length);
                  }
 
                  [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
                  internal static extern void Fun1Native(\
+                    [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
+                    IntPtr dataLen\
+                 );
+
+                 public void Fun2(ulong id, byte[] data) {
+                     Fun2Native(id, data, (IntPtr) data.Length);
+                 }
+
+                 [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
+                 internal static extern void Fun2Native(\
                     ulong id, \
                     [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] data, \
                     IntPtr dataLen\
                  );
 
-                 public void Fun2(ref FfiResult result, IntPtr len) {
-                     Fun2Native(ref result, len);
+                 public void Fun3(ref FfiResult result, IntPtr len) {
+                     Fun3Native(ref result, len);
                  }
 
-                 [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
-                 internal static extern void Fun2Native(ref FfiResult result, IntPtr len);
+                 [DllImport(DLL_NAME, EntryPoint = \"fun3\")]
+                 internal static extern void Fun3Native(ref FfiResult result, IntPtr len);
 
              }
          }
@@ -1005,8 +1029,10 @@ fn opaque_types() {
     let expected = indoc!(
         "using System;
          using System.Runtime.InteropServices;
+         using JetBrains.Annotations;
 
          namespace Backend {
+             [PublicAPI]
              public struct Context {
                  public IntPtr Handle;
              }
