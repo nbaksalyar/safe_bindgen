@@ -127,6 +127,7 @@ fn native_structs() {
         }
     });
 
+    // Wrapper types.
     let actual = fetch(&outputs, "Types.cs");
     let expected = indoc!(
         "using System;
@@ -134,20 +135,6 @@ fn native_structs() {
          using JetBrains.Annotations;
 
          namespace Backend {
-             internal struct EntryNative {
-                 public uint Id;
-                 public IntPtr KeyPtr;
-                 public IntPtr KeyLen;
-                 public IntPtr RecordsPtr;
-                 public IntPtr RecordsLen;
-                 public IntPtr RecordsCap;
-
-                 internal void Free() {
-                     Utils.FreeArray(ref KeyPtr, ref KeyLen);
-                     Utils.FreeArray(ref RecordsPtr, ref RecordsLen);
-                 }
-             }
-
              [PublicAPI]
              public struct Entry {
                  public uint Id;
@@ -173,14 +160,6 @@ fn native_structs() {
                  }
              }
 
-             internal struct WrapperNative {
-                 public EntryNative Entry;
-
-                 internal void Free() {
-                     Entry.Free();
-                 }
-             }
-
              [PublicAPI]
              public struct Wrapper {
                  public Entry Entry;
@@ -201,6 +180,41 @@ fn native_structs() {
     );
     assert_multiline_eq!(actual, expected);
 
+    // Native types.
+    let actual = fetch(&outputs, "Types.Native.cs");
+    let expected = indoc!(
+        "using System;
+         using System.Runtime.InteropServices;
+
+         namespace Backend {
+             internal struct EntryNative {
+                 public uint Id;
+                 public IntPtr KeyPtr;
+                 public IntPtr KeyLen;
+                 public IntPtr RecordsPtr;
+                 public IntPtr RecordsLen;
+                 public IntPtr RecordsCap;
+
+                 internal void Free() {
+                     Utils.FreeArray(ref KeyPtr, ref KeyLen);
+                     Utils.FreeArray(ref RecordsPtr, ref RecordsLen);
+                 }
+             }
+
+             internal struct WrapperNative {
+                 public EntryNative Entry;
+
+                 internal void Free() {
+                     Entry.Free();
+                 }
+             }
+
+         }
+        "
+    );
+    assert_multiline_eq!(actual, expected);
+
+    // Functions.
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;

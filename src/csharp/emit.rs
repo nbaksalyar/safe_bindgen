@@ -251,13 +251,145 @@ pub fn emit_enum(writer: &mut IndentedWriter, context: &Context, name: &str, ite
     emit!(writer, "}}\n\n");
 }
 
-pub fn emit_struct(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Struct) {
-    if context.is_native_name(name) {
-        emit_native_struct(writer, context, name, item);
-        emit_wrapper_struct(writer, context, name, item);
-    } else {
-        emit_normal_struct(writer, context, name, item);
+pub fn emit_normal_struct(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    name: &str,
+    item: &Struct,
+) {
+    emit!(writer, "[PublicAPI]\n");
+    emit!(writer, "public struct {} {{\n", name);
+    writer.indent();
+
+    for field in &item.fields {
+        emit_docs(writer, context, &field.docs);
+        emit_struct_field(writer, context, field, NativeMode::AsIs);
     }
+
+    writer.unindent();
+    emit!(writer, "}}\n\n");
+}
+
+pub fn emit_native_struct(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    name: &str,
+    item: &Struct,
+) {
+    emit!(writer, "internal struct {}Native {{\n", name);
+    writer.indent();
+
+    for field in &item.fields {
+        emit_docs(writer, context, &field.docs);
+        emit_struct_field(writer, context, field, NativeMode::AsIs);
+    }
+
+    // Emit `Free` method.
+    emit!(writer, "\n");
+    emit!(writer, "internal void Free() {{\n");
+    writer.indent();
+
+    for field in &item.fields {
+        let name = field.name.to_pascal_case();
+
+        if field.ty.is_dynamic_array() {
+            emit!(
+                writer,
+                "{0}.FreeArray(ref {1}Ptr, ref {1}Len);\n",
+                context.utils_class_name,
+                name
+            );
+        } else if context.is_native_type(&field.ty) {
+            emit!(writer, "{}.Free();\n", name)
+        }
+    }
+
+    writer.unindent();
+    emit!(writer, "}}\n");
+
+    writer.unindent();
+    emit!(writer, "}}\n\n");
+}
+
+pub fn emit_wrapper_struct(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    name: &str,
+    item: &Struct,
+) {
+    emit!(writer, "[PublicAPI]\n");
+    emit!(writer, "public struct {} {{\n", name);
+    writer.indent();
+
+    for field in &item.fields {
+        emit_struct_field(writer, context, field, NativeMode::Wrap);
+    }
+
+    emit!(writer, "\n");
+
+    // Emit constructor.
+    emit!(writer, "internal {0}({0}Native native) {{\n", name);
+    writer.indent();
+
+    for field in &item.fields {
+        let name = field.name.to_pascal_case();
+
+        emit!(writer, "{} = ", name);
+
+        if let Type::Array(ref ty, ArraySize::Dynamic) = field.ty {
+            emit_copy_to_array_utility_name(writer, context, ty);
+            emit!(writer, "(native.{0}Ptr, native.{0}Len);\n", name);
+        } else if context.is_native_type(&field.ty) {
+            emit!(writer, "{0}(native.{0});\n", name)
+        } else {
+            emit!(writer, "native.{};\n", name)
+        }
+    }
+
+    writer.unindent();
+    emit!(writer, "}}\n\n");
+
+    // Emit `ToNative` method.
+    emit!(writer, "internal {}Native ToNative() {{\n", name);
+    writer.indent();
+
+    emit!(writer, "return new {}Native() {{\n", name);
+    writer.indent();
+
+    for (index, field) in item.fields.iter().enumerate() {
+        let name = field.name.to_pascal_case();
+
+        if let Type::Array(ref ty, ArraySize::Dynamic) = field.ty {
+            emit!(writer, "{}Ptr = ", name);
+            emit_copy_from_array_utility_name(writer, context, ty);
+            emit!(writer, "({}),\n", name);
+            emit!(writer, "{0}Len = (IntPtr) {0}.Length", name);
+
+            if field.has_cap {
+                emit!(writer, ",\n");
+                emit!(writer, "{0}Cap = (IntPtr) 0", name);
+            }
+        } else if context.is_native_type(&field.ty) {
+            emit!(writer, "{0} = {0}.ToNative()", name);
+        } else {
+            emit!(writer, "{0} = {0}", name);
+        }
+
+        if index < item.fields.len() - 1 {
+            emit!(writer, ",\n");
+        } else {
+            emit!(writer, "\n")
+        }
+    }
+
+    writer.unindent();
+    emit!(writer, "}};\n");
+
+    writer.unindent();
+    emit!(writer, "}}\n");
+
+    writer.unindent();
+    emit!(writer, "}}\n\n");
 }
 
 pub fn emit_utilities(writer: &mut IndentedWriter, context: &Context) {
@@ -373,132 +505,6 @@ fn emit_const_use(writer: &mut IndentedWriter, context: &Context, name: &str) {
         context.consts_class_name,
         name.to_pascal_case()
     );
-}
-
-fn emit_normal_struct(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Struct) {
-    emit!(writer, "[PublicAPI]\n");
-    emit!(writer, "public struct {} {{\n", name);
-    writer.indent();
-
-    for field in &item.fields {
-        emit_docs(writer, context, &field.docs);
-        emit_struct_field(writer, context, field, NativeMode::AsIs);
-    }
-
-    writer.unindent();
-    emit!(writer, "}}\n\n");
-}
-
-fn emit_native_struct(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Struct) {
-    emit!(writer, "internal struct {}Native {{\n", name);
-    writer.indent();
-
-    for field in &item.fields {
-        emit_docs(writer, context, &field.docs);
-        emit_struct_field(writer, context, field, NativeMode::AsIs);
-    }
-
-    // Emit `Free` method.
-    emit!(writer, "\n");
-    emit!(writer, "internal void Free() {{\n");
-    writer.indent();
-
-    for field in &item.fields {
-        let name = field.name.to_pascal_case();
-
-        if field.ty.is_dynamic_array() {
-            emit!(
-                writer,
-                "{0}.FreeArray(ref {1}Ptr, ref {1}Len);\n",
-                context.utils_class_name,
-                name
-            );
-        } else if context.is_native_type(&field.ty) {
-            emit!(writer, "{}.Free();\n", name)
-        }
-    }
-
-    writer.unindent();
-    emit!(writer, "}}\n");
-
-    writer.unindent();
-    emit!(writer, "}}\n\n");
-}
-
-fn emit_wrapper_struct(writer: &mut IndentedWriter, context: &Context, name: &str, item: &Struct) {
-    emit!(writer, "[PublicAPI]\n");
-    emit!(writer, "public struct {} {{\n", name);
-    writer.indent();
-
-    for field in &item.fields {
-        emit_struct_field(writer, context, field, NativeMode::Wrap);
-    }
-
-    emit!(writer, "\n");
-
-    // Emit constructor.
-    emit!(writer, "internal {0}({0}Native native) {{\n", name);
-    writer.indent();
-
-    for field in &item.fields {
-        let name = field.name.to_pascal_case();
-
-        emit!(writer, "{} = ", name);
-
-        if let Type::Array(ref ty, ArraySize::Dynamic) = field.ty {
-            emit_copy_to_array_utility_name(writer, context, ty);
-            emit!(writer, "(native.{0}Ptr, native.{0}Len);\n", name);
-        } else if context.is_native_type(&field.ty) {
-            emit!(writer, "{0}(native.{0});\n", name)
-        } else {
-            emit!(writer, "native.{};\n", name)
-        }
-    }
-
-    writer.unindent();
-    emit!(writer, "}}\n\n");
-
-    // Emit `ToNative` method.
-    emit!(writer, "internal {}Native ToNative() {{\n", name);
-    writer.indent();
-
-    emit!(writer, "return new {}Native() {{\n", name);
-    writer.indent();
-
-    for (index, field) in item.fields.iter().enumerate() {
-        let name = field.name.to_pascal_case();
-
-        if let Type::Array(ref ty, ArraySize::Dynamic) = field.ty {
-            emit!(writer, "{}Ptr = ", name);
-            emit_copy_from_array_utility_name(writer, context, ty);
-            emit!(writer, "({}),\n", name);
-            emit!(writer, "{0}Len = (IntPtr) {0}.Length", name);
-
-            if field.has_cap {
-                emit!(writer, ",\n");
-                emit!(writer, "{0}Cap = (IntPtr) 0", name);
-            }
-        } else if context.is_native_type(&field.ty) {
-            emit!(writer, "{0} = {0}.ToNative()", name);
-        } else {
-            emit!(writer, "{0} = {0}", name);
-        }
-
-        if index < item.fields.len() - 1 {
-            emit!(writer, ",\n");
-        } else {
-            emit!(writer, "\n")
-        }
-    }
-
-    writer.unindent();
-    emit!(writer, "}};\n");
-
-    writer.unindent();
-    emit!(writer, "}}\n");
-
-    writer.unindent();
-    emit!(writer, "}}\n\n");
 }
 
 fn emit_struct_field(

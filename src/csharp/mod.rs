@@ -595,9 +595,14 @@ impl Lang for LangCSharp {
             }
 
             // Structs
-            for snippet in self.structs.drain(..) {
+            for snippet in &self.structs {
                 emit_docs(&mut writer, &self.context, &snippet.docs);
-                emit_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
+
+                if self.context.is_native_name(&snippet.name) {
+                    emit_wrapper_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
+                } else {
+                    emit_normal_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
+                }
             }
 
             writer.unindent();
@@ -605,6 +610,35 @@ impl Lang for LangCSharp {
 
             outputs.insert(
                 PathBuf::from(format!("{}.cs", self.context.types_file_name)),
+                writer.into_inner(),
+            );
+        }
+
+        let structs = mem::replace(&mut self.structs, Vec::new());
+        let structs: Vec<_> = structs
+            .into_iter()
+            .filter(|snippet| self.context.is_native_name(&snippet.name))
+            .collect();
+
+        // Native types
+        if !structs.is_empty() {
+            let mut writer = IndentedWriter::new(INDENT_WIDTH);
+
+            emit!(writer, "using System;\n");
+            emit!(writer, "using System.Runtime.InteropServices;\n\n");
+
+            emit!(writer, "namespace {} {{\n", self.context.namespace);
+            writer.indent();
+
+            for snippet in structs {
+                emit_native_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
+            }
+
+            writer.unindent();
+            emit!(writer, "}}\n");
+
+            outputs.insert(
+                PathBuf::from(format!("{}.Native.cs", self.context.types_file_name)),
                 writer.into_inner(),
             );
         }

@@ -91,14 +91,14 @@ namespace @Namespace {
             return ptr;
         }
 
-        public static T[] CopyFromObjectArray<T>(T[] array) {
+        public static IntPtr CopyFromObjectArray<T>(T[] array) {
             var size = Marshal.SizeOf(array[0]) * array.Length;
             var ptr  = Marshal.AllocHGlobal(size);
             for (int i = 0; i < array.Length; ++i) {
                 Marshal.StructureToPtr(array[i], IntPtr.Add(ptr, Marshal.SizeOf<T>() * i), false);
             }
 
-            return array;
+            return ptr;
         }
 
         public static void FreeArray(ref IntPtr ptr, ref IntPtr len) {
