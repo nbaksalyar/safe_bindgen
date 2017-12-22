@@ -1,6 +1,7 @@
 #pragma warning disable CS0649
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
@@ -67,23 +68,24 @@ namespace @Namespace {
             CompleteTask(userData, ref result, true);
         }
 
-        public static byte[] CopyToByteArray(IntPtr ptr, IntPtr len) {
+        public static List<byte> CopyToByteList(IntPtr ptr, IntPtr len) {
             var array = new byte[(int) len];
             Marshal.Copy(ptr, array, 0, (int) len);
 
-            return array;
+            return new List<byte>(array);
         }
 
-        public static T[] CopyToObjectArray<T>(IntPtr ptr, IntPtr len) {
+        public static List<T> CopyToObjectList<T>(IntPtr ptr, IntPtr len) {
             var array = new T[(int) len];
             for (int i = 0; i < (int) len; ++i) {
                 array[i] = Marshal.PtrToStructure<T>(IntPtr.Add(ptr, Marshal.SizeOf<T>() * i));
             }
 
-            return array;
+            return new List<T>(array);
         }
 
-        public static IntPtr CopyFromByteArray(byte[] array) {
+        public static IntPtr CopyFromByteList(List<byte> list) {
+            var array = list.ToArray();
             var size = Marshal.SizeOf(array[0]) * array.Length;
             var ptr  = Marshal.AllocHGlobal(size);
             Marshal.Copy(array, 0, ptr, array.Length);
@@ -91,7 +93,8 @@ namespace @Namespace {
             return ptr;
         }
 
-        public static IntPtr CopyFromObjectArray<T>(T[] array) {
+        public static IntPtr CopyFromObjectList<T>(List<T> list) {
+            var array = list.ToArray();
             var size = Marshal.SizeOf(array[0]) * array.Length;
             var ptr  = Marshal.AllocHGlobal(size);
             for (int i = 0; i < array.Length; ++i) {
@@ -101,7 +104,7 @@ namespace @Namespace {
             return ptr;
         }
 
-        public static void FreeArray(ref IntPtr ptr, ref IntPtr len) {
+        public static void FreeList(ref IntPtr ptr, ref IntPtr len) {
             if (ptr != IntPtr.Zero) {
                 Marshal.FreeHGlobal(ptr);
             }

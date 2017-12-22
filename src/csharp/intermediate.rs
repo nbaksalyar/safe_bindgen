@@ -52,7 +52,7 @@ impl Type {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArraySize {
     /// Static size given as literal number.
     Lit(usize),

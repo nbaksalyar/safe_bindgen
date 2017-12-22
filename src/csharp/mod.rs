@@ -19,12 +19,13 @@ use std::path::PathBuf;
 use syntax::ast;
 use syntax::print::pprust;
 
-const INDENT_WIDTH: usize = 4;
+const INDENT_WIDTH: usize = 2;
 
 pub struct LangCSharp {
     filter: HashSet<String>,
     filter_mode: FilterMode,
     wrapper_function_blacklist: HashSet<String>,
+    types_enabled: bool,
     utils_enabled: bool,
     context: Context,
     custom_consts: Vec<String>,
@@ -71,6 +72,7 @@ impl LangCSharp {
             filter_mode: FilterMode::Blacklist,
             filter: Default::default(),
             wrapper_function_blacklist: Default::default(),
+            types_enabled: true,
             utils_enabled: true,
             context: Context {
                 lib_name: "backend".to_string(),
@@ -116,6 +118,11 @@ impl LangCSharp {
     /// Set the name of the class containing all constants.
     pub fn set_consts_class_name<T: Into<String>>(&mut self, name: T) {
         self.context.consts_class_name = name.into();
+    }
+
+    /// Enabl/disable generation of types.
+    pub fn set_types_enabled(&mut self, enabled: bool) {
+        self.types_enabled = enabled;
     }
 
     /// Set the name of the file containing types (structs, enums, ...).
@@ -426,6 +433,7 @@ impl Lang for LangCSharp {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
             emit!(writer, "using System;\n");
+            emit!(writer, "using System.Collections.Generic;\n");
             emit!(writer, "using System.Runtime.InteropServices;\n");
             emit!(writer, "using System.Threading.Tasks;\n\n");
             emit!(writer, "namespace {} {{\n", self.context.namespace);
@@ -442,11 +450,11 @@ impl Lang for LangCSharp {
             // Define constant with the native library name, to be used in
             // the [DllImport] attributes.
             emit!(writer, "#if __IOS__\n");
-            emit!(writer, "internal const string DLL_NAME = \"__Internal\";\n");
+            emit!(writer, "internal const string DllName = \"__Internal\";\n");
             emit!(writer, "#else\n");
             emit!(
                 writer,
-                "internal const string DLL_NAME = \"{}\";\n",
+                "internal const string DllName = \"{}\";\n",
                 self.context.lib_name
             );
             emit!(writer, "#endif\n\n");
@@ -463,8 +471,6 @@ impl Lang for LangCSharp {
             {
                 let callbacks = collect_callbacks(&self.functions);
                 if !callbacks.is_empty() {
-                    emit!(writer, "#region Callbacks\n");
-
                     for (callback, single) in callbacks {
                         emit_callback_delegate(&mut writer, &self.context, callback);
 
@@ -472,8 +478,6 @@ impl Lang for LangCSharp {
                             emit_callback_wrapper(&mut writer, &self.context, callback);
                         }
                     }
-
-                    emit!(writer, "#endregion\n\n");
                 }
             }
 
@@ -501,6 +505,7 @@ impl Lang for LangCSharp {
                 let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
                 emit!(writer, "using System;\n");
+                emit!(writer, "using System.Collections.Generic;\n");
                 emit!(writer, "using System.Runtime.InteropServices;\n");
                 emit!(writer, "using System.Threading.Tasks;\n\n");
                 emit!(writer, "namespace {} {{\n", self.context.namespace);
@@ -578,10 +583,11 @@ impl Lang for LangCSharp {
         }
 
         // Types
-        if !self.enums.is_empty() || !self.structs.is_empty() {
+        if self.types_enabled && (!self.enums.is_empty() || !self.structs.is_empty()) {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
             emit!(writer, "using System;\n");
+            emit!(writer, "using System.Collections.Generic;\n");
             emit!(writer, "using System.Runtime.InteropServices;\n");
             emit!(writer, "using JetBrains.Annotations;\n\n");
 
@@ -600,6 +606,7 @@ impl Lang for LangCSharp {
 
                 if self.context.is_native_name(&snippet.name) {
                     emit_wrapper_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
+                    emit_native_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
                 } else {
                     emit_normal_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
                 }
@@ -610,35 +617,6 @@ impl Lang for LangCSharp {
 
             outputs.insert(
                 PathBuf::from(format!("{}.cs", self.context.types_file_name)),
-                writer.into_inner(),
-            );
-        }
-
-        let structs = mem::replace(&mut self.structs, Vec::new());
-        let structs: Vec<_> = structs
-            .into_iter()
-            .filter(|snippet| self.context.is_native_name(&snippet.name))
-            .collect();
-
-        // Native types
-        if !structs.is_empty() {
-            let mut writer = IndentedWriter::new(INDENT_WIDTH);
-
-            emit!(writer, "using System;\n");
-            emit!(writer, "using System.Runtime.InteropServices;\n\n");
-
-            emit!(writer, "namespace {} {{\n", self.context.namespace);
-            writer.indent();
-
-            for snippet in structs {
-                emit_native_struct(&mut writer, &self.context, &snippet.name, &snippet.item);
-            }
-
-            writer.unindent();
-            emit!(writer, "}}\n");
-
-            outputs.insert(
-                PathBuf::from(format!("{}.Native.cs", self.context.types_file_name)),
                 writer.into_inner(),
             );
         }

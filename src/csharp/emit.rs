@@ -98,7 +98,7 @@ pub fn emit_wrapper_function(
 
             match *ty {
                 Type::Array(_, ArraySize::Dynamic) => {
-                    emit!(writer, "{0}, (IntPtr) {0}.Length", name)
+                    emit!(writer, "{0}.ToArray(), (IntPtr) {0}.Count", name)
                 }
                 Type::Pointer(ref ty) => {
                     emit_pointer_use(
@@ -145,7 +145,7 @@ pub fn emit_function_extern_decl(
 
     emit!(
         writer,
-        "[DllImport(DLL_NAME, EntryPoint = \"{}\")]\n",
+        "[DllImport(DllName, EntryPoint = \"{}\")]\n",
         native_name
     );
     emit!(writer, "internal static extern ");
@@ -295,7 +295,7 @@ pub fn emit_native_struct(
         if field.ty.is_dynamic_array() {
             emit!(
                 writer,
-                "{0}.FreeArray(ref {1}Ptr, ref {1}Len);\n",
+                "{0}.FreeList(ref {1}Ptr, ref {1}Len);\n",
                 context.utils_class_name,
                 name
             );
@@ -337,7 +337,7 @@ pub fn emit_wrapper_struct(
         emit!(writer, "{} = ", name);
 
         if let Type::Array(ref ty, ArraySize::Dynamic) = field.ty {
-            emit_copy_to_array_utility_name(writer, context, ty);
+            emit_copy_to_utility_name(writer, context, ty);
             emit!(writer, "(native.{0}Ptr, native.{0}Len);\n", name);
         } else if context.is_native_type(&field.ty) {
             emit!(writer, "{0}(native.{0});\n", name)
@@ -361,9 +361,9 @@ pub fn emit_wrapper_struct(
 
         if let Type::Array(ref ty, ArraySize::Dynamic) = field.ty {
             emit!(writer, "{}Ptr = ", name);
-            emit_copy_from_array_utility_name(writer, context, ty);
+            emit_copy_from_utility_name(writer, context, ty);
             emit!(writer, "({}),\n", name);
-            emit!(writer, "{0}Len = (IntPtr) {0}.Length", name);
+            emit!(writer, "{0}Len = (IntPtr) {0}.Count", name);
 
             if field.has_cap {
                 emit!(writer, ",\n");
@@ -743,9 +743,15 @@ fn emit_type(
                 _ => emit!(writer, "IntPtr"),
             }
         }
-        Type::Array(ref ty, ..) => {
-            emit_type(writer, context, ty, ptr_mode, native_mode);
-            emit!(writer, "[]")
+        Type::Array(ref ty, ref size) => {
+            if native_mode == NativeMode::Wrap && *size == ArraySize::Dynamic {
+                emit!(writer, "List<");
+                emit_type(writer, context, ty, ptr_mode, native_mode);
+                emit!(writer, ">");
+            } else {
+                emit_type(writer, context, ty, ptr_mode, native_mode);
+                emit!(writer, "[]")
+            }
         }
         Type::Function(..) => unimplemented!(),
         Type::User(ref name) => {
@@ -773,7 +779,7 @@ fn emit_args(
         let name = param_name(name, offset + index);
         match *ty {
             Type::Array(ref ty, ref size) => {
-                emit_copy_to_array_utility_name(writer, context, ty);
+                emit_copy_to_utility_name(writer, context, ty);
                 emit!(writer, "({}Ptr, ", name);
 
                 match *size {
@@ -860,31 +866,31 @@ fn emit_delegate_base_part_name(writer: &mut IndentedWriter, ty: &Type) {
     }
 }
 
-fn emit_copy_to_array_utility_name(writer: &mut IndentedWriter, context: &Context, ty: &Type) {
+fn emit_copy_to_utility_name(writer: &mut IndentedWriter, context: &Context, ty: &Type) {
     emit!(writer, "{}.CopyTo", context.utils_class_name);
     emit_copy_utility_suffix(writer, ty, true);
 }
 
-fn emit_copy_from_array_utility_name(writer: &mut IndentedWriter, context: &Context, ty: &Type) {
+fn emit_copy_from_utility_name(writer: &mut IndentedWriter, context: &Context, ty: &Type) {
     emit!(writer, "{}.CopyFrom", context.utils_class_name);
     emit_copy_utility_suffix(writer, ty, false);
 }
 
 fn emit_copy_utility_suffix(writer: &mut IndentedWriter, ty: &Type, add_type: bool) {
     match *ty {
-        Type::F32 => emit!(writer, "SingleArray"),
-        Type::F64 => emit!(writer, "DoubleArray"),
-        Type::I16 => emit!(writer, "Int16Array"),
-        Type::I32 => emit!(writer, "Int32Array"),
-        Type::I64 => emit!(writer, "Int64Array"),
-        Type::U8 => emit!(writer, "ByteArray"),
+        Type::F32 => emit!(writer, "SingleList"),
+        Type::F64 => emit!(writer, "DoubleList"),
+        Type::I16 => emit!(writer, "Int16List"),
+        Type::I32 => emit!(writer, "Int32List"),
+        Type::I64 => emit!(writer, "Int64List"),
+        Type::U8 => emit!(writer, "ByteList"),
         Type::User(ref name) => {
-            emit!(writer, "ObjectArray");
+            emit!(writer, "ObjectList");
 
             if add_type {
                 emit!(writer, "<{}>", name);
             }
         }
-        _ => panic!("cannot emit copy utility name for array of {:?}", ty),
+        _ => panic!("cannot emit copy utility name for List of {:?}", ty),
     }
 }

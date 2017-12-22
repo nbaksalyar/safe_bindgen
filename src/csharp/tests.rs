@@ -68,23 +68,24 @@ fn structs() {
     let actual = fetch(&outputs, "Types.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using JetBrains.Annotations;
 
          namespace Backend {
-             [PublicAPI]
-             public struct Record {
-                 public ulong Id;
-                 [MarshalAs(UnmanagedType.U1)]
-                 public bool Enabled;
-                 [MarshalAs(UnmanagedType.LPStr)]
-                 public string Name;
-                 [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
-                 public int[] RandomNumbers;
-                 public Widget Widget;
-                 [MarshalAs(UnmanagedType.ByValArray, SizeConst = 100)]
-                 public Gadget[] Gadgets;
-             }
+           [PublicAPI]
+           public struct Record {
+             public ulong Id;
+             [MarshalAs(UnmanagedType.U1)]
+             public bool Enabled;
+             [MarshalAs(UnmanagedType.LPStr)]
+             public string Name;
+             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
+             public int[] RandomNumbers;
+             public Widget Widget;
+             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 100)]
+             public Gadget[] Gadgets;
+           }
 
          }
          "
@@ -131,83 +132,72 @@ fn native_structs() {
     let actual = fetch(&outputs, "Types.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using JetBrains.Annotations;
 
          namespace Backend {
-             [PublicAPI]
-             public struct Entry {
-                 public uint Id;
-                 public byte[] Key;
-                 public Record[] Records;
+           [PublicAPI]
+           public struct Entry {
+             public uint Id;
+             public List<byte> Key;
+             public List<Record> Records;
 
-                 internal Entry(EntryNative native) {
-                     Id = native.Id;
-                     Key = Utils.CopyToByteArray(native.KeyPtr, native.KeyLen);
-                     Records = Utils.CopyToObjectArray<Record>(native.RecordsPtr, \
-                                                               native.RecordsLen);
-                 }
-
-                 internal EntryNative ToNative() {
-                     return new EntryNative() {
-                         Id = Id,
-                         KeyPtr = Utils.CopyFromByteArray(Key),
-                         KeyLen = (IntPtr) Key.Length,
-                         RecordsPtr = Utils.CopyFromObjectArray(Records),
-                         RecordsLen = (IntPtr) Records.Length,
-                         RecordsCap = (IntPtr) 0
-                     };
-                 }
+             internal Entry(EntryNative native) {
+               Id = native.Id;
+               Key = Utils.CopyToByteList(native.KeyPtr, native.KeyLen);
+               Records = Utils.CopyToObjectList<Record>(native.RecordsPtr, \
+                                                        native.RecordsLen);
              }
 
-             [PublicAPI]
-             public struct Wrapper {
-                 public Entry Entry;
+             internal EntryNative ToNative() {
+               return new EntryNative() {
+                 Id = Id,
+                 KeyPtr = Utils.CopyFromByteList(Key),
+                 KeyLen = (IntPtr) Key.Count,
+                 RecordsPtr = Utils.CopyFromObjectList(Records),
+                 RecordsLen = (IntPtr) Records.Count,
+                 RecordsCap = (IntPtr) 0
+               };
+             }
+           }
 
-                 internal Wrapper(WrapperNative native) {
-                     Entry = Entry(native.Entry);
-                 }
+           internal struct EntryNative {
+             public uint Id;
+             public IntPtr KeyPtr;
+             public IntPtr KeyLen;
+             public IntPtr RecordsPtr;
+             public IntPtr RecordsLen;
+             public IntPtr RecordsCap;
 
-                 internal WrapperNative ToNative() {
-                     return new WrapperNative() {
-                         Entry = Entry.ToNative()
-                     };
-                 }
+             internal void Free() {
+               Utils.FreeList(ref KeyPtr, ref KeyLen);
+               Utils.FreeList(ref RecordsPtr, ref RecordsLen);
+             }
+           }
+
+           [PublicAPI]
+           public struct Wrapper {
+             public Entry Entry;
+
+             internal Wrapper(WrapperNative native) {
+               Entry = Entry(native.Entry);
              }
 
-         }
-        "
-    );
-    assert_multiline_eq!(actual, expected);
-
-    // Native types.
-    let actual = fetch(&outputs, "Types.Native.cs");
-    let expected = indoc!(
-        "using System;
-         using System.Runtime.InteropServices;
-
-         namespace Backend {
-             internal struct EntryNative {
-                 public uint Id;
-                 public IntPtr KeyPtr;
-                 public IntPtr KeyLen;
-                 public IntPtr RecordsPtr;
-                 public IntPtr RecordsLen;
-                 public IntPtr RecordsCap;
-
-                 internal void Free() {
-                     Utils.FreeArray(ref KeyPtr, ref KeyLen);
-                     Utils.FreeArray(ref RecordsPtr, ref RecordsLen);
-                 }
+             internal WrapperNative ToNative() {
+               return new WrapperNative() {
+                 Entry = Entry.ToNative()
+               };
              }
+           }
 
-             internal struct WrapperNative {
-                 public EntryNative Entry;
+           internal struct WrapperNative {
+             public EntryNative Entry;
 
-                 internal void Free() {
-                     Entry.Free();
-                 }
+             internal void Free() {
+               Entry.Free();
              }
+           }
 
          }
         "
@@ -218,62 +208,60 @@ fn native_structs() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public void Fun0(Entry entry) {
-                     var entryNative = entry.ToNative();
-                     Fun0Native(entryNative);
-                     entryNative.Free();
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-                 internal static extern void Fun0Native(EntryNative entry);
-
-                 public void Fun1(ref Entry entry) {
-                     var entryNative = entry.ToNative();
-                     Fun1Native(ref entryNative);
-                     entryNative.Free();
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
-                 internal static extern void Fun1Native(ref EntryNative entry);
-
-                 public Task<Entry> Fun2Async() {
-                     var (ret, userData) = Utils.PrepareTask<Entry>();
-                     Fun2Native(userData, OnFfiResultEntryCb);
-                     return ret;
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
-                 internal static extern void Fun2Native(IntPtr userData, \
-                                                        FfiResultEntryCb cb);
-
-                 #region Callbacks
-                 internal delegate void FfiResultEntryCb(IntPtr userData, \
-                                                         ref FfiResult result, \
-                                                         ref EntryNative entry);
-
-                 #if __IOS__
-                 [MonoPInvokeCallback(typeof(FfiResultEntryCb))]
-                 #endif
-                 private static void OnFfiResultEntryCb(IntPtr userData, \
-                                                        ref FfiResult result, \
-                                                        ref EntryNative entry) {
-                     Utils.CompleteTask(userData, ref result, new Entry(entry));
-                 }
-
-                 #endregion
-
+             public void Fun0(Entry entry) {
+               var entryNative = entry.ToNative();
+               Fun0Native(entryNative);
+               entryNative.Free();
              }
+
+             [DllImport(DllName, EntryPoint = \"fun0\")]
+             internal static extern void Fun0Native(EntryNative entry);
+
+             public void Fun1(ref Entry entry) {
+               var entryNative = entry.ToNative();
+               Fun1Native(ref entryNative);
+               entryNative.Free();
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun1\")]
+             internal static extern void Fun1Native(ref EntryNative entry);
+
+             public Task<Entry> Fun2Async() {
+               var (ret, userData) = Utils.PrepareTask<Entry>();
+               Fun2Native(userData, OnFfiResultEntryCb);
+               return ret;
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun2\")]
+             internal static extern void Fun2Native(IntPtr userData, \
+                                                    FfiResultEntryCb cb);
+
+             internal delegate void FfiResultEntryCb(IntPtr userData, \
+                                                     ref FfiResult result, \
+                                                     ref EntryNative entry);
+
+             #if __IOS__
+             [MonoPInvokeCallback(typeof(FfiResultEntryCb))]
+             #endif
+             private static void OnFfiResultEntryCb(IntPtr userData, \
+                                                    ref FfiResult result, \
+                                                    ref EntryNative entry) {
+               Utils.CompleteTask(userData, ref result, new Entry(entry));
+             }
+
+           }
          }
         "
     );
@@ -306,17 +294,18 @@ fn type_aliases() {
     let actual = fetch(&outputs, "Types.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using JetBrains.Annotations;
 
          namespace Backend {
-             [PublicAPI]
-             public struct Message {
-                 public ulong Id;
-                 public ulong SenderId;
-                 [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
-                 public ulong[] ReceiverIds;
-             }
+           [PublicAPI]
+           public struct Message {
+             public ulong Id;
+             public ulong SenderId;
+             [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
+             public ulong[] ReceiverIds;
+           }
 
          }
          "
@@ -326,45 +315,43 @@ fn type_aliases() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public Task<ulong> FunAsync(ulong id) {
-                     var (ret, userData) = Utils.PrepareTask<ulong>();
-                     FunNative(id, userData, OnFfiResultULongCb);
-                     return ret;
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun\")]
-                 internal static extern void FunNative(ulong id, \
-                                                       IntPtr userData, \
-                                                       FfiResultULongCb cb);
-
-                 #region Callbacks
-                 internal delegate void FfiResultULongCb(IntPtr arg0, \
-                                                         ref FfiResult arg1, \
-                                                         ulong arg2);
-
-                 #if __IOS__
-                 [MonoPInvokeCallback(typeof(FfiResultULongCb))]
-                 #endif
-                 private static void OnFfiResultULongCb(IntPtr arg0, \
-                                                        ref FfiResult arg1, \
-                                                        ulong arg2) {
-                     Utils.CompleteTask(arg0, ref arg1, arg2);
-                 }
-
-                 #endregion
-
+             public Task<ulong> FunAsync(ulong id) {
+               var (ret, userData) = Utils.PrepareTask<ulong>();
+               FunNative(id, userData, OnFfiResultULongCb);
+               return ret;
              }
+
+             [DllImport(DllName, EntryPoint = \"fun\")]
+             internal static extern void FunNative(ulong id, \
+                                                   IntPtr userData, \
+                                                   FfiResultULongCb cb);
+
+             internal delegate void FfiResultULongCb(IntPtr arg0, \
+                                                     ref FfiResult arg1, \
+                                                     ulong arg2);
+
+             #if __IOS__
+             [MonoPInvokeCallback(typeof(FfiResultULongCb))]
+             #endif
+             private static void OnFfiResultULongCb(IntPtr arg0, \
+                                                    ref FfiResult arg1, \
+                                                    ulong arg2) {
+               Utils.CompleteTask(arg0, ref arg1, arg2);
+             }
+
+           }
          }
          "
     );
@@ -391,22 +378,23 @@ fn enums() {
     let actual = fetch(&outputs, "Types.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using JetBrains.Annotations;
 
          namespace Backend {
-             [PublicAPI]
-             public enum Mode {
-                 ReadOnly,
-                 WriteOnly,
-                 ReadAndWrite,
-             }
+           [PublicAPI]
+           public enum Mode {
+             ReadOnly,
+             WriteOnly,
+             ReadAndWrite,
+           }
 
-             [PublicAPI]
-             public enum Binary {
-                 Zero = 0,
-                 One = 1,
-             }
+           [PublicAPI]
+           public enum Binary {
+             Zero = 0,
+             One = 1,
+           }
 
          }
         "
@@ -438,25 +426,26 @@ fn functions_taking_no_callbacks() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public void Fun0(ref Engine engine) {
-                     Fun0Native(ref engine);
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-                 internal static extern void Fun0Native(ref Engine engine);
-
+             public void Fun0(ref Engine engine) {
+               Fun0Native(ref engine);
              }
+
+             [DllImport(DllName, EntryPoint = \"fun0\")]
+             internal static extern void Fun0Native(ref Engine engine);
+
+           }
          }
         "
     );
@@ -480,43 +469,41 @@ fn functions_taking_one_callback() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public Task Fun1Async(int num, string name) {
-                     var (ret, userData) = Utils.PrepareTask();
-                     Fun1Native(num, name, userData, OnFfiResultCb);
-                     return ret;
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
-                 internal static extern void Fun1Native(\
-                    int num, \
-                    [MarshalAs(UnmanagedType.LPStr)] string name, \
-                    IntPtr userData, \
-                    FfiResultCb cb);
-
-                 #region Callbacks
-                 internal delegate void FfiResultCb(IntPtr userData, ref FfiResult result);
-
-                 #if __IOS__
-                 [MonoPInvokeCallback(typeof(FfiResultCb))]
-                 #endif
-                 private static void OnFfiResultCb(IntPtr userData, ref FfiResult result) {
-                     Utils.CompleteTask(userData, ref result);
-                 }
-
-                 #endregion
-
+             public Task Fun1Async(int num, string name) {
+               var (ret, userData) = Utils.PrepareTask();
+               Fun1Native(num, name, userData, OnFfiResultCb);
+               return ret;
              }
+
+             [DllImport(DllName, EntryPoint = \"fun1\")]
+             internal static extern void Fun1Native(\
+               int num, \
+               [MarshalAs(UnmanagedType.LPStr)] string name, \
+               IntPtr userData, \
+               FfiResultCb cb);
+
+             internal delegate void FfiResultCb(IntPtr userData, ref FfiResult result);
+
+             #if __IOS__
+             [MonoPInvokeCallback(typeof(FfiResultCb))]
+             #endif
+             private static void OnFfiResultCb(IntPtr userData, ref FfiResult result) {
+               Utils.CompleteTask(userData, ref result);
+             }
+
+           }
          }
         "
     );
@@ -544,33 +531,31 @@ fn functions_taking_multiple_callbacks() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 [DllImport(DLL_NAME, EntryPoint = \"fun\")]
-                 internal static extern void FunNative(int input, \
-                                                       IntPtr userData, \
-                                                       NoneCb cb0, \
-                                                       FfiResultIntCb cb1);
+             [DllImport(DllName, EntryPoint = \"fun\")]
+             internal static extern void FunNative(int input, \
+                                                   IntPtr userData, \
+                                                   NoneCb cb0, \
+                                                   FfiResultIntCb cb1);
 
-                 #region Callbacks
-                 internal delegate void FfiResultIntCb(IntPtr userData, \
-                                                       ref FfiResult result, \
-                                                       int output);
+             internal delegate void FfiResultIntCb(IntPtr userData, \
+                                                   ref FfiResult result, \
+                                                   int output);
 
-                 internal delegate void NoneCb(IntPtr userData);
+             internal delegate void NoneCb(IntPtr userData);
 
-                 #endregion
-
-             }
+           }
          }
         "
     );
@@ -601,56 +586,57 @@ fn functions_taking_array() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public void Fun0(byte[] data) {
-                     Fun0Native(data, (IntPtr) data.Length);
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-                 internal static extern void Fun0Native(\
-                    [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
-                    IntPtr dataLen\
-                 );
-
-                 public void Fun1(byte[] data) {
-                     Fun1Native(data, (IntPtr) data.Length);
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
-                 internal static extern void Fun1Native(\
-                    [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
-                    IntPtr dataLen\
-                 );
-
-                 public void Fun2(ulong id, byte[] data) {
-                     Fun2Native(id, data, (IntPtr) data.Length);
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
-                 internal static extern void Fun2Native(\
-                    ulong id, \
-                    [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] data, \
-                    IntPtr dataLen\
-                 );
-
-                 public void Fun3(ref FfiResult result, IntPtr len) {
-                     Fun3Native(ref result, len);
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun3\")]
-                 internal static extern void Fun3Native(ref FfiResult result, IntPtr len);
-
+             public void Fun0(List<byte> data) {
+               Fun0Native(data.ToArray(), (IntPtr) data.Count);
              }
+
+             [DllImport(DllName, EntryPoint = \"fun0\")]
+             internal static extern void Fun0Native(\
+               [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
+               IntPtr dataLen\
+             );
+
+             public void Fun1(List<byte> data) {
+               Fun1Native(data.ToArray(), (IntPtr) data.Count);
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun1\")]
+             internal static extern void Fun1Native(\
+               [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
+               IntPtr dataLen\
+             );
+
+             public void Fun2(ulong id, List<byte> data) {
+               Fun2Native(id, data.ToArray(), (IntPtr) data.Count);
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun2\")]
+             internal static extern void Fun2Native(\
+               ulong id, \
+               [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] data, \
+               IntPtr dataLen\
+             );
+
+             public void Fun3(ref FfiResult result, IntPtr len) {
+               Fun3Native(ref result, len);
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun3\")]
+             internal static extern void Fun3Native(ref FfiResult result, IntPtr len);
+
+           }
          }
         "
     );
@@ -685,71 +671,69 @@ fn functions_taking_callback_taking_const_size_array() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public Task<byte[]> Fun2Async() {
-                     var (ret, userData) = Utils.PrepareTask<byte[]>();
-                     Fun2Native(userData, OnFfiResultByteArray32Cb);
-                     return ret;
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun2\")]
-                 internal static extern void Fun2Native(IntPtr userData, \
-                                                        FfiResultByteArray32Cb cb);
-
-                 public Task<byte[]> Fun3Async() {
-                     var (ret, userData) = Utils.PrepareTask<byte[]>();
-                     Fun3Native(userData, OnFfiResultByteArrayNonceLenCb);
-                     return ret;
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun3\")]
-                 internal static extern void Fun3Native(IntPtr userData, \
-                                                        FfiResultByteArrayNonceLenCb cb);
-
-                 #region Callbacks
-                 internal delegate void FfiResultByteArray32Cb(IntPtr userData, \
-                                                               ref FfiResult result, \
-                                                               IntPtr keyPtr);
-
-                 #if __IOS__
-                 [MonoPInvokeCallback(typeof(FfiResultByteArray32Cb))]
-                 #endif
-                 private static void OnFfiResultByteArray32Cb(IntPtr userData, \
-                                                              ref FfiResult result, \
-                                                              IntPtr keyPtr) {
-                     Utils.CompleteTask(userData, \
-                                        ref result, \
-                                        Utils.CopyToByteArray(keyPtr, 32));
-                 }
-
-                 internal delegate void FfiResultByteArrayNonceLenCb(IntPtr userData, \
-                                                                     ref FfiResult result, \
-                                                                     IntPtr noncePtr);
-
-                 #if __IOS__
-                 [MonoPInvokeCallback(typeof(FfiResultByteArrayNonceLenCb))]
-                 #endif
-                 private static void OnFfiResultByteArrayNonceLenCb(IntPtr userData, \
-                                                                    ref FfiResult result, \
-                                                                    IntPtr noncePtr) {
-                     Utils.CompleteTask(userData, \
-                                        ref result, \
-                                        Utils.CopyToByteArray(noncePtr, Constants.NonceLen));
-                 }
-
-                 #endregion
-
+             public Task<byte[]> Fun2Async() {
+               var (ret, userData) = Utils.PrepareTask<byte[]>();
+               Fun2Native(userData, OnFfiResultByteArray32Cb);
+               return ret;
              }
+
+             [DllImport(DllName, EntryPoint = \"fun2\")]
+             internal static extern void Fun2Native(IntPtr userData, \
+                                                    FfiResultByteArray32Cb cb);
+
+             public Task<byte[]> Fun3Async() {
+               var (ret, userData) = Utils.PrepareTask<byte[]>();
+               Fun3Native(userData, OnFfiResultByteArrayNonceLenCb);
+               return ret;
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun3\")]
+             internal static extern void Fun3Native(IntPtr userData, \
+                                                    FfiResultByteArrayNonceLenCb cb);
+
+             internal delegate void FfiResultByteArray32Cb(IntPtr userData, \
+                                                           ref FfiResult result, \
+                                                           IntPtr keyPtr);
+
+             #if __IOS__
+             [MonoPInvokeCallback(typeof(FfiResultByteArray32Cb))]
+             #endif
+             private static void OnFfiResultByteArray32Cb(IntPtr userData, \
+                                                          ref FfiResult result, \
+                                                          IntPtr keyPtr) {
+               Utils.CompleteTask(userData, \
+                                  ref result, \
+                                  Utils.CopyToByteList(keyPtr, 32));
+             }
+
+             internal delegate void FfiResultByteArrayNonceLenCb(IntPtr userData, \
+                                                                 ref FfiResult result, \
+                                                                 IntPtr noncePtr);
+
+             #if __IOS__
+             [MonoPInvokeCallback(typeof(FfiResultByteArrayNonceLenCb))]
+             #endif
+             private static void OnFfiResultByteArrayNonceLenCb(IntPtr userData, \
+                                                                ref FfiResult result, \
+                                                                IntPtr noncePtr) {
+               Utils.CompleteTask(userData, \
+                                  ref result, \
+                                  Utils.CopyToByteList(noncePtr, Constants.NonceLen));
+             }
+
+           }
          }
         "
     );
@@ -786,77 +770,75 @@ fn functions_taking_callback_taking_dynamic_array() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public Task<byte[]> Fun0Async() {
-                     var (ret, userData) = Utils.PrepareTask<byte[]>();
-                     Fun0Native(userData, OnFfiResultByteListCb);
-                     return ret;
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-                 internal static extern void Fun0Native(IntPtr userData, \
-                                                        FfiResultByteListCb cb);
-
-                 public Task<Record[]> Fun1Async() {
-                     var (ret, userData) = Utils.PrepareTask<Record[]>();
-                     Fun1Native(userData, OnFfiResultRecordListCb);
-                     return ret;
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun1\")]
-                 internal static extern void Fun1Native(IntPtr userData, \
-                                                        FfiResultRecordListCb cb);
-
-                 #region Callbacks
-                 internal delegate void FfiResultByteListCb(IntPtr userData, \
-                                                            ref FfiResult result, \
-                                                            IntPtr dataPtr, \
-                                                            IntPtr dataLen);
-
-                 #if __IOS__
-                 [MonoPInvokeCallback(typeof(FfiResultByteListCb))]
-                 #endif
-                 private static void OnFfiResultByteListCb(IntPtr userData, \
-                                                           ref FfiResult result, \
-                                                           IntPtr dataPtr, \
-                                                           IntPtr dataLen) {
-                     Utils.CompleteTask(userData, \
-                                        ref result, \
-                                        Utils.CopyToByteArray(dataPtr, dataLen));
-                 }
-
-                 internal delegate void FfiResultRecordListCb(IntPtr userData, \
-                                                              ref FfiResult result, \
-                                                              IntPtr recordsPtr, \
-                                                              IntPtr recordsLen);
-
-                 #if __IOS__
-                 [MonoPInvokeCallback(typeof(FfiResultRecordListCb))]
-                 #endif
-                 private static void OnFfiResultRecordListCb(IntPtr userData, \
-                                                             ref FfiResult result, \
-                                                             IntPtr recordsPtr, \
-                                                             IntPtr recordsLen) {
-                     Utils.CompleteTask(userData, \
-                                        ref result, \
-                                        Utils.CopyToObjectArray<Record>(\
-                                            recordsPtr, \
-                                            recordsLen));
-                 }
-
-                 #endregion
-
+             public Task<List<byte>> Fun0Async() {
+               var (ret, userData) = Utils.PrepareTask<List<byte>>();
+               Fun0Native(userData, OnFfiResultByteListCb);
+               return ret;
              }
+
+             [DllImport(DllName, EntryPoint = \"fun0\")]
+             internal static extern void Fun0Native(IntPtr userData, \
+                                                    FfiResultByteListCb cb);
+
+             public Task<List<Record>> Fun1Async() {
+               var (ret, userData) = Utils.PrepareTask<List<Record>>();
+               Fun1Native(userData, OnFfiResultRecordListCb);
+               return ret;
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun1\")]
+             internal static extern void Fun1Native(IntPtr userData, \
+                                                    FfiResultRecordListCb cb);
+
+             internal delegate void FfiResultByteListCb(IntPtr userData, \
+                                                        ref FfiResult result, \
+                                                        IntPtr dataPtr, \
+                                                        IntPtr dataLen);
+
+             #if __IOS__
+             [MonoPInvokeCallback(typeof(FfiResultByteListCb))]
+             #endif
+             private static void OnFfiResultByteListCb(IntPtr userData, \
+                                                       ref FfiResult result, \
+                                                       IntPtr dataPtr, \
+                                                       IntPtr dataLen) {
+               Utils.CompleteTask(userData, \
+                                  ref result, \
+                                  Utils.CopyToByteList(dataPtr, dataLen));
+             }
+
+             internal delegate void FfiResultRecordListCb(IntPtr userData, \
+                                                          ref FfiResult result, \
+                                                          IntPtr recordsPtr, \
+                                                          IntPtr recordsLen);
+
+             #if __IOS__
+             [MonoPInvokeCallback(typeof(FfiResultRecordListCb))]
+             #endif
+             private static void OnFfiResultRecordListCb(IntPtr userData, \
+                                                         ref FfiResult result, \
+                                                         IntPtr recordsPtr, \
+                                                         IntPtr recordsLen) {
+               Utils.CompleteTask(userData, \
+                                  ref result, \
+                                  Utils.CopyToObjectList<Record>(\
+                                    recordsPtr, \
+                                    recordsLen));
+             }
+
+           }
          }
         "
     );
@@ -874,26 +856,27 @@ fn functions_with_return_values() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public bool Fun(int arg) {
-                     var ret = FunNative(arg);
-                     return ret;
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun\")]
-                 internal static extern bool FunNative(int arg);
-
+             public bool Fun(int arg) {
+               var ret = FunNative(arg);
+               return ret;
              }
+
+             [DllImport(DllName, EntryPoint = \"fun\")]
+             internal static extern bool FunNative(int arg);
+
+           }
          }
         "
     );
@@ -911,25 +894,26 @@ fn functions_taking_out_param() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public void Fun(out IntPtr oApp) {
-                     FunNative(out oApp);
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun\")]
-                 internal static extern void FunNative(out IntPtr oApp);
-
+             public void Fun(out IntPtr oApp) {
+               FunNative(out oApp);
              }
+
+             [DllImport(DllName, EntryPoint = \"fun\")]
+             internal static extern void FunNative(out IntPtr oApp);
+
+           }
          }
         "
     );
@@ -964,17 +948,17 @@ fn constants() {
         "using System;
 
          namespace Backend {
-             public static class Constants {
-                 public const int Number = 123;
-                 public const string String = \"hello world\";
-                 public static readonly byte[] Array = new byte[] { 0, 1, 2, 3 };
-                 public static readonly Record StructValue = new Record { \
-                     id = 0, secretCode = \"xyz\" };
-                 public static readonly Record StructRef = new Record { \
-                     id = 1, secretCode = \"xyz\" };
-                 public const string EmptyStr = \"\";
-                 public const byte Custom = 45;
-             }
+           public static class Constants {
+             public const int Number = 123;
+             public const string String = \"hello world\";
+             public static readonly byte[] Array = new byte[] { 0, 1, 2, 3 };
+             public static readonly Record StructValue = new Record { \
+                 id = 0, secretCode = \"xyz\" };
+             public static readonly Record StructRef = new Record { \
+                 id = 1, secretCode = \"xyz\" };
+             public const string EmptyStr = \"\";
+             public const byte Custom = 45;
+           }
          }
         "
     );
@@ -994,29 +978,30 @@ fn arrays() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public void Fun(byte[] a, byte[] b) {
-                     FunNative(a, b);
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun\")]
-                 internal static extern void FunNative(\
-                     [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)] \
-                     byte[] a, \
-                     [MarshalAs(UnmanagedType.ByValArray, SizeConst = (int) Constants.ArraySize)] \
-                     byte[] b);
-
+             public void Fun(byte[] a, byte[] b) {
+               FunNative(a, b);
              }
+
+             [DllImport(DllName, EntryPoint = \"fun\")]
+             internal static extern void FunNative(\
+               [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)] \
+               byte[] a, \
+               [MarshalAs(UnmanagedType.ByValArray, SizeConst = (int) Constants.ArraySize)] \
+               byte[] b);
+
+           }
          }
         "
     );
@@ -1042,14 +1027,15 @@ fn opaque_types() {
     let actual = fetch(&outputs, "Types.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using JetBrains.Annotations;
 
          namespace Backend {
-             [PublicAPI]
-             public struct Context {
-                 public IntPtr Handle;
-             }
+           [PublicAPI]
+           public struct Context {
+             public IntPtr Handle;
+           }
 
          }
         "
@@ -1059,25 +1045,26 @@ fn opaque_types() {
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial class Backend : IBackend {
-                 #if __IOS__
-                 internal const string DLL_NAME = \"__Internal\";
-                 #else
-                 internal const string DLL_NAME = \"backend\";
-                 #endif
+           public partial class Backend : IBackend {
+             #if __IOS__
+             internal const string DllName = \"__Internal\";
+             #else
+             internal const string DllName = \"backend\";
+             #endif
 
-                 public void Fun0(IntPtr handle) {
-                     Fun0Native(handle);
-                 }
-
-                 [DllImport(DLL_NAME, EntryPoint = \"fun0\")]
-                 internal static extern void Fun0Native(IntPtr handle);
-
+             public void Fun0(IntPtr handle) {
+               Fun0Native(handle);
              }
+
+             [DllImport(DllName, EntryPoint = \"fun0\")]
+             internal static extern void Fun0Native(IntPtr handle);
+
+           }
          }
         "
     );
@@ -1099,13 +1086,14 @@ fn interface() {
     let actual = fetch(&outputs, "IBackend.cs");
     let expected = indoc!(
         "using System;
+         using System.Collections.Generic;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
-             public partial interface IBackend {
-                 Task FunAsync(bool enabled);
-             }
+           public partial interface IBackend {
+             Task FunAsync(bool enabled);
+           }
          }
         "
     );
