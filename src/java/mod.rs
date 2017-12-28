@@ -232,7 +232,11 @@ impl common::Lang for LangJava {
 /// Transform a struct name into a Java class name
 pub fn struct_to_java_classname<S: AsRef<str>>(s: S) -> String {
     // s.as_ref().to_class_case()
-    s.as_ref().to_string()
+    let mut c = s.as_ref().chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
 }
 
 /// Get the Java interface name for the callback based on its types
@@ -650,5 +654,69 @@ fn rust_ty_to_java<'a>(ty: &'a str, context: &Context, use_type_map: bool) -> &'
             }
         }
         ty => libc_ty_to_java(ty),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syntax::ast::{Arg, ItemKind};
+    use syntax::parse::{self, ParseSess};
+
+    #[test]
+    fn cb_names() {
+        fn get_inputs(source: &str) -> Vec<Arg> {
+            let parse_sess = ParseSess::new();
+
+            let item = unwrap!(unwrap!(parse::parse_item_from_source_str(
+                "dummy.rs".to_owned(),
+                source.to_owned(),
+                &parse_sess,
+            )));
+
+            match item.node {
+                ItemKind::Fn(ref fn_decl, _, _, _, _, _) => fn_decl.inputs.clone(),
+                _ => panic!("wrong item type"),
+            }
+        }
+
+        let context = Context {
+            type_map: HashMap::new(),
+            lib_name: "backend".to_owned(),
+            namespace: "net.maidsafe.bindings".to_owned(),
+            generated_jni_cbs: BTreeSet::new(),
+        };
+
+        let inputs = get_inputs("fn dummy() {}");
+        assert_eq!("CallbackVoid", unwrap!(callback_name(&inputs, &context)));
+
+        let inputs = get_inputs(
+            "fn dummy(user_data: *mut c_void, result: *const FfiResult) {}",
+        );
+        assert_eq!("CallbackResult", unwrap!(callback_name(&inputs, &context)));
+
+        let inputs = get_inputs(
+            "fn dummy(user_data: *mut c_void, result: *const FfiResult, b: u64, c: u32) {}",
+        );
+        assert_eq!(
+            "CallbackResultLongInt",
+            unwrap!(callback_name(&inputs, &context))
+        );
+
+        let inputs = get_inputs(
+            "fn dummy(user_data: *mut c_void, result: *const FfiResult, b: *const MyStruct) {}",
+        );
+        assert_eq!(
+            "CallbackResultMyStruct",
+            unwrap!(callback_name(&inputs, &context))
+        );
+
+        let inputs = get_inputs(
+            "fn dummy(user_data: *mut c_void, result: *const FfiResult, b: *const c_char) {}",
+        );
+        assert_eq!(
+            "CallbackResultString",
+            unwrap!(callback_name(&inputs, &context))
+        );
     }
 }

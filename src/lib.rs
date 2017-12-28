@@ -26,6 +26,9 @@ extern crate diff;
 #[cfg(test)]
 #[macro_use]
 extern crate indoc;
+#[cfg(test)]
+#[macro_use]
+extern crate unwrap;
 
 use common::{Lang, Outputs};
 pub use common::FilterMode;

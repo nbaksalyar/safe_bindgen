@@ -41,6 +41,7 @@ jni = "~0.7.2"
 quote = "~0.3.15"
 
 [dev-dependencies]
+unwrap = "~1.1.0"
 colored = "~1.6.0"
 diff = "~0.1.11"
 indoc = "~0.2.3"
