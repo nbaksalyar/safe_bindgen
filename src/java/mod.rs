@@ -136,6 +136,7 @@ impl common::Lang for LangJava {
 
             if variants.is_struct() {
                 let mut constructor_fields = Vec::new();
+                let mut constructor_assignments = Vec::new();
 
                 buffer.push_str(" {\n");
 
@@ -171,13 +172,16 @@ impl common::Lang for LangJava {
                     ));
 
                     constructor_fields.push(format!("{} {}", ty, name));
+                    constructor_assignments.push(format!("\t\tthis.{name} = {name};", name = name));
                 }
 
                 // Parametrised constructor
                 buffer.push_str(&format!(
-                    "\tpublic {name}({constructor_fields}) {{ }}\n",
+                    "\tpublic {name}({constructor_fields}) {{\n{constructor_assignments}\n}}\n",
                     name = name,
-                    constructor_fields = constructor_fields.join(", ")
+                    constructor_fields = constructor_fields.join(", "),
+                    constructor_assignments =
+                        constructor_assignments.join("\n")
                 ));
 
                 buffer.push_str("}");
