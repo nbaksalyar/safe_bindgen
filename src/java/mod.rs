@@ -25,6 +25,8 @@ pub struct Context {
     lib_name: String,
     /// Namespace
     namespace: String,
+    /// Model namespace (structures go into this one)
+    namespace_model: String,
     /// Maps types from Rust to Java
     type_map: HashMap<&'static str, &'static str>,
     /// Keeps track of which JNI callback functions has been generated already
@@ -38,6 +40,7 @@ impl LangJava {
                 type_map,
                 lib_name: "backend".to_owned(),
                 namespace: "net.maidsafe.bindings".to_owned(),
+                namespace_model: "net.maidsafe.model".to_owned(),
                 generated_jni_cbs: BTreeSet::new(),
             },
         }
@@ -48,9 +51,14 @@ impl LangJava {
         self.context.lib_name = name.into();
     }
 
-    /// Set the namespace to put all the generated code in.
+    /// Set the namespace to put the NativeBindings class in.
     pub fn set_namespace<T: Into<String>>(&mut self, namespace: T) {
         self.context.namespace = namespace.into();
+    }
+
+    /// Set the namespace to put all structures/classes in.
+    pub fn set_model_namespace<T: Into<String>>(&mut self, namespace: T) {
+        self.context.namespace_model = namespace.into();
     }
 }
 
@@ -382,7 +390,7 @@ pub fn transform_callback<S: AsRef<str>>(
             "package {namespace};\n\n\
              public interface {name} {{\n\
              \tpublic void call({types});\n}}\n",
-            namespace = context.namespace,
+            namespace = context.namespace_model,
             name = class_name.as_ref(),
             types = try_some!(callback_to_java(bare_fn, ty.span, context)),
         ))),
@@ -684,6 +692,7 @@ mod tests {
             type_map: HashMap::new(),
             lib_name: "backend".to_owned(),
             namespace: "net.maidsafe.bindings".to_owned(),
+            namespace_model: "net.maidsafe.model".to_owned(),
             generated_jni_cbs: BTreeSet::new(),
         };
 

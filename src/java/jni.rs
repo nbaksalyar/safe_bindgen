@@ -66,7 +66,7 @@ fn java_ty_to_signature(s: &str) -> Option<JavaType> {
 
 // Produces a fully qualified class name (i.e. with a Java package)
 fn fully_qualified(ty: &str, context: &Context) -> String {
-    format!("{}/{}", context.namespace.replace(".", "/"), ty)
+    format!("{}/{}", context.namespace_model.replace(".", "/"), ty)
 }
 
 fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
