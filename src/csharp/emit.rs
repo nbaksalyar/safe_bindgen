@@ -634,40 +634,66 @@ fn emit_marshal_as(
     index: Option<usize>,
     append: &str,
 ) {
-    if let Some(unmanaged) = unmanaged_type(ty) {
+    if let Some(unmanaged) = unmanaged_type(ty, index.is_none()) {
         emit!(writer, "[MarshalAs(UnmanagedType.{}", unmanaged);
 
-        if let Type::Array(ref ty, ref size) = *ty {
-            if let Some(unmanaged) = unmanaged_type(ty) {
-                emit!(writer, ", ArraySubType = UnmanagedType.{}", unmanaged);
+        match *ty {
+            Type::Array(ref ty, ref size) => {
+                emit_array_marshal_as(writer, context, ty, size, index)
             }
-
-            match *size {
-                ArraySize::Lit(value) => emit!(writer, ", SizeConst = {}", value),
-                ArraySize::Const(ref name) => {
-                    emit!(writer, ", SizeConst = (int) ");
-                    emit_const_use(writer, context, name);
-                }
-                ArraySize::Dynamic => {
-                    if let Some(index) = index {
-                        emit!(writer, ", SizeParamIndex = {}", index + 1)
-                    }
+            Type::Pointer(ref ty) => {
+                if let Type::Array(ref ty, ref size) = **ty {
+                    emit_array_marshal_as(writer, context, ty, size, index)
                 }
             }
+            _ => (),
         }
 
         emit!(writer, ")]{}", append);
     }
 }
 
-fn unmanaged_type(ty: &Type) -> Option<&str> {
+fn unmanaged_type(ty: &Type, field: bool) -> Option<&str> {
     match *ty {
         Type::Bool => Some("U1"),
         // TODO: consider marshaling as "LPUTF8Str", is possible and useful.
         Type::String => Some("LPStr"),
         Type::Array(_, ArraySize::Dynamic) => Some("LPArray"),
-        Type::Array(_, _) => Some("ByValArray"),
+        Type::Array(..) if field => Some("ByValArray"),
+        Type::Array(..) => Some("LPArray"),
+        Type::Pointer(ref ty) => {
+            if let Type::Array(_, _) = **ty {
+                Some("LPArray")
+            } else {
+                None
+            }
+        }
         _ => None,
+    }
+}
+
+fn emit_array_marshal_as(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    ty: &Type,
+    size: &ArraySize,
+    index: Option<usize>,
+) {
+    if let Some(unmanaged) = unmanaged_type(ty, false) {
+        emit!(writer, ", ArraySubType = UnmanagedType.{}", unmanaged);
+    }
+
+    match *size {
+        ArraySize::Lit(value) => emit!(writer, ", SizeConst = {}", value),
+        ArraySize::Const(ref name) => {
+            emit!(writer, ", SizeConst = (int) ");
+            emit_const_use(writer, context, name);
+        }
+        ArraySize::Dynamic => {
+            if let Some(index) = index {
+                emit!(writer, ", SizeParamIndex = {}", index + 1)
+            }
+        }
     }
 }
 
@@ -718,6 +744,9 @@ fn emit_type(
         Type::String => emit!(writer, "string"),
         Type::Pointer(ref ty) => {
             match **ty {
+                Type::Array(ref ty, ref size) => {
+                    emit_array(writer, context, ty, size, ptr_mode, native_mode)
+                }
                 Type::User(ref name) => {
                     if context.is_opaque(name) {
                         emit!(writer, "IntPtr")
@@ -744,14 +773,7 @@ fn emit_type(
             }
         }
         Type::Array(ref ty, ref size) => {
-            if native_mode == NativeMode::Wrap && *size == ArraySize::Dynamic {
-                emit!(writer, "List<");
-                emit_type(writer, context, ty, ptr_mode, native_mode);
-                emit!(writer, ">");
-            } else {
-                emit_type(writer, context, ty, ptr_mode, native_mode);
-                emit!(writer, "[]")
-            }
+            emit_array(writer, context, ty, size, ptr_mode, native_mode)
         }
         Type::Function(..) => unimplemented!(),
         Type::User(ref name) => {
@@ -761,6 +783,24 @@ fn emit_type(
                 emit!(writer, "{}", name)
             }
         }
+    }
+}
+
+fn emit_array(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    ty: &Type,
+    size: &ArraySize,
+    ptr_mode: PointerMode,
+    native_mode: NativeMode,
+) {
+    if native_mode == NativeMode::Wrap && *size == ArraySize::Dynamic {
+        emit!(writer, "List<");
+        emit_type(writer, context, ty, ptr_mode, native_mode);
+        emit!(writer, ">");
+    } else {
+        emit_type(writer, context, ty, ptr_mode, native_mode);
+        emit!(writer, "[]")
     }
 }
 

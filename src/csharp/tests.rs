@@ -970,9 +970,16 @@ fn constants() {
 fn arrays() {
     let outputs = compile!(None, {
         pub const ARRAY_SIZE: usize = 20;
+        pub type Key = [u8; 32];
 
         #[no_mangle]
-        pub extern "C" fn fun(a: [u8; 10], b: [u8; ARRAY_SIZE]) {}
+        pub extern "C" fn fun0(a: [u8; 10], b: [u8; ARRAY_SIZE]) {}
+
+        #[no_mangle]
+        pub extern "C" fn fun1(a: *const [u8; 10]) {}
+
+        #[no_mangle]
+        pub extern "C" fn fun2(a: *const Key) {}
     });
 
     let actual = fetch(&outputs, "Backend.cs");
@@ -990,16 +997,34 @@ fn arrays() {
              internal const string DllName = \"backend\";
              #endif
 
-             public void Fun(byte[] a, byte[] b) {
-               FunNative(a, b);
+             public void Fun0(byte[] a, byte[] b) {
+               Fun0Native(a, b);
              }
 
-             [DllImport(DllName, EntryPoint = \"fun\")]
-             internal static extern void FunNative(\
-               [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)] \
+             [DllImport(DllName, EntryPoint = \"fun0\")]
+             internal static extern void Fun0Native(\
+               [MarshalAs(UnmanagedType.LPArray, SizeConst = 10)] \
                byte[] a, \
-               [MarshalAs(UnmanagedType.ByValArray, SizeConst = (int) Constants.ArraySize)] \
+               [MarshalAs(UnmanagedType.LPArray, SizeConst = (int) Constants.ArraySize)] \
                byte[] b);
+
+             public void Fun1(byte[] a) {
+               Fun1Native(a);
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun1\")]
+             internal static extern void Fun1Native(\
+               [MarshalAs(UnmanagedType.LPArray, SizeConst = 10)] \
+               byte[] a);
+
+             public void Fun2(byte[] a) {
+               Fun2Native(a);
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun2\")]
+             internal static extern void Fun2Native(\
+               [MarshalAs(UnmanagedType.LPArray, SizeConst = 32)] \
+               byte[] a);
 
            }
          }
