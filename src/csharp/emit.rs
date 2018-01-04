@@ -98,7 +98,7 @@ pub fn emit_wrapper_function(
 
             match *ty {
                 Type::Array(_, ArraySize::Dynamic) => {
-                    emit!(writer, "{0}.ToArray(), (IntPtr) {0}.Count", name)
+                    emit!(writer, "{0}.ToArray(), (ulong) {0}.Count", name)
                 }
                 Type::Pointer(ref ty) => {
                     emit_pointer_use(
@@ -338,7 +338,7 @@ pub fn emit_wrapper_struct(
 
         if let Type::Array(ref ty, ArraySize::Dynamic) = field.ty {
             emit_copy_to_utility_name(writer, context, ty);
-            emit!(writer, "(native.{0}Ptr, native.{0}Len);\n", name);
+            emit!(writer, "(native.{0}Ptr, (int) native.{0}Len);\n", name);
         } else if context.is_native_type(&field.ty) {
             emit!(writer, "{0}(native.{0});\n", name)
         } else {
@@ -363,11 +363,11 @@ pub fn emit_wrapper_struct(
             emit!(writer, "{}Ptr = ", name);
             emit_copy_from_utility_name(writer, context, ty);
             emit!(writer, "({}),\n", name);
-            emit!(writer, "{0}Len = (IntPtr) {0}.Count", name);
+            emit!(writer, "{0}Len = (ulong) {0}.Count", name);
 
             if field.has_cap {
                 emit!(writer, ",\n");
-                emit!(writer, "{0}Cap = (IntPtr) 0", name);
+                emit!(writer, "{0}Cap = 0", name);
             }
         } else if context.is_native_type(&field.ty) {
             emit!(writer, "{0} = {0}.ToNative()", name);
@@ -517,10 +517,10 @@ fn emit_struct_field(
 
     if field.ty.is_dynamic_array() && native_mode == NativeMode::AsIs {
         emit!(writer, "public IntPtr {}Ptr;\n", name);
-        emit!(writer, "public IntPtr {}Len;\n", name);
+        emit!(writer, "public ulong {}Len;\n", name);
 
         if field.has_cap {
-            emit!(writer, "public IntPtr {}Cap;\n", name);
+            emit!(writer, "public ulong {}Cap;\n", name);
         }
     } else {
         if native_mode == NativeMode::AsIs {
@@ -589,7 +589,7 @@ fn emit_native_function_params(
         emit!(writer, " {}", name);
 
         if ty.is_dynamic_array() {
-            emit!(writer, ", IntPtr {}Len", name);
+            emit!(writer, ", ulong {}Len", name);
         }
 
         index += 1;
@@ -606,7 +606,7 @@ fn emit_callback_params(writer: &mut IndentedWriter, context: &Context, params: 
 
         match *ty {
             Type::Array(_, ArraySize::Dynamic) => {
-                emit!(writer, "IntPtr {0}Ptr, IntPtr {0}Len", name);
+                emit!(writer, "IntPtr {0}Ptr, ulong {0}Len", name);
             }
             Type::Array(_, _) => {
                 emit!(writer, "IntPtr {}Ptr", name);
@@ -735,12 +735,12 @@ fn emit_type(
         Type::I16 => emit!(writer, "short"),
         Type::I32 => emit!(writer, "int"),
         Type::I64 => emit!(writer, "long"),
-        Type::ISize => emit!(writer, "IntPtr"),
+        Type::ISize => emit!(writer, "long"),
         Type::U8 => emit!(writer, "byte"),
         Type::U16 => emit!(writer, "ushort"),
         Type::U32 => emit!(writer, "uint"),
         Type::U64 => emit!(writer, "ulong"),
-        Type::USize => emit!(writer, "IntPtr"),
+        Type::USize => emit!(writer, "ulong"),
         Type::String => emit!(writer, "string"),
         Type::Pointer(ref ty) => {
             match **ty {
@@ -825,7 +825,7 @@ fn emit_args(
                 match *size {
                     ArraySize::Lit(value) => emit!(writer, "{}", value),
                     ArraySize::Const(ref name) => emit_const_use(writer, context, name),
-                    ArraySize::Dynamic => emit!(writer, "{}Len", name),
+                    ArraySize::Dynamic => emit!(writer, "(int) {}Len", name),
                 }
 
                 emit!(writer, ")");

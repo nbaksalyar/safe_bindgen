@@ -68,16 +68,16 @@ namespace @Namespace {
             CompleteTask(userData, ref result, true);
         }
 
-        public static List<byte> CopyToByteList(IntPtr ptr, IntPtr len) {
-            var array = new byte[(int) len];
-            Marshal.Copy(ptr, array, 0, (int) len);
+        public static List<byte> CopyToByteList(IntPtr ptr, int len) {
+            var array = new byte[len];
+            Marshal.Copy(ptr, array, 0, len);
 
             return new List<byte>(array);
         }
 
-        public static List<T> CopyToObjectList<T>(IntPtr ptr, IntPtr len) {
-            var array = new T[(int) len];
-            for (int i = 0; i < (int) len; ++i) {
+        public static List<T> CopyToObjectList<T>(IntPtr ptr, int len) {
+            var array = new T[len];
+            for (int i = 0; i < len; ++i) {
                 array[i] = Marshal.PtrToStructure<T>(IntPtr.Add(ptr, Marshal.SizeOf<T>() * i));
             }
 
@@ -104,13 +104,13 @@ namespace @Namespace {
             return ptr;
         }
 
-        public static void FreeList(ref IntPtr ptr, ref IntPtr len) {
+        public static void FreeList(ref IntPtr ptr, ref ulong len) {
             if (ptr != IntPtr.Zero) {
                 Marshal.FreeHGlobal(ptr);
             }
 
             ptr = IntPtr.Zero;
-            len = IntPtr.Zero;
+            len = 0;
         }
 
     }

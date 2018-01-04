@@ -145,19 +145,19 @@ fn native_structs() {
 
              internal Entry(EntryNative native) {
                Id = native.Id;
-               Key = Utils.CopyToByteList(native.KeyPtr, native.KeyLen);
+               Key = Utils.CopyToByteList(native.KeyPtr, (int) native.KeyLen);
                Records = Utils.CopyToObjectList<Record>(native.RecordsPtr, \
-                                                        native.RecordsLen);
+                                                        (int) native.RecordsLen);
              }
 
              internal EntryNative ToNative() {
                return new EntryNative() {
                  Id = Id,
                  KeyPtr = Utils.CopyFromByteList(Key),
-                 KeyLen = (IntPtr) Key.Count,
+                 KeyLen = (ulong) Key.Count,
                  RecordsPtr = Utils.CopyFromObjectList(Records),
-                 RecordsLen = (IntPtr) Records.Count,
-                 RecordsCap = (IntPtr) 0
+                 RecordsLen = (ulong) Records.Count,
+                 RecordsCap = 0
                };
              }
            }
@@ -165,10 +165,10 @@ fn native_structs() {
            internal struct EntryNative {
              public uint Id;
              public IntPtr KeyPtr;
-             public IntPtr KeyLen;
+             public ulong KeyLen;
              public IntPtr RecordsPtr;
-             public IntPtr RecordsLen;
-             public IntPtr RecordsCap;
+             public ulong RecordsLen;
+             public ulong RecordsCap;
 
              internal void Free() {
                Utils.FreeList(ref KeyPtr, ref KeyLen);
@@ -599,42 +599,42 @@ fn functions_taking_array() {
              #endif
 
              public void Fun0(List<byte> data) {
-               Fun0Native(data.ToArray(), (IntPtr) data.Count);
+               Fun0Native(data.ToArray(), (ulong) data.Count);
              }
 
              [DllImport(DllName, EntryPoint = \"fun0\")]
              internal static extern void Fun0Native(\
                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
-               IntPtr dataLen\
+               ulong dataLen\
              );
 
              public void Fun1(List<byte> data) {
-               Fun1Native(data.ToArray(), (IntPtr) data.Count);
+               Fun1Native(data.ToArray(), (ulong) data.Count);
              }
 
              [DllImport(DllName, EntryPoint = \"fun1\")]
              internal static extern void Fun1Native(\
                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
-               IntPtr dataLen\
+               ulong dataLen\
              );
 
              public void Fun2(ulong id, List<byte> data) {
-               Fun2Native(id, data.ToArray(), (IntPtr) data.Count);
+               Fun2Native(id, data.ToArray(), (ulong) data.Count);
              }
 
              [DllImport(DllName, EntryPoint = \"fun2\")]
              internal static extern void Fun2Native(\
                ulong id, \
                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] data, \
-               IntPtr dataLen\
+               ulong dataLen\
              );
 
-             public void Fun3(ref FfiResult result, IntPtr len) {
+             public void Fun3(ref FfiResult result, ulong len) {
                Fun3Native(ref result, len);
              }
 
              [DllImport(DllName, EntryPoint = \"fun3\")]
-             internal static extern void Fun3Native(ref FfiResult result, IntPtr len);
+             internal static extern void Fun3Native(ref FfiResult result, ulong len);
 
            }
          }
@@ -805,7 +805,7 @@ fn functions_taking_callback_taking_dynamic_array() {
              internal delegate void FfiResultByteListCb(IntPtr userData, \
                                                         ref FfiResult result, \
                                                         IntPtr dataPtr, \
-                                                        IntPtr dataLen);
+                                                        ulong dataLen);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultByteListCb))]
@@ -813,16 +813,16 @@ fn functions_taking_callback_taking_dynamic_array() {
              private static void OnFfiResultByteListCb(IntPtr userData, \
                                                        ref FfiResult result, \
                                                        IntPtr dataPtr, \
-                                                       IntPtr dataLen) {
+                                                       ulong dataLen) {
                Utils.CompleteTask(userData, \
                                   ref result, \
-                                  Utils.CopyToByteList(dataPtr, dataLen));
+                                  Utils.CopyToByteList(dataPtr, (int) dataLen));
              }
 
              internal delegate void FfiResultRecordListCb(IntPtr userData, \
                                                           ref FfiResult result, \
                                                           IntPtr recordsPtr, \
-                                                          IntPtr recordsLen);
+                                                          ulong recordsLen);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultRecordListCb))]
@@ -830,12 +830,12 @@ fn functions_taking_callback_taking_dynamic_array() {
              private static void OnFfiResultRecordListCb(IntPtr userData, \
                                                          ref FfiResult result, \
                                                          IntPtr recordsPtr, \
-                                                         IntPtr recordsLen) {
+                                                         ulong recordsLen) {
                Utils.CompleteTask(userData, \
                                   ref result, \
                                   Utils.CopyToObjectList<Record>(\
                                     recordsPtr, \
-                                    recordsLen));
+                                    (int) recordsLen));
              }
 
            }

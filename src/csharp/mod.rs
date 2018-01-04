@@ -249,7 +249,10 @@ impl Lang for LangCSharp {
 
         if let ast::ItemKind::Ty(ref ty, ref generics) = item.node {
             if generics.is_parameterized() {
-                println!("parameterized type aliases not supported. Skipping.");
+                println!(
+                    "parameterized type aliases not supported ({}). Skipping.",
+                    name,
+                );
                 return Ok(());
             }
 
