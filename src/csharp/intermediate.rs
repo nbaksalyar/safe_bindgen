@@ -407,7 +407,6 @@ fn transform_ptr_and_len_to_array(
     }
 
     // Matches "foo_ptr"/"foo_len" and "foo"/"foo_len"
-
     let ptr_index = if ptr_name.ends_with("_ptr") {
         ptr_name.len() - "_ptr".len()
     } else {

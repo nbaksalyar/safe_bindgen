@@ -27,13 +27,7 @@ pub fn emit_wrapper_function_decl(
         emit_task(writer, context, &callback.inputs);
         emit!(writer, " {}Async(", name.to_pascal_case());
     } else {
-        emit_type(
-            writer,
-            context,
-            &fun.output,
-            PointerMode::Ref,
-            NativeMode::Wrap,
-        );
+        emit_type(writer, context, &fun.output, Mode::WrapperFunc);
         emit!(writer, " {}(", name.to_pascal_case());
     }
 
@@ -101,13 +95,7 @@ pub fn emit_wrapper_function(
                     emit!(writer, "{0}.ToArray(), (ulong) {0}.Count", name)
                 }
                 Type::Pointer(ref ty) => {
-                    emit_pointer_use(
-                        writer,
-                        context,
-                        &**ty,
-                        &name.to_camel_case(),
-                        PointerMode::Ref,
-                    )
+                    emit_pointer_use(writer, context, ty, &name.to_camel_case(), Mode::ExternFunc)
                 }
                 _ => emit!(writer, "{}", name),
             }
@@ -149,13 +137,7 @@ pub fn emit_function_extern_decl(
         native_name
     );
     emit!(writer, "internal static extern ");
-    emit_type(
-        writer,
-        context,
-        &fun.output,
-        PointerMode::Ref,
-        NativeMode::AsIs,
-    );
+    emit_type(writer, context, &fun.output, Mode::ExternFunc);
     emit!(writer, " {}(", name);
     emit_native_function_params(writer, context, &fun.inputs);
     emit!(writer, ");\n\n");
@@ -184,7 +166,7 @@ pub fn emit_callback_wrapper(writer: &mut IndentedWriter, context: &Context, cal
     writer.indent();
 
     emit!(writer, "{}.CompleteTask(", &context.utils_class_name);
-    emit_args(writer, context, &callback.inputs[0..2], 0, PointerMode::Ref);
+    emit_args(writer, context, &callback.inputs[0..2], 0, Mode::Callback);
 
     if callback.inputs.len() > 2 {
         emit!(writer, ", ");
@@ -193,7 +175,7 @@ pub fn emit_callback_wrapper(writer: &mut IndentedWriter, context: &Context, cal
             emit!(writer, "(");
         }
 
-        emit_args(writer, context, &callback.inputs[2..], 2, PointerMode::AsIs);
+        emit_args(writer, context, &callback.inputs[2..], 2, Mode::Callback);
 
         if callback.inputs.len() > 3 {
             emit!(writer, ")");
@@ -220,13 +202,7 @@ pub fn emit_const(writer: &mut IndentedWriter, context: &Context, name: &str, it
         _ => emit!(writer, "const "),
     }
 
-    emit_type(
-        writer,
-        context,
-        &item.ty,
-        PointerMode::Opaque,
-        NativeMode::AsIs,
-    );
+    emit_type(writer, context, &item.ty, Mode::Const);
     emit!(writer, " {} = ", name.to_pascal_case());
     emit_const_value(writer, context, Some(&item.ty), &item.value);
     emit!(writer, ";\n");
@@ -263,7 +239,7 @@ pub fn emit_normal_struct(
 
     for field in &item.fields {
         emit_docs(writer, context, &field.docs);
-        emit_struct_field(writer, context, field, NativeMode::AsIs);
+        emit_struct_field(writer, context, field, StructMode::Normal);
     }
 
     writer.unindent();
@@ -281,7 +257,7 @@ pub fn emit_native_struct(
 
     for field in &item.fields {
         emit_docs(writer, context, &field.docs);
-        emit_struct_field(writer, context, field, NativeMode::AsIs);
+        emit_struct_field(writer, context, field, StructMode::Normal);
     }
 
     // Emit `Free` method.
@@ -322,7 +298,7 @@ pub fn emit_wrapper_struct(
     writer.indent();
 
     for field in &item.fields {
-        emit_struct_field(writer, context, field, NativeMode::Wrap);
+        emit_struct_field(writer, context, field, StructMode::Wrapper);
     }
 
     emit!(writer, "\n");
@@ -340,7 +316,7 @@ pub fn emit_wrapper_struct(
             emit_copy_to_utility_name(writer, context, ty);
             emit!(writer, "(native.{0}Ptr, (int) native.{0}Len);\n", name);
         } else if context.is_native_type(&field.ty) {
-            emit!(writer, "{0}(native.{0});\n", name)
+            emit!(writer, "new {0}(native.{0});\n", name)
         } else {
             emit!(writer, "native.{};\n", name)
         }
@@ -439,7 +415,7 @@ fn emit_task_generic_args(
             emit!(writer, ", ");
         }
 
-        emit_type(writer, context, ty, PointerMode::AsIs, NativeMode::Wrap);
+        emit_type(writer, context, ty, Mode::Generic);
     }
 
     if params.len() > 3 {
@@ -465,7 +441,7 @@ fn emit_const_value(
         ConstValue::Array(ref elements) => {
             if let Some(&Type::Array(ref ty, ..)) = ty {
                 emit!(writer, "new ");
-                emit_type(writer, context, ty, PointerMode::Opaque, NativeMode::AsIs);
+                emit_type(writer, context, ty, Mode::Const);
                 emit!(writer, "[] ");
             }
 
@@ -511,11 +487,11 @@ fn emit_struct_field(
     writer: &mut IndentedWriter,
     context: &Context,
     field: &StructField,
-    native_mode: NativeMode,
+    mode: StructMode,
 ) {
     let name = field.name.to_pascal_case();
 
-    if field.ty.is_dynamic_array() && native_mode == NativeMode::AsIs {
+    if field.ty.is_dynamic_array() && mode == StructMode::Normal {
         emit!(writer, "public IntPtr {}Ptr;\n", name);
         emit!(writer, "public ulong {}Len;\n", name);
 
@@ -523,12 +499,12 @@ fn emit_struct_field(
             emit!(writer, "public ulong {}Cap;\n", name);
         }
     } else {
-        if native_mode == NativeMode::AsIs {
+        if mode == StructMode::Normal {
             emit_marshal_as(writer, context, &field.ty, None, "\n");
         }
 
         emit!(writer, "public ");
-        emit_type(writer, context, &field.ty, PointerMode::Opaque, native_mode);
+        emit_type(writer, context, &field.ty, mode.into());
         emit!(writer, " {};\n", name);
     }
 }
@@ -555,7 +531,7 @@ fn emit_wrapper_function_params(
             emit!(writer, ", ");
         }
 
-        emit_type(writer, context, ty, PointerMode::Ref, NativeMode::Wrap);
+        emit_type(writer, context, ty, Mode::WrapperFunc);
         if name.is_empty() {
             emit!(writer, " arg{}", index);
         } else {
@@ -582,7 +558,7 @@ fn emit_native_function_params(
         if let Some(callback) = extract_callback(ty) {
             emit_callback_wrapper_name(writer, &callback);
         } else {
-            emit_type(writer, context, ty, PointerMode::Ref, NativeMode::AsIs);
+            emit_type(writer, context, ty, Mode::ExternFunc);
         }
 
         let name = param_name(name, index);
@@ -612,7 +588,7 @@ fn emit_callback_params(writer: &mut IndentedWriter, context: &Context, params: 
                 emit!(writer, "IntPtr {}Ptr", name);
             }
             _ => {
-                emit_type(writer, context, ty, PointerMode::Ref, NativeMode::AsIs);
+                emit_type(writer, context, ty, Mode::Callback);
                 emit!(writer, " {}", name);
             }
         }
@@ -697,33 +673,42 @@ fn emit_array_marshal_as(
     }
 }
 
-// How should a pointer be emitted.
+// Mode in which a type or value is emitted.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum PointerMode {
-    // Tranform to `IntPtr`
-    Opaque,
-    // Add `ref` in front of it.
-    Ref,
-    // Emit as is.
-    AsIs,
+enum Mode {
+    // Parameter of a wrapper (managed) function.
+    WrapperFunc,
+    // Parameter of a extern function.
+    ExternFunc,
+    // Parameter of a callback.
+    Callback,
+    // Field in normal or native struct.
+    NormalStruct,
+    // Field in wrapper struct.
+    WrapperStruct,
+    // Constant definition.
+    Const,
+    // Generic argument
+    Generic,
 }
 
-// How should a "native" type be emitted.
+// Mode in which a struct is emitted.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum NativeMode {
-    // Emit managed wrapper for the native type.
-    Wrap,
-    // Emit the native type directly.
-    AsIs,
+enum StructMode {
+    Normal,
+    Wrapper,
 }
 
-fn emit_type(
-    writer: &mut IndentedWriter,
-    context: &Context,
-    ty: &Type,
-    ptr_mode: PointerMode,
-    native_mode: NativeMode,
-) {
+impl From<StructMode> for Mode {
+    fn from(mode: StructMode) -> Self {
+        match mode {
+            StructMode::Normal => Mode::NormalStruct,
+            StructMode::Wrapper => Mode::WrapperStruct,
+        }
+    }
+}
+
+fn emit_type(writer: &mut IndentedWriter, context: &Context, ty: &Type, mode: Mode) {
     match *ty {
         Type::Unit => emit!(writer, "void"),
         Type::Bool => emit!(writer, "bool"),
@@ -744,26 +729,24 @@ fn emit_type(
         Type::String => emit!(writer, "string"),
         Type::Pointer(ref ty) => {
             match **ty {
-                Type::Array(ref ty, ref size) => {
-                    emit_array(writer, context, ty, size, ptr_mode, native_mode)
-                }
+                Type::Array(ref ty, ref size) => emit_array(writer, context, ty, size, mode),
                 Type::User(ref name) => {
-                    if context.is_opaque(name) {
-                        emit!(writer, "IntPtr")
-                    } else {
-                        match ptr_mode {
-                            PointerMode::Opaque => emit!(writer, "IntPtr"),
-                            PointerMode::Ref => emit!(writer, "ref {}", name),
-                            PointerMode::AsIs => emit!(writer, "{}", name),
+                    match mode {
+                        Mode::Callback | Mode::Const | Mode::NormalStruct | Mode::WrapperStruct => {
+                            emit!(writer, "IntPtr")
                         }
-                    }
-
-                    if context.is_native_name(name) && native_mode == NativeMode::AsIs {
-                        emit!(writer, "Native");
+                        Mode::Generic => emit!(writer, "{}", name),
+                        Mode::ExternFunc if context.is_native_name(name) => {
+                            emit!(writer, "ref {}Native", name);
+                        }
+                        _ if context.is_opaque(name) => emit!(writer, "IntPtr"),
+                        _ => {
+                            emit!(writer, "ref {}", name);
+                        }
                     }
                 }
                 Type::Pointer(_) => {
-                    if ptr_mode == PointerMode::Ref {
+                    if mode == Mode::WrapperFunc || mode == Mode::ExternFunc {
                         emit!(writer, "out IntPtr")
                     } else {
                         emit!(writer, "IntPtr")
@@ -772,12 +755,13 @@ fn emit_type(
                 _ => emit!(writer, "IntPtr"),
             }
         }
-        Type::Array(ref ty, ref size) => {
-            emit_array(writer, context, ty, size, ptr_mode, native_mode)
-        }
+        Type::Array(ref ty, ref size) => emit_array(writer, context, ty, size, mode),
         Type::Function(..) => unimplemented!(),
         Type::User(ref name) => {
-            if context.is_native_name(name) && native_mode == NativeMode::AsIs {
+            if context.is_native_name(name) &&
+                (mode == Mode::Callback || mode == Mode::Const || mode == Mode::ExternFunc ||
+                     mode == Mode::NormalStruct)
+            {
                 emit!(writer, "{}Native", name)
             } else {
                 emit!(writer, "{}", name)
@@ -791,15 +775,16 @@ fn emit_array(
     context: &Context,
     ty: &Type,
     size: &ArraySize,
-    ptr_mode: PointerMode,
-    native_mode: NativeMode,
+    mode: Mode,
 ) {
-    if native_mode == NativeMode::Wrap && *size == ArraySize::Dynamic {
+    if (mode == Mode::WrapperFunc || mode == Mode::WrapperStruct || mode == Mode::Generic) &&
+        *size == ArraySize::Dynamic
+    {
         emit!(writer, "List<");
-        emit_type(writer, context, ty, ptr_mode, native_mode);
+        emit_type(writer, context, ty, mode);
         emit!(writer, ">");
     } else {
-        emit_type(writer, context, ty, ptr_mode, native_mode);
+        emit_type(writer, context, ty, mode);
         emit!(writer, "[]")
     }
 }
@@ -809,7 +794,7 @@ fn emit_args(
     context: &Context,
     args: &[(String, Type)],
     offset: usize,
-    mode: PointerMode,
+    mode: Mode,
 ) {
     for (index, &(ref name, ref ty)) in args.into_iter().enumerate() {
         if index > 0 {
@@ -833,9 +818,11 @@ fn emit_args(
             Type::Pointer(ref ty) => {
                 match **ty {
                     Type::User(ref type_name) if context.is_native_name(type_name) => {
-                        emit!(writer, "new {}({})", type_name, name);
+                        emit!(writer, "new {}(", type_name);
+                        emit_pointer_use(writer, context, ty, &name, mode);
+                        emit!(writer, ")");
                     }
-                    _ => emit_pointer_use(writer, context, &**ty, &name, mode),
+                    _ => emit_pointer_use(writer, context, ty, &name, mode),
                 }
             }
             Type::User(ref type_name) if context.is_native_name(type_name) => {
@@ -851,13 +838,24 @@ fn emit_pointer_use(
     context: &Context,
     ty: &Type,
     name: &str,
-    mode: PointerMode,
+    mode: Mode,
 ) {
     match *ty {
-        Type::User(ref pointee) if mode == PointerMode::Ref && !context.is_opaque(pointee) => {
+        Type::User(ref pointee)
+            if mode == Mode::WrapperFunc ||
+                   mode == Mode::ExternFunc && !context.is_opaque(pointee) => {
             emit!(writer, "ref {}", name);
         }
-        Type::Pointer(_) if mode == PointerMode::Ref => {
+        Type::User(ref pointee) if mode == Mode::Callback => {
+            emit!(writer, "Marshal.PtrToStructure<{}", pointee);
+
+            if context.is_native_name(pointee) {
+                emit!(writer, "Native");
+            }
+
+            emit!(writer, ">({})", name);
+        }
+        Type::Pointer(_) if mode == Mode::WrapperFunc || mode == Mode::ExternFunc => {
             emit!(writer, "out {}", name);
         }
         _ => emit!(writer, "{}", name),

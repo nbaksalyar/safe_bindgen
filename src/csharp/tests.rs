@@ -181,7 +181,7 @@ fn native_structs() {
              public Entry Entry;
 
              internal Wrapper(WrapperNative native) {
-               Entry = Entry(native.Entry);
+               Entry = new Entry(native.Entry);
              }
 
              internal WrapperNative ToNative() {
@@ -249,16 +249,18 @@ fn native_structs() {
                                                     FfiResultEntryCb cb);
 
              internal delegate void FfiResultEntryCb(IntPtr userData, \
-                                                     ref FfiResult result, \
-                                                     ref EntryNative entry);
+                                                     IntPtr result, \
+                                                     IntPtr entry);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultEntryCb))]
              #endif
              private static void OnFfiResultEntryCb(IntPtr userData, \
-                                                    ref FfiResult result, \
-                                                    ref EntryNative entry) {
-               Utils.CompleteTask(userData, ref result, new Entry(entry));
+                                                    IntPtr result, \
+                                                    IntPtr entry) {
+               Utils.CompleteTask(userData, \
+                                  Marshal.PtrToStructure<FfiResult>(result), \
+                                  new Entry(Marshal.PtrToStructure<EntryNative>(entry)));
              }
 
            }
@@ -339,16 +341,18 @@ fn type_aliases() {
                                                    FfiResultULongCb cb);
 
              internal delegate void FfiResultULongCb(IntPtr arg0, \
-                                                     ref FfiResult arg1, \
+                                                     IntPtr arg1, \
                                                      ulong arg2);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultULongCb))]
              #endif
              private static void OnFfiResultULongCb(IntPtr arg0, \
-                                                    ref FfiResult arg1, \
+                                                    IntPtr arg1, \
                                                     ulong arg2) {
-               Utils.CompleteTask(arg0, ref arg1, arg2);
+               Utils.CompleteTask(arg0, \
+                                  Marshal.PtrToStructure<FfiResult>(arg1), \
+                                  arg2);
              }
 
            }
@@ -494,13 +498,13 @@ fn functions_taking_one_callback() {
                IntPtr userData, \
                FfiResultCb cb);
 
-             internal delegate void FfiResultCb(IntPtr userData, ref FfiResult result);
+             internal delegate void FfiResultCb(IntPtr userData, IntPtr result);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultCb))]
              #endif
-             private static void OnFfiResultCb(IntPtr userData, ref FfiResult result) {
-               Utils.CompleteTask(userData, ref result);
+             private static void OnFfiResultCb(IntPtr userData, IntPtr result) {
+               Utils.CompleteTask(userData, Marshal.PtrToStructure<FfiResult>(result));
              }
 
            }
@@ -550,7 +554,7 @@ fn functions_taking_multiple_callbacks() {
                                                    FfiResultIntCb cb1);
 
              internal delegate void FfiResultIntCb(IntPtr userData, \
-                                                   ref FfiResult result, \
+                                                   IntPtr result, \
                                                    int output);
 
              internal delegate void NoneCb(IntPtr userData);
@@ -704,32 +708,32 @@ fn functions_taking_callback_taking_const_size_array() {
                                                     FfiResultByteArrayNonceLenCb cb);
 
              internal delegate void FfiResultByteArray32Cb(IntPtr userData, \
-                                                           ref FfiResult result, \
+                                                           IntPtr result, \
                                                            IntPtr keyPtr);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultByteArray32Cb))]
              #endif
              private static void OnFfiResultByteArray32Cb(IntPtr userData, \
-                                                          ref FfiResult result, \
+                                                          IntPtr result, \
                                                           IntPtr keyPtr) {
                Utils.CompleteTask(userData, \
-                                  ref result, \
+                                  Marshal.PtrToStructure<FfiResult>(result), \
                                   Utils.CopyToByteList(keyPtr, 32));
              }
 
              internal delegate void FfiResultByteArrayNonceLenCb(IntPtr userData, \
-                                                                 ref FfiResult result, \
+                                                                 IntPtr result, \
                                                                  IntPtr noncePtr);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultByteArrayNonceLenCb))]
              #endif
              private static void OnFfiResultByteArrayNonceLenCb(IntPtr userData, \
-                                                                ref FfiResult result, \
+                                                                IntPtr result, \
                                                                 IntPtr noncePtr) {
                Utils.CompleteTask(userData, \
-                                  ref result, \
+                                  Marshal.PtrToStructure<FfiResult>(result), \
                                   Utils.CopyToByteList(noncePtr, Constants.NonceLen));
              }
 
@@ -803,7 +807,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                                                     FfiResultRecordListCb cb);
 
              internal delegate void FfiResultByteListCb(IntPtr userData, \
-                                                        ref FfiResult result, \
+                                                        IntPtr result, \
                                                         IntPtr dataPtr, \
                                                         ulong dataLen);
 
@@ -811,16 +815,16 @@ fn functions_taking_callback_taking_dynamic_array() {
              [MonoPInvokeCallback(typeof(FfiResultByteListCb))]
              #endif
              private static void OnFfiResultByteListCb(IntPtr userData, \
-                                                       ref FfiResult result, \
+                                                       IntPtr result, \
                                                        IntPtr dataPtr, \
                                                        ulong dataLen) {
                Utils.CompleteTask(userData, \
-                                  ref result, \
+                                  Marshal.PtrToStructure<FfiResult>(result), \
                                   Utils.CopyToByteList(dataPtr, (int) dataLen));
              }
 
              internal delegate void FfiResultRecordListCb(IntPtr userData, \
-                                                          ref FfiResult result, \
+                                                          IntPtr result, \
                                                           IntPtr recordsPtr, \
                                                           ulong recordsLen);
 
@@ -828,11 +832,11 @@ fn functions_taking_callback_taking_dynamic_array() {
              [MonoPInvokeCallback(typeof(FfiResultRecordListCb))]
              #endif
              private static void OnFfiResultRecordListCb(IntPtr userData, \
-                                                         ref FfiResult result, \
+                                                         IntPtr result, \
                                                          IntPtr recordsPtr, \
                                                          ulong recordsLen) {
                Utils.CompleteTask(userData, \
-                                  ref result, \
+                                  Marshal.PtrToStructure<FfiResult>(result), \
                                   Utils.CopyToObjectList<Record>(\
                                     recordsPtr, \
                                     (int) recordsLen));
