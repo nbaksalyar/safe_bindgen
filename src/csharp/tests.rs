@@ -126,6 +126,16 @@ fn native_structs() {
                               entry: *const Entry),
         ) {
         }
+
+        #[no_mangle]
+        pub extern "C" fn fun3(
+            user_data: *mut c_void,
+            cb: extern "C" fn(user_data: *mut c_void,
+                              result: *const FfiResult,
+                              entries: *const Entry,
+                              entries_len: usize),
+        ) {
+        }
     });
 
     // Wrapper types.
@@ -248,6 +258,15 @@ fn native_structs() {
              internal static extern void Fun2Native(IntPtr userData, \
                                                     FfiResultEntryCb cb);
 
+             public Task<List<Entry>> Fun3Async() {
+               var (ret, userData) = Utils.PrepareTask<List<Entry>>();
+               Fun3Native(userData, OnFfiResultEntryListCb);
+               return ret;
+             }
+
+             [DllImport(DllName, EntryPoint = \"fun3\")]
+             internal static extern void Fun3Native(IntPtr userData, FfiResultEntryListCb cb);
+
              internal delegate void FfiResultEntryCb(IntPtr userData, \
                                                      IntPtr result, \
                                                      IntPtr entry);
@@ -261,6 +280,26 @@ fn native_structs() {
                Utils.CompleteTask(userData, \
                                   Marshal.PtrToStructure<FfiResult>(result), \
                                   new Entry(Marshal.PtrToStructure<EntryNative>(entry)));
+             }
+
+             internal delegate void FfiResultEntryListCb(IntPtr userData, \
+                                                         IntPtr result, \
+                                                         IntPtr entriesPtr, \
+                                                         ulong entriesLen);
+
+             #if __IOS__
+             [MonoPInvokeCallback(typeof(FfiResultEntryListCb))]
+             #endif
+             private static void OnFfiResultEntryListCb(IntPtr userData, \
+                                                        IntPtr result, \
+                                                        IntPtr entriesPtr, \
+                                                        ulong entriesLen) {
+               Utils.CompleteTask(\
+                 userData, \
+                 Marshal.PtrToStructure<FfiResult>(result), \
+                 Utils.CopyToObjectList<EntryNative>(\
+                   entriesPtr, \
+                   (int) entriesLen).ConvertAll(native => new Entry(native)));
              }
 
            }

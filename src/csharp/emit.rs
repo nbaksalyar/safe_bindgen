@@ -814,6 +814,12 @@ fn emit_args(
                 }
 
                 emit!(writer, ")");
+
+                if let Type::User(ref name) = **ty {
+                    if context.is_native_name(name) {
+                        emit!(writer, ".ConvertAll(native => new {}(native))", name);
+                    }
+                }
             }
             Type::Pointer(ref ty) => {
                 match **ty {
@@ -906,15 +912,20 @@ fn emit_delegate_base_part_name(writer: &mut IndentedWriter, ty: &Type) {
 
 fn emit_copy_to_utility_name(writer: &mut IndentedWriter, context: &Context, ty: &Type) {
     emit!(writer, "{}.CopyTo", context.utils_class_name);
-    emit_copy_utility_suffix(writer, ty, true);
+    emit_copy_utility_suffix(writer, context, ty, true);
 }
 
 fn emit_copy_from_utility_name(writer: &mut IndentedWriter, context: &Context, ty: &Type) {
     emit!(writer, "{}.CopyFrom", context.utils_class_name);
-    emit_copy_utility_suffix(writer, ty, false);
+    emit_copy_utility_suffix(writer, context, ty, false);
 }
 
-fn emit_copy_utility_suffix(writer: &mut IndentedWriter, ty: &Type, add_type: bool) {
+fn emit_copy_utility_suffix(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    ty: &Type,
+    add_type: bool,
+) {
     match *ty {
         Type::F32 => emit!(writer, "SingleList"),
         Type::F64 => emit!(writer, "DoubleList"),
@@ -926,7 +937,12 @@ fn emit_copy_utility_suffix(writer: &mut IndentedWriter, ty: &Type, add_type: bo
             emit!(writer, "ObjectList");
 
             if add_type {
-                emit!(writer, "<{}>", name);
+                if context.is_native_name(name) {
+                    emit!(writer, "<{}Native>", name);
+
+                } else {
+                    emit!(writer, "<{}>", name);
+                }
             }
         }
         _ => panic!("cannot emit copy utility name for List of {:?}", ty),
