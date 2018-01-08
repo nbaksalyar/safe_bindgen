@@ -279,7 +279,7 @@ fn native_structs() {
                                                     IntPtr entry) {
                Utils.CompleteTask(userData, \
                                   Marshal.PtrToStructure<FfiResult>(result), \
-                                  new Entry(Marshal.PtrToStructure<EntryNative>(entry)));
+                                  () => new Entry(Marshal.PtrToStructure<EntryNative>(entry)));
              }
 
              internal delegate void FfiResultEntryListCb(IntPtr userData, \
@@ -297,7 +297,7 @@ fn native_structs() {
                Utils.CompleteTask(\
                  userData, \
                  Marshal.PtrToStructure<FfiResult>(result), \
-                 Utils.CopyToObjectList<EntryNative>(\
+                 () => Utils.CopyToObjectList<EntryNative>(\
                    entriesPtr, \
                    (int) entriesLen).ConvertAll(native => new Entry(native)));
              }
@@ -391,7 +391,7 @@ fn type_aliases() {
                                                     ulong arg2) {
                Utils.CompleteTask(arg0, \
                                   Marshal.PtrToStructure<FfiResult>(arg1), \
-                                  arg2);
+                                  () => arg2);
              }
 
            }
@@ -758,7 +758,7 @@ fn functions_taking_callback_taking_const_size_array() {
                                                           IntPtr keyPtr) {
                Utils.CompleteTask(userData, \
                                   Marshal.PtrToStructure<FfiResult>(result), \
-                                  Utils.CopyToByteList(keyPtr, 32));
+                                  () => Utils.CopyToByteList(keyPtr, 32));
              }
 
              internal delegate void FfiResultByteArrayNonceLenCb(IntPtr userData, \
@@ -773,7 +773,7 @@ fn functions_taking_callback_taking_const_size_array() {
                                                                 IntPtr noncePtr) {
                Utils.CompleteTask(userData, \
                                   Marshal.PtrToStructure<FfiResult>(result), \
-                                  Utils.CopyToByteList(noncePtr, Constants.NonceLen));
+                                  () => Utils.CopyToByteList(noncePtr, Constants.NonceLen));
              }
 
            }
@@ -859,7 +859,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                                                        ulong dataLen) {
                Utils.CompleteTask(userData, \
                                   Marshal.PtrToStructure<FfiResult>(result), \
-                                  Utils.CopyToByteList(dataPtr, (int) dataLen));
+                                  () => Utils.CopyToByteList(dataPtr, (int) dataLen));
              }
 
              internal delegate void FfiResultRecordListCb(IntPtr userData, \
@@ -876,7 +876,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                                                          ulong recordsLen) {
                Utils.CompleteTask(userData, \
                                   Marshal.PtrToStructure<FfiResult>(result), \
-                                  Utils.CopyToObjectList<Record>(\
+                                  () => Utils.CopyToObjectList<Record>(\
                                     recordsPtr, \
                                     (int) recordsLen));
              }
