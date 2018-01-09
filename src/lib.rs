@@ -1,4 +1,5 @@
-//! safe_bindgen is a library based on moz-cheddar for converting Rust source files into Java and C# bindings.
+//! safe_bindgen is a library based on moz-cheddar for converting Rust source files
+//! into Java and C# bindings.
 //! It is built specifically for the SAFE Client Libs project.
 
 #![cfg_attr(not(feature = "with-syntex"), feature(rustc_private))]
@@ -248,14 +249,14 @@ impl Bindgen {
     pub fn compile<L: Lang>(
         &self,
         lang: &mut L,
-        mut outputs: &mut Outputs,
+        outputs: &mut Outputs,
         finalise: bool,
     ) -> Result<(), Vec<Error>> {
         let base_path = self.input.parent().unwrap();
 
         // Parse the top level mod.
         let krate = syntax::parse::parse_crate_from_file(&self.input, &self.session).unwrap();
-        parse::parse_mod(lang, &krate.module, &mut outputs)?;
+        parse::parse_mod(lang, &krate.module, outputs)?;
 
         // Parse other mods.
         let modules = parse::imported_mods(&krate.module);
@@ -275,17 +276,27 @@ impl Bindgen {
             eprintln!("Parsing {:?}", mod_path);
 
             let krate = syntax::parse::parse_crate_from_file(&mod_path, &self.session).unwrap();
-            parse::parse_mod(lang, &krate.module, &mut outputs)?;
+            parse::parse_mod(lang, &krate.module, outputs)?;
 
             // TODO: insert custom_code to each module?
             // .map(|source| format!("{}\n\n{}", self.custom_code, source))
         }
 
         if finalise {
-            lang.finalise_output(&mut outputs)?;
+            lang.finalise_output(outputs)?;
         }
 
         Ok(())
+    }
+
+    pub fn compile_or_panic<L: Lang>(&self, lang: &mut L, outputs: &mut Outputs, finalise: bool) {
+        if let Err(errors) = self.compile(lang, outputs, finalise) {
+            for error in &errors {
+                self.print_error(error);
+            }
+
+            panic!("Failed to compile.");
+        }
     }
 
     /// Writes virtual files to the file system
@@ -307,6 +318,13 @@ impl Bindgen {
         Ok(())
     }
 
+    pub fn write_outputs_or_panic<P: AsRef<Path>>(&self, root: P, outputs: &Outputs) {
+        if let Err(err) = self.write_outputs(root, &outputs) {
+            self.print_error(&From::from(err));
+            panic!("Failed to write output.");
+        }
+    }
+
     /// Write the header to a file, panicking on error.
     ///
     /// This is a convenience method for use in build scripts. If errors occur during compilation
@@ -317,21 +335,8 @@ impl Bindgen {
     /// Panics on any compilation error so that the build script exits and prints output.
     pub fn run_build<P: AsRef<path::Path>, L: Lang>(&self, lang: &mut L, output_dir: P) {
         let mut outputs = HashMap::new();
-
-        match self.compile(lang, &mut outputs, true) {
-            Err(errors) => {
-                for error in &errors {
-                    self.print_error(error);
-                }
-                panic!("errors compiling header file");
-            }
-            Ok(()) => {
-                if let Err(err) = self.write_outputs(output_dir, &outputs) {
-                    self.print_error(&From::from(err));
-                    panic!("errors writing output");
-                }
-            }
-        }
+        self.compile_or_panic(lang, &mut outputs, true);
+        self.write_outputs_or_panic(output_dir, &outputs);
     }
 
     /// Print an error using the ParseSess stored in Cheddar.

@@ -165,7 +165,8 @@ impl common::Lang for LangJava {
                         capitalized = name.to_class_case(),
                     ));
                     buffer.push_str(&format!(
-                        "\tpublic void set{capitalized}(final {ty} val) {{\n\t\t{name} = val;\n\t}}\n\n",
+                        "\tpublic void set{capitalized}(final {ty} val) {{\n\t\t{name} \
+                         = val;\n\t}}\n\n",
                         ty = ty,
                         name = name,
                         capitalized = name.to_class_case(),

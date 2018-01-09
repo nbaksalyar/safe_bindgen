@@ -62,7 +62,7 @@ pub fn emit_wrapper_function(
             writer,
             "var ({}, userData) = {}.PrepareTask",
             return_name,
-            &context.utils_class_name
+            &context.utils_section.class
         );
         emit_task_generic_args(writer, context, &callback.inputs);
         emit!(writer, "();\n");
@@ -165,7 +165,7 @@ pub fn emit_callback_wrapper(writer: &mut IndentedWriter, context: &Context, cal
     emit!(writer, ") {{\n");
     writer.indent();
 
-    emit!(writer, "{}.CompleteTask(", &context.utils_class_name);
+    emit!(writer, "{}.CompleteTask(", &context.utils_section.class);
     emit_args(writer, context, &callback.inputs[0..2], 0, Mode::Callback);
 
     if callback.inputs.len() > 2 {
@@ -272,7 +272,7 @@ pub fn emit_native_struct(
             emit!(
                 writer,
                 "{0}.FreeList(ref {1}Ptr, ref {1}Len);\n",
-                context.utils_class_name,
+                context.utils_section.class,
                 name
             );
         } else if context.is_native_type(&field.ty) {
@@ -313,7 +313,7 @@ pub fn emit_wrapper_struct(
         emit!(writer, "{} = ", name);
 
         if let Type::Array(ref ty, ArraySize::Dynamic) = field.ty {
-            emit_copy_to_utility_name(writer, context, ty);
+            emit_copy_to_utility_name(writer, context, ty, "List");
             emit!(writer, "(native.{0}Ptr, (int) native.{0}Len);\n", name);
         } else if context.is_native_type(&field.ty) {
             emit!(writer, "new {0}(native.{0});\n", name)
@@ -370,8 +370,8 @@ pub fn emit_wrapper_struct(
 
 pub fn emit_utilities(writer: &mut IndentedWriter, context: &Context) {
     let content = include_str!("../../resources/csharp/Utils.cs.template");
-    let content = content.replace("@Namespace", &context.namespace);
-    let content = content.replace("@Class", &context.utils_class_name);
+    let content = content.replace("@Namespace", &context.utils_section.namespace);
+    let content = content.replace("@Class", &context.utils_section.class);
 
     emit!(writer, "{}", content);
 }
@@ -478,7 +478,7 @@ fn emit_const_use(writer: &mut IndentedWriter, context: &Context, name: &str) {
     emit!(
         writer,
         "{}.{}",
-        context.consts_class_name,
+        context.consts_section.class,
         name.to_pascal_case()
     );
 }
@@ -580,17 +580,11 @@ fn emit_callback_params(writer: &mut IndentedWriter, context: &Context, params: 
 
         let name = param_name(name, index);
 
-        match *ty {
-            Type::Array(_, ArraySize::Dynamic) => {
-                emit!(writer, "IntPtr {0}Ptr, ulong {0}Len", name);
-            }
-            Type::Array(_, _) => {
-                emit!(writer, "IntPtr {}Ptr", name);
-            }
-            _ => {
-                emit_type(writer, context, ty, Mode::Callback);
-                emit!(writer, " {}", name);
-            }
+        if let Type::Array(_, ArraySize::Dynamic) = *ty {
+            emit!(writer, "IntPtr {0}Ptr, ulong {0}Len", name);
+        } else {
+            emit_type(writer, context, ty, Mode::Callback);
+            emit!(writer, " {}", name);
         }
     }
 }
@@ -783,6 +777,8 @@ fn emit_array(
         emit!(writer, "List<");
         emit_type(writer, context, ty, mode);
         emit!(writer, ">");
+    } else if mode == Mode::Callback {
+        emit!(writer, "IntPtr");
     } else {
         emit_type(writer, context, ty, mode);
         emit!(writer, "[]")
@@ -803,26 +799,12 @@ fn emit_args(
 
         let name = param_name(name, offset + index);
         match *ty {
-            Type::Array(ref ty, ref size) => {
-                emit_copy_to_utility_name(writer, context, ty);
-                emit!(writer, "({}Ptr, ", name);
-
-                match *size {
-                    ArraySize::Lit(value) => emit!(writer, "{}", value),
-                    ArraySize::Const(ref name) => emit_const_use(writer, context, name),
-                    ArraySize::Dynamic => emit!(writer, "(int) {}Len", name),
-                }
-
-                emit!(writer, ")");
-
-                if let Type::User(ref name) = **ty {
-                    if context.is_native_name(name) {
-                        emit!(writer, ".ConvertAll(native => new {}(native))", name);
-                    }
-                }
-            }
+            Type::Array(ref ty, ref size) => emit_array_use(writer, context, ty, size, &name),
             Type::Pointer(ref ty) => {
                 match **ty {
+                    Type::Array(ref ty, ref size) => {
+                        emit_array_use(writer, context, ty, size, &name)
+                    }
                     Type::User(ref type_name) if context.is_native_name(type_name) => {
                         emit!(writer, "new {}(", type_name);
                         emit_pointer_use(writer, context, ty, &name, mode);
@@ -868,6 +850,39 @@ fn emit_pointer_use(
     }
 }
 
+fn emit_array_use(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    ty: &Type,
+    size: &ArraySize,
+    name: &str,
+) {
+    let (collection, suffix) = if let ArraySize::Dynamic = *size {
+        ("List", "Ptr")
+    } else {
+        ("Array", "")
+    };
+
+    emit_copy_to_utility_name(writer, context, ty, collection);
+    emit!(writer, "({}{}, ", name, suffix);
+
+    match *size {
+        ArraySize::Lit(value) => emit!(writer, "{}", value),
+        ArraySize::Const(ref name) => {
+            emit!(writer, "(int) ");
+            emit_const_use(writer, context, name);
+        }
+        ArraySize::Dynamic => emit!(writer, "(int) {}Len", name),
+    }
+
+    emit!(writer, ")");
+
+    if let Type::User(ref name) = *ty {
+        if context.is_native_name(name) {
+            emit!(writer, ".Select(native => new {}(native)).ToList()", name);
+        }
+    }
+}
 fn emit_delegate_base_name(writer: &mut IndentedWriter, fun: &Function) {
     if fun.inputs.len() > 1 {
         // Skip the user data param.
@@ -910,31 +925,37 @@ fn emit_delegate_base_part_name(writer: &mut IndentedWriter, ty: &Type) {
     }
 }
 
-fn emit_copy_to_utility_name(writer: &mut IndentedWriter, context: &Context, ty: &Type) {
-    emit!(writer, "{}.CopyTo", context.utils_class_name);
-    emit_copy_utility_suffix(writer, context, ty, true);
+fn emit_copy_to_utility_name(
+    writer: &mut IndentedWriter,
+    context: &Context,
+    ty: &Type,
+    collection: &str,
+) {
+    emit!(writer, "{}.CopyTo", context.utils_section.class);
+    emit_copy_utility_suffix(writer, context, ty, collection, true);
 }
 
 fn emit_copy_from_utility_name(writer: &mut IndentedWriter, context: &Context, ty: &Type) {
-    emit!(writer, "{}.CopyFrom", context.utils_class_name);
-    emit_copy_utility_suffix(writer, context, ty, false);
+    emit!(writer, "{}.CopyFrom", context.utils_section.class);
+    emit_copy_utility_suffix(writer, context, ty, "List", false);
 }
 
 fn emit_copy_utility_suffix(
     writer: &mut IndentedWriter,
     context: &Context,
     ty: &Type,
+    collection: &str,
     add_type: bool,
 ) {
     match *ty {
-        Type::F32 => emit!(writer, "SingleList"),
-        Type::F64 => emit!(writer, "DoubleList"),
-        Type::I16 => emit!(writer, "Int16List"),
-        Type::I32 => emit!(writer, "Int32List"),
-        Type::I64 => emit!(writer, "Int64List"),
-        Type::U8 => emit!(writer, "ByteList"),
+        Type::F32 => emit!(writer, "Single{}", collection),
+        Type::F64 => emit!(writer, "Double{}", collection),
+        Type::I16 => emit!(writer, "Int16{}", collection),
+        Type::I32 => emit!(writer, "Int32{}", collection),
+        Type::I64 => emit!(writer, "Int64{}", collection),
+        Type::U8 => emit!(writer, "Byte{}", collection),
         Type::User(ref name) => {
-            emit!(writer, "ObjectList");
+            emit!(writer, "Object{}", collection);
 
             if add_type {
                 if context.is_native_name(name) {

@@ -25,6 +25,7 @@ pub struct LangCSharp {
     filter: HashSet<String>,
     filter_mode: FilterMode,
     wrapper_function_blacklist: HashSet<String>,
+    consts_enabled: bool,
     types_enabled: bool,
     utils_enabled: bool,
     context: Context,
@@ -38,11 +39,11 @@ pub struct LangCSharp {
 
 pub struct Context {
     lib_name: String,
-    namespace: String,
-    class_name: String,
-    consts_class_name: String,
-    types_file_name: String,
-    utils_class_name: String,
+    interface_section: Section,
+    functions_section: Section,
+    consts_section: Section,
+    types_section: Section,
+    utils_section: Section,
     preserve_comments: bool,
     opaque_types: HashSet<String>,
     native_types: HashSet<String>,
@@ -66,21 +67,44 @@ impl Context {
     }
 }
 
+pub struct Section {
+    path: String,
+    namespace: String,
+    class: String,
+}
+
+impl Section {
+    fn new<P, N, C>(path: P, namespace: N, class: C) -> Self
+    where
+        P: Into<String>,
+        N: Into<String>,
+        C: Into<String>,
+    {
+        Section {
+            path: path.into(),
+            namespace: namespace.into(),
+            class: class.into(),
+        }
+    }
+}
+
+
 impl LangCSharp {
     pub fn new() -> Self {
         LangCSharp {
             filter_mode: FilterMode::Blacklist,
             filter: Default::default(),
             wrapper_function_blacklist: Default::default(),
+            consts_enabled: true,
             types_enabled: true,
             utils_enabled: true,
             context: Context {
                 lib_name: "backend".to_string(),
-                namespace: "Backend".to_string(),
-                class_name: "Backend".to_string(),
-                consts_class_name: "Constants".to_string(),
-                types_file_name: "Types".to_string(),
-                utils_class_name: "Utils".to_string(),
+                interface_section: Section::new("IBackend.cs", "Backend", "IBackend"),
+                functions_section: Section::new("Backend.cs", "Backend", "Backend"),
+                consts_section: Section::new("Constants.cs", "Backend", "Constants"),
+                types_section: Section::new("Types.cs", "Backend", ""),
+                utils_section: Section::new("Utils.cs", "Backend", "Utils"),
                 preserve_comments: false,
                 opaque_types: Default::default(),
                 native_types: Default::default(),
@@ -99,25 +123,39 @@ impl LangCSharp {
         self.context.lib_name = name.into();
     }
 
-    /// Set the namespace to put all the generated code in.
-    pub fn set_namespace<T: Into<String>>(&mut self, namespace: T) {
-        self.context.namespace = namespace.into();
+    /// Set path, namespace and interface name of the interface section.
+    pub fn set_interface_section<P, N, C>(&mut self, path: P, namespace: N, interface: C)
+    where
+        P: Into<String>,
+        N: Into<String>,
+        C: Into<String>,
+    {
+        self.context.interface_section = Section::new(path, namespace, interface)
     }
 
-    /// Set the name of the static class containing all transformed functions and
-    /// constants. By default this is derived from the linked library name.
-    pub fn set_class_name<T: Into<String>>(&mut self, name: T) {
-        self.context.class_name = name.into();
+    /// Set path, namespace and class name of the functions section.
+    pub fn set_functions_section<P, N, C>(&mut self, path: P, namespace: N, class: C)
+    where
+        P: Into<String>,
+        N: Into<String>,
+        C: Into<String>,
+    {
+        self.context.functions_section = Section::new(path, namespace, class)
     }
 
-    /// Add definition of opaque type (type represented by an opaque pointer).
-    pub fn add_opaque_type<T: Into<String>>(&mut self, name: T) {
-        let _ = self.context.opaque_types.insert(name.into());
+    /// Enabl/disable generation of constants.
+    pub fn set_consts_enabled(&mut self, enabled: bool) {
+        self.consts_enabled = enabled;
     }
 
-    /// Set the name of the class containing all constants.
-    pub fn set_consts_class_name<T: Into<String>>(&mut self, name: T) {
-        self.context.consts_class_name = name.into();
+    /// Set path, namespace and class name of the constants section.
+    pub fn set_consts_section<P, N, C>(&mut self, path: P, namespace: N, class: C)
+    where
+        P: Into<String>,
+        N: Into<String>,
+        C: Into<String>,
+    {
+        self.context.consts_section = Section::new(path, namespace, class)
     }
 
     /// Enabl/disable generation of types.
@@ -125,25 +163,33 @@ impl LangCSharp {
         self.types_enabled = enabled;
     }
 
-    /// Set the name of the file containing types (structs, enums, ...).
-    pub fn set_types_file_name<T: Into<String>>(&mut self, name: T) {
-        let mut name = name.into();
-        if name.ends_with(".cs") {
-            let len = name.len();
-            name.truncate(len - 3);
-        }
-
-        self.context.types_file_name = name;
-    }
-
-    /// Set the name of the utils class.
-    pub fn set_utils_class_name<T: Into<String>>(&mut self, name: T) {
-        self.context.utils_class_name = name.into();
+    /// Set path and namespace of the types section.
+    pub fn set_types_section<P, N>(&mut self, path: P, namespace: N)
+    where
+        P: Into<String>,
+        N: Into<String>,
+    {
+        self.context.types_section = Section::new(path, namespace, "")
     }
 
     /// Enable/disable generation of the utils class.
     pub fn set_utils_enabled(&mut self, enabled: bool) {
         self.utils_enabled = enabled;
+    }
+
+    /// Set path, namespace and class name of the utilities section.
+    pub fn set_utils_section<P, N, C>(&mut self, path: P, namespace: N, class: C)
+    where
+        P: Into<String>,
+        N: Into<String>,
+        C: Into<String>,
+    {
+        self.context.utils_section = Section::new(path, namespace, class)
+    }
+
+    /// Add definition of opaque type (type represented by an opaque pointer).
+    pub fn add_opaque_type<T: Into<String>>(&mut self, name: T) {
+        let _ = self.context.opaque_types.insert(name.into());
     }
 
     /// Add constant definition.
@@ -437,16 +483,21 @@ impl Lang for LangCSharp {
 
             emit!(writer, "using System;\n");
             emit!(writer, "using System.Collections.Generic;\n");
+            emit!(writer, "using System.Linq;\n");
             emit!(writer, "using System.Runtime.InteropServices;\n");
             emit!(writer, "using System.Threading.Tasks;\n\n");
-            emit!(writer, "namespace {} {{\n", self.context.namespace);
+            emit!(
+                writer,
+                "namespace {} {{\n",
+                self.context.functions_section.namespace
+            );
             writer.indent();
 
             emit!(
                 writer,
                 "public partial class {} : I{} {{\n",
-                self.context.class_name,
-                self.context.class_name
+                self.context.functions_section.class,
+                self.context.functions_section.class
             );
             writer.indent();
 
@@ -491,7 +542,7 @@ impl Lang for LangCSharp {
             emit!(writer, "}}\n");
 
             outputs.insert(
-                PathBuf::from(format!("{}.cs", self.context.class_name)),
+                PathBuf::from(self.context.functions_section.path.clone()),
                 writer.into_inner(),
             );
 
@@ -511,13 +562,17 @@ impl Lang for LangCSharp {
                 emit!(writer, "using System.Collections.Generic;\n");
                 emit!(writer, "using System.Runtime.InteropServices;\n");
                 emit!(writer, "using System.Threading.Tasks;\n\n");
-                emit!(writer, "namespace {} {{\n", self.context.namespace);
+                emit!(
+                    writer,
+                    "namespace {} {{\n",
+                    self.context.interface_section.namespace
+                );
                 writer.indent();
 
                 emit!(
                     writer,
-                    "public partial interface I{} {{\n",
-                    self.context.class_name
+                    "public partial interface {} {{\n",
+                    self.context.interface_section.class
                 );
                 writer.indent();
 
@@ -541,23 +596,27 @@ impl Lang for LangCSharp {
                 emit!(writer, "}}\n");
 
                 outputs.insert(
-                    PathBuf::from(format!("I{}.cs", self.context.class_name)),
+                    PathBuf::from(self.context.interface_section.path.clone()),
                     writer.into_inner(),
                 );
             }
         }
 
         // Constants
-        if !self.consts.is_empty() || !self.custom_consts.is_empty() {
+        if self.consts_enabled && (!self.consts.is_empty() || !self.custom_consts.is_empty()) {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
             emit!(writer, "using System;\n\n");
-            emit!(writer, "namespace {} {{\n", self.context.namespace);
+            emit!(
+                writer,
+                "namespace {} {{\n",
+                self.context.consts_section.namespace
+            );
             writer.indent();
 
             emit!(
                 writer,
                 "public static class {} {{\n",
-                self.context.consts_class_name
+                self.context.consts_section.class
             );
             writer.indent();
 
@@ -579,7 +638,7 @@ impl Lang for LangCSharp {
             emit!(writer, "}}\n");
 
             outputs.insert(
-                PathBuf::from(format!("{}.cs", self.context.consts_class_name)),
+                PathBuf::from(self.context.consts_section.path.clone()),
                 writer.into_inner(),
             );
 
@@ -594,7 +653,11 @@ impl Lang for LangCSharp {
             emit!(writer, "using System.Runtime.InteropServices;\n");
             emit!(writer, "using JetBrains.Annotations;\n\n");
 
-            emit!(writer, "namespace {} {{\n", self.context.namespace);
+            emit!(
+                writer,
+                "namespace {} {{\n",
+                self.context.types_section.namespace
+            );
             writer.indent();
 
             // Enums
@@ -619,7 +682,7 @@ impl Lang for LangCSharp {
             emit!(writer, "}}\n");
 
             outputs.insert(
-                PathBuf::from(format!("{}.cs", self.context.types_file_name)),
+                PathBuf::from(self.context.types_section.path.clone()),
                 writer.into_inner(),
             );
         }
@@ -630,7 +693,7 @@ impl Lang for LangCSharp {
             emit_utilities(&mut writer, &self.context);
 
             outputs.insert(
-                PathBuf::from(format!("{}.cs", self.context.utils_class_name)),
+                PathBuf::from(self.context.utils_section.path.clone()),
                 writer.into_inner(),
             );
         }

@@ -219,6 +219,7 @@ fn native_structs() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -299,7 +300,7 @@ fn native_structs() {
                  Marshal.PtrToStructure<FfiResult>(result), \
                  () => Utils.CopyToObjectList<EntryNative>(\
                    entriesPtr, \
-                   (int) entriesLen).ConvertAll(native => new Entry(native)));
+                   (int) entriesLen).Select(native => new Entry(native)).ToList());
              }
 
            }
@@ -357,6 +358,7 @@ fn type_aliases() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -470,6 +472,7 @@ fn functions_taking_no_callbacks() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -513,6 +516,7 @@ fn functions_taking_one_callback() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -575,6 +579,7 @@ fn functions_taking_multiple_callbacks() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -630,6 +635,7 @@ fn functions_taking_array() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -690,6 +696,8 @@ fn functions_taking_array() {
 #[test]
 fn functions_taking_callback_taking_const_size_array() {
     let outputs = compile!(None, {
+        pub type Nonce = [u8; NONCE_LEN];
+
         // Literal.
         #[no_mangle]
         pub extern "C" fn fun2(
@@ -700,21 +708,23 @@ fn functions_taking_callback_taking_const_size_array() {
         ) {
         }
 
-        // Named constant.
+        // Pointor to array via named constant.
         #[no_mangle]
         pub extern "C" fn fun3(
             user_data: *mut c_void,
             cb: extern "C" fn(user_data: *mut c_void,
                               result: *const FfiResult,
-                              nonce: [u8; NONCE_LEN]),
+                              nonce: *const Nonce),
         ) {
         }
+
     });
 
     let actual = fetch(&outputs, "Backend.cs");
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -748,32 +758,33 @@ fn functions_taking_callback_taking_const_size_array() {
 
              internal delegate void FfiResultByteArray32Cb(IntPtr userData, \
                                                            IntPtr result, \
-                                                           IntPtr keyPtr);
+                                                           IntPtr key);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultByteArray32Cb))]
              #endif
              private static void OnFfiResultByteArray32Cb(IntPtr userData, \
                                                           IntPtr result, \
-                                                          IntPtr keyPtr) {
+                                                          IntPtr key) {
                Utils.CompleteTask(userData, \
                                   Marshal.PtrToStructure<FfiResult>(result), \
-                                  () => Utils.CopyToByteList(keyPtr, 32));
+                                  () => Utils.CopyToByteArray(key, 32));
              }
 
              internal delegate void FfiResultByteArrayNonceLenCb(IntPtr userData, \
                                                                  IntPtr result, \
-                                                                 IntPtr noncePtr);
+                                                                 IntPtr nonce);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultByteArrayNonceLenCb))]
              #endif
              private static void OnFfiResultByteArrayNonceLenCb(IntPtr userData, \
                                                                 IntPtr result, \
-                                                                IntPtr noncePtr) {
-               Utils.CompleteTask(userData, \
-                                  Marshal.PtrToStructure<FfiResult>(result), \
-                                  () => Utils.CopyToByteList(noncePtr, Constants.NonceLen));
+                                                                IntPtr nonce) {
+               Utils.CompleteTask(\
+                 userData, \
+                 Marshal.PtrToStructure<FfiResult>(result), \
+                 () => Utils.CopyToByteArray(nonce, (int) Constants.NonceLen));
              }
 
            }
@@ -814,6 +825,7 @@ fn functions_taking_callback_taking_dynamic_array() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -900,6 +912,7 @@ fn functions_with_return_values() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -938,6 +951,7 @@ fn functions_taking_out_param() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -1029,6 +1043,7 @@ fn arrays() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
@@ -1114,6 +1129,7 @@ fn opaque_types() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
+         using System.Linq;
          using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
