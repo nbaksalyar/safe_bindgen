@@ -92,7 +92,7 @@ pub fn emit_wrapper_function(
 
             match *ty {
                 Type::Array(_, ArraySize::Dynamic) => {
-                    emit!(writer, "{0}.ToArray(), (ulong) {0}.Count", name)
+                    emit!(writer, "{0}?.ToArray(), (ulong) ({0}?.Count ?? 0)", name)
                 }
                 Type::Pointer(ref ty) => {
                     emit_pointer_use(writer, context, ty, &name.to_camel_case(), Mode::ExternFunc)
@@ -339,7 +339,7 @@ pub fn emit_wrapper_struct(
             emit!(writer, "{}Ptr = ", name);
             emit_copy_from_utility_name(writer, context, ty);
             emit!(writer, "({}),\n", name);
-            emit!(writer, "{0}Len = (ulong) {0}.Count", name);
+            emit!(writer, "{0}Len = (ulong) ({0}?.Count ?? 0)", name);
 
             if field.has_cap {
                 emit!(writer, ",\n");

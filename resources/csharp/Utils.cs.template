@@ -91,6 +91,10 @@ namespace @Namespace {
     }
 
     public static IntPtr CopyFromByteList(List<byte> list) {
+      if (list == null || list.Count == 0) {
+        return IntPtr.Zero;
+      }
+
       var array = list.ToArray();
       var size = Marshal.SizeOf(array[0]) * array.Length;
       var ptr  = Marshal.AllocHGlobal(size);
@@ -100,6 +104,10 @@ namespace @Namespace {
     }
 
     public static IntPtr CopyFromObjectList<T>(List<T> list) {
+      if (list == null || list.Count == 0) {
+        return IntPtr.Zero;
+      }
+
       var size = Marshal.SizeOf(list[0]) * list.Count;
       var ptr  = Marshal.AllocHGlobal(size);
       for (int i = 0; i < list.Count; ++i) {

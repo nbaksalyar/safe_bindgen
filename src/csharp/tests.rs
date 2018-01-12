@@ -164,9 +164,9 @@ fn native_structs() {
                return new EntryNative() {
                  Id = Id,
                  KeyPtr = Utils.CopyFromByteList(Key),
-                 KeyLen = (ulong) Key.Count,
+                 KeyLen = (ulong) (Key?.Count ?? 0),
                  RecordsPtr = Utils.CopyFromObjectList(Records),
-                 RecordsLen = (ulong) Records.Count,
+                 RecordsLen = (ulong) (Records?.Count ?? 0),
                  RecordsCap = 0
                };
              }
@@ -648,7 +648,7 @@ fn functions_taking_array() {
              #endif
 
              public void Fun0(List<byte> data) {
-               Fun0Native(data.ToArray(), (ulong) data.Count);
+               Fun0Native(data?.ToArray(), (ulong) (data?.Count ?? 0));
              }
 
              [DllImport(DllName, EntryPoint = \"fun0\")]
@@ -658,7 +658,7 @@ fn functions_taking_array() {
              );
 
              public void Fun1(List<byte> data) {
-               Fun1Native(data.ToArray(), (ulong) data.Count);
+               Fun1Native(data?.ToArray(), (ulong) (data?.Count ?? 0));
              }
 
              [DllImport(DllName, EntryPoint = \"fun1\")]
@@ -668,7 +668,7 @@ fn functions_taking_array() {
              );
 
              public void Fun2(ulong id, List<byte> data) {
-               Fun2Native(id, data.ToArray(), (ulong) data.Count);
+               Fun2Native(id, data?.ToArray(), (ulong) (data?.Count ?? 0));
              }
 
              [DllImport(DllName, EntryPoint = \"fun2\")]
