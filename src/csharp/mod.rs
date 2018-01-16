@@ -495,7 +495,7 @@ impl Lang for LangCSharp {
 
             emit!(
                 writer,
-                "public partial class {} : I{} {{\n",
+                "internal partial class {} : I{} {{\n",
                 self.context.functions_section.class,
                 self.context.functions_section.class
             );
@@ -504,11 +504,11 @@ impl Lang for LangCSharp {
             // Define constant with the native library name, to be used in
             // the [DllImport] attributes.
             emit!(writer, "#if __IOS__\n");
-            emit!(writer, "internal const string DllName = \"__Internal\";\n");
+            emit!(writer, "private const string DllName = \"__Internal\";\n");
             emit!(writer, "#else\n");
             emit!(
                 writer,
-                "internal const string DllName = \"{}\";\n",
+                "private const string DllName = \"{}\";\n",
                 self.context.lib_name
             );
             emit!(writer, "#endif\n\n");
@@ -605,7 +605,10 @@ impl Lang for LangCSharp {
         // Constants
         if self.consts_enabled && (!self.consts.is_empty() || !self.custom_consts.is_empty()) {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
-            emit!(writer, "using System;\n\n");
+
+            emit!(writer, "using System;\n");
+            emit!(writer, "using JetBrains.Annotations;\n\n");
+
             emit!(
                 writer,
                 "namespace {} {{\n",
@@ -613,6 +616,7 @@ impl Lang for LangCSharp {
             );
             writer.indent();
 
+            emit!(writer, "[PublicAPI]\n");
             emit!(
                 writer,
                 "public static class {} {{\n",

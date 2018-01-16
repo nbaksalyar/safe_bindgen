@@ -136,7 +136,7 @@ pub fn emit_function_extern_decl(
         "[DllImport(DllName, EntryPoint = \"{}\")]\n",
         native_name
     );
-    emit!(writer, "internal static extern ");
+    emit!(writer, "private static extern ");
     emit_type(writer, context, &fun.output, Mode::ExternFunc);
     emit!(writer, " {}(", name);
     emit_native_function_params(writer, context, &fun.inputs);
@@ -144,7 +144,7 @@ pub fn emit_function_extern_decl(
 }
 
 pub fn emit_callback_delegate(writer: &mut IndentedWriter, context: &Context, callback: &Function) {
-    emit!(writer, "internal delegate void ");
+    emit!(writer, "private delegate void ");
     emit_callback_wrapper_name(writer, callback);
     emit!(writer, "(");
     emit_callback_params(writer, context, &callback.inputs);
@@ -496,6 +496,10 @@ fn emit_struct_field(
         emit!(writer, "public ulong {}Len;\n", name);
 
         if field.has_cap {
+            emit!(
+                writer,
+                "// ReSharper disable once NotAccessedField.Compiler\n"
+            );
             emit!(writer, "public ulong {}Cap;\n", name);
         }
     } else {
