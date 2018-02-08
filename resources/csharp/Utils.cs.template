@@ -117,13 +117,13 @@ namespace @Namespace {
       return ptr;
     }
 
-    public static void FreeList(ref IntPtr ptr, ref ulong len) {
+    public static void FreeList(ref IntPtr ptr, ref IntPtr len) {
       if (ptr != IntPtr.Zero) {
           Marshal.FreeHGlobal(ptr);
       }
 
       ptr = IntPtr.Zero;
-      len = 0;
+      len = IntPtr.Zero;
     }
   }
 }

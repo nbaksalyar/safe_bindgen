@@ -164,10 +164,10 @@ fn native_structs() {
                return new EntryNative() {
                  Id = Id,
                  KeyPtr = Utils.CopyFromByteList(Key),
-                 KeyLen = (ulong) (Key?.Count ?? 0),
+                 KeyLen = (IntPtr) (Key?.Count ?? 0),
                  RecordsPtr = Utils.CopyFromObjectList(Records),
-                 RecordsLen = (ulong) (Records?.Count ?? 0),
-                 RecordsCap = 0
+                 RecordsLen = (IntPtr) (Records?.Count ?? 0),
+                 RecordsCap = IntPtr.Zero
                };
              }
            }
@@ -175,11 +175,11 @@ fn native_structs() {
            internal struct EntryNative {
              public uint Id;
              public IntPtr KeyPtr;
-             public ulong KeyLen;
+             public IntPtr KeyLen;
              public IntPtr RecordsPtr;
-             public ulong RecordsLen;
+             public IntPtr RecordsLen;
              // ReSharper disable once NotAccessedField.Compiler
-             public ulong RecordsCap;
+             public IntPtr RecordsCap;
 
              internal void Free() {
                Utils.FreeList(ref KeyPtr, ref KeyLen);
@@ -270,8 +270,8 @@ fn native_structs() {
              private static extern void Fun3Native(IntPtr userData, FfiResultEntryListCb cb);
 
              private delegate void FfiResultEntryCb(IntPtr userData, \
-                                                     IntPtr result, \
-                                                     IntPtr entry);
+                                                    IntPtr result, \
+                                                    IntPtr entry);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultEntryCb))]
@@ -285,9 +285,9 @@ fn native_structs() {
              }
 
              private delegate void FfiResultEntryListCb(IntPtr userData, \
-                                                         IntPtr result, \
-                                                         IntPtr entriesPtr, \
-                                                         ulong entriesLen);
+                                                        IntPtr result, \
+                                                        IntPtr entriesPtr, \
+                                                        IntPtr entriesLen);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultEntryListCb))]
@@ -295,7 +295,7 @@ fn native_structs() {
              private static void OnFfiResultEntryListCb(IntPtr userData, \
                                                         IntPtr result, \
                                                         IntPtr entriesPtr, \
-                                                        ulong entriesLen) {
+                                                        IntPtr entriesLen) {
                Utils.CompleteTask(\
                  userData, \
                  Marshal.PtrToStructure<FfiResult>(result), \
@@ -649,42 +649,42 @@ fn functions_taking_array() {
              #endif
 
              public void Fun0(List<byte> data) {
-               Fun0Native(data?.ToArray(), (ulong) (data?.Count ?? 0));
+               Fun0Native(data?.ToArray(), (IntPtr) (data?.Count ?? 0));
              }
 
              [DllImport(DllName, EntryPoint = \"fun0\")]
              private static extern void Fun0Native(\
                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
-               ulong dataLen\
+               IntPtr dataLen\
              );
 
              public void Fun1(List<byte> data) {
-               Fun1Native(data?.ToArray(), (ulong) (data?.Count ?? 0));
+               Fun1Native(data?.ToArray(), (IntPtr) (data?.Count ?? 0));
              }
 
              [DllImport(DllName, EntryPoint = \"fun1\")]
              private static extern void Fun1Native(\
                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] byte[] data, \
-               ulong dataLen\
+               IntPtr dataLen\
              );
 
              public void Fun2(ulong id, List<byte> data) {
-               Fun2Native(id, data?.ToArray(), (ulong) (data?.Count ?? 0));
+               Fun2Native(id, data?.ToArray(), (IntPtr) (data?.Count ?? 0));
              }
 
              [DllImport(DllName, EntryPoint = \"fun2\")]
              private static extern void Fun2Native(\
                ulong id, \
                [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] byte[] data, \
-               ulong dataLen\
+               IntPtr dataLen\
              );
 
-             public void Fun3(ref FfiResult result, ulong len) {
+             public void Fun3(ref FfiResult result, IntPtr len) {
                Fun3Native(ref result, len);
              }
 
              [DllImport(DllName, EntryPoint = \"fun3\")]
-             private static extern void Fun3Native(ref FfiResult result, ulong len);
+             private static extern void Fun3Native(ref FfiResult result, IntPtr len);
 
            }
          }
@@ -846,7 +846,7 @@ fn functions_taking_callback_taking_dynamic_array() {
 
              [DllImport(DllName, EntryPoint = \"fun0\")]
              private static extern void Fun0Native(IntPtr userData, \
-                                                    FfiResultByteListCb cb);
+                                                   FfiResultByteListCb cb);
 
              public Task<List<Record>> Fun1Async() {
                var (ret, userData) = Utils.PrepareTask<List<Record>>();
@@ -856,12 +856,12 @@ fn functions_taking_callback_taking_dynamic_array() {
 
              [DllImport(DllName, EntryPoint = \"fun1\")]
              private static extern void Fun1Native(IntPtr userData, \
-                                                    FfiResultRecordListCb cb);
+                                                   FfiResultRecordListCb cb);
 
              private delegate void FfiResultByteListCb(IntPtr userData, \
-                                                        IntPtr result, \
-                                                        IntPtr dataPtr, \
-                                                        ulong dataLen);
+                                                       IntPtr result, \
+                                                       IntPtr dataPtr, \
+                                                       IntPtr dataLen);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultByteListCb))]
@@ -869,7 +869,7 @@ fn functions_taking_callback_taking_dynamic_array() {
              private static void OnFfiResultByteListCb(IntPtr userData, \
                                                        IntPtr result, \
                                                        IntPtr dataPtr, \
-                                                       ulong dataLen) {
+                                                       IntPtr dataLen) {
                Utils.CompleteTask(userData, \
                                   Marshal.PtrToStructure<FfiResult>(result), \
                                   () => Utils.CopyToByteList(dataPtr, (int) dataLen));
@@ -878,7 +878,7 @@ fn functions_taking_callback_taking_dynamic_array() {
              private delegate void FfiResultRecordListCb(IntPtr userData, \
                                                           IntPtr result, \
                                                           IntPtr recordsPtr, \
-                                                          ulong recordsLen);
+                                                          IntPtr recordsLen);
 
              #if __IOS__
              [MonoPInvokeCallback(typeof(FfiResultRecordListCb))]
@@ -886,7 +886,7 @@ fn functions_taking_callback_taking_dynamic_array() {
              private static void OnFfiResultRecordListCb(IntPtr userData, \
                                                          IntPtr result, \
                                                          IntPtr recordsPtr, \
-                                                         ulong recordsLen) {
+                                                         IntPtr recordsLen) {
                Utils.CompleteTask(userData, \
                                   Marshal.PtrToStructure<FfiResult>(result), \
                                   () => Utils.CopyToObjectList<Record>(\
