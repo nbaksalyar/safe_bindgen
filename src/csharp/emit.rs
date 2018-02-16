@@ -6,6 +6,9 @@ use inflector::Inflector;
 use output::IndentedWriter;
 use std::fmt::Write;
 
+const LEN_TYPE: &str = "UIntPtr";
+const LEN_ZERO: &str = "UIntPtr.Zero";
+
 macro_rules! emit {
     ($writer:expr, $($arg:tt)*) => {
         write!($writer, $($arg)*).unwrap()
@@ -92,7 +95,12 @@ pub fn emit_wrapper_function(
 
             match *ty {
                 Type::Array(_, ArraySize::Dynamic) => {
-                    emit!(writer, "{0}?.ToArray(), (IntPtr) ({0}?.Count ?? 0)", name)
+                    emit!(
+                        writer,
+                        "{0}?.ToArray(), ({1}) ({0}?.Count ?? 0)",
+                        name,
+                        LEN_TYPE
+                    )
                 }
                 Type::Pointer(ref ty) => {
                     emit_pointer_use(writer, context, ty, &name.to_camel_case(), Mode::ExternFunc)
@@ -339,11 +347,11 @@ pub fn emit_wrapper_struct(
             emit!(writer, "{}Ptr = ", name);
             emit_copy_from_utility_name(writer, context, ty);
             emit!(writer, "({}),\n", name);
-            emit!(writer, "{0}Len = (UIntPtr) ({0}?.Count ?? 0)", name);
+            emit!(writer, "{0}Len = ({1}) ({0}?.Count ?? 0)", name, LEN_TYPE);
 
             if field.has_cap {
                 emit!(writer, ",\n");
-                emit!(writer, "{0}Cap = UIntPtr.Zero", name);
+                emit!(writer, "{}Cap = {}", name, LEN_ZERO);
             }
         } else if context.is_native_type(&field.ty) {
             emit!(writer, "{0} = {0}.ToNative()", name);
@@ -493,14 +501,14 @@ fn emit_struct_field(
 
     if field.ty.is_dynamic_array() && mode == StructMode::Normal {
         emit!(writer, "public IntPtr {}Ptr;\n", name);
-        emit!(writer, "public UIntPtr {}Len;\n", name);
+        emit!(writer, "public {} {}Len;\n", LEN_TYPE, name);
 
         if field.has_cap {
             emit!(
                 writer,
                 "// ReSharper disable once NotAccessedField.Compiler\n"
             );
-            emit!(writer, "public UIntPtr {}Cap;\n", name);
+            emit!(writer, "public {} {}Cap;\n", LEN_TYPE, name);
         }
     } else {
         if mode == StructMode::Normal {
@@ -571,7 +579,7 @@ fn emit_native_function_params(
         emit!(writer, " {}", name);
 
         if ty.is_dynamic_array() {
-            emit!(writer, ", IntPtr {}Len", name);
+            emit!(writer, ", {} {}Len", LEN_TYPE, name);
         }
 
         index += 1;
@@ -587,7 +595,7 @@ fn emit_callback_params(writer: &mut IndentedWriter, context: &Context, params: 
         let name = param_name(name, index);
 
         if let Type::Array(_, ArraySize::Dynamic) = *ty {
-            emit!(writer, "IntPtr {0}Ptr, IntPtr {0}Len", name);
+            emit!(writer, "IntPtr {0}Ptr, {1} {0}Len", name, LEN_TYPE);
         } else {
             emit_type(writer, context, ty, Mode::Callback);
             emit!(writer, " {}", name);
@@ -728,7 +736,7 @@ fn emit_type(writer: &mut IndentedWriter, context: &Context, ty: &Type, mode: Mo
             if mode == Mode::Generic {
                 emit!(writer, "ulong")
             } else {
-                emit!(writer, "UIntPtr")
+                emit!(writer, "{}", LEN_TYPE)
             }
         }
         Type::String => emit!(writer, "string"),
