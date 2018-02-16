@@ -169,7 +169,7 @@ pub fn emit_callback_wrapper(writer: &mut IndentedWriter, context: &Context, cal
     emit_args(writer, context, &callback.inputs[0..2], 0, Mode::Callback);
 
     if callback.inputs.len() > 2 {
-        emit!(writer, ", () => ");
+        emit!(writer, ", ");
 
         if callback.inputs.len() > 3 {
             emit!(writer, "(");
@@ -339,11 +339,11 @@ pub fn emit_wrapper_struct(
             emit!(writer, "{}Ptr = ", name);
             emit_copy_from_utility_name(writer, context, ty);
             emit!(writer, "({}),\n", name);
-            emit!(writer, "{0}Len = (IntPtr) ({0}?.Count ?? 0)", name);
+            emit!(writer, "{0}Len = (UIntPtr) ({0}?.Count ?? 0)", name);
 
             if field.has_cap {
                 emit!(writer, ",\n");
-                emit!(writer, "{0}Cap = IntPtr.Zero", name);
+                emit!(writer, "{0}Cap = UIntPtr.Zero", name);
             }
         } else if context.is_native_type(&field.ty) {
             emit!(writer, "{0} = {0}.ToNative()", name);
@@ -493,14 +493,14 @@ fn emit_struct_field(
 
     if field.ty.is_dynamic_array() && mode == StructMode::Normal {
         emit!(writer, "public IntPtr {}Ptr;\n", name);
-        emit!(writer, "public IntPtr {}Len;\n", name);
+        emit!(writer, "public UIntPtr {}Len;\n", name);
 
         if field.has_cap {
             emit!(
                 writer,
                 "// ReSharper disable once NotAccessedField.Compiler\n"
             );
-            emit!(writer, "public IntPtr {}Cap;\n", name);
+            emit!(writer, "public UIntPtr {}Cap;\n", name);
         }
     } else {
         if mode == StructMode::Normal {
@@ -723,7 +723,13 @@ fn emit_type(writer: &mut IndentedWriter, context: &Context, ty: &Type, mode: Mo
         Type::U16 => emit!(writer, "ushort"),
         Type::U32 => emit!(writer, "uint"),
         Type::U64 => emit!(writer, "ulong"),
-        Type::USize => emit!(writer, "IntPtr"),
+        Type::USize => {
+            if mode == Mode::Generic {
+                emit!(writer, "ulong")
+            } else {
+                emit!(writer, "UIntPtr")
+            }
+        }
         Type::String => emit!(writer, "string"),
         Type::Pointer(ref ty) => {
             match **ty {
@@ -820,6 +826,7 @@ fn emit_args(
             Type::User(ref type_name) if context.is_native_name(type_name) => {
                 emit!(writer, "new {}({})", type_name, name);
             }
+            Type::USize => emit!(writer, "(ulong) {}", name),
             _ => emit!(writer, "{}", name),
         }
     }
