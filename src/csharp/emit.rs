@@ -177,7 +177,7 @@ pub fn emit_callback_wrapper(writer: &mut IndentedWriter, context: &Context, cal
     emit_args(writer, context, &callback.inputs[0..2], 0, Mode::Callback);
 
     if callback.inputs.len() > 2 {
-        emit!(writer, ", ");
+        emit!(writer, ", () => ");
 
         if callback.inputs.len() > 3 {
             emit!(writer, "(");
