@@ -60,7 +60,7 @@ pub fn append_output(text: String, file: &str, o: &mut Outputs) {
     }
 }
 
-/// Check the attribute is #[no_mangle].
+/// Check the attribute is `#[no_mangle]`.
 pub fn check_no_mangle(attr: &ast::Attribute) -> bool {
     match attr.value.node {
         ast::MetaItemKind::Word if attr.name() == "no_mangle" => true,
@@ -105,7 +105,7 @@ pub fn is_array_arg(arg: &ast::Arg, next_arg: Option<&ast::Arg>) -> bool {
 // TODO: Maybe it would be wise to use syntax::attr here.
 /// Loop through a list of attributes.
 ///
-/// Check that at least one attribute matches some criteria (usually #[repr(C)] or #[no_mangle])
+/// Check that at least one attribute matches some criteria (usually `#[repr(C)]` or `#[no_mangle]`)
 /// and optionally retrieve a String from it (usually a docstring).
 pub fn parse_attr<C, R>(attrs: &[ast::Attribute], check: C, retrieve: R) -> (bool, String)
 where

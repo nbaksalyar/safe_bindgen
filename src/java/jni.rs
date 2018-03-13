@@ -31,8 +31,7 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
                 "c_char" | "u8" | "i8" => "jbyte",
                 "c_short" | "u16" | "i16" => "jshort",
                 "c_int" | "u32" | "i32" => "jint",
-                "c_long" | "u64" | "i64" => "jlong",
-                "c_usize" | "usize" | "isize" => "jlong",
+                "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => "jlong",
                 _ => ty,
             };
 
@@ -85,18 +84,19 @@ fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
                 "c_byte" | "u8" | "i8" => Some(JavaType::Primitive(signature::Primitive::Byte)),
                 "c_short" | "u16" | "i16" => Some(JavaType::Primitive(signature::Primitive::Short)),
                 "c_int" | "u32" | "i32" => Some(JavaType::Primitive(signature::Primitive::Int)),
-                "c_long" | "u64" | "i64" => Some(JavaType::Primitive(signature::Primitive::Long)),
-                "c_usize" | "usize" | "isize" => Some(
-                    JavaType::Primitive(signature::Primitive::Long),
+                "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some(
+                    JavaType::Primitive(
+                        signature::Primitive::Long,
+                    ),
                 ),
                 "c_bool" | "bool" => Some(JavaType::Object(From::from("java/lang/Boolean"))),
                 _ => {
                     if let Some(mapped) = context.type_map.get(ty) {
                         java_ty_to_signature(mapped).or_else(|| {
-                            Some(JavaType::Object(From::from(fully_qualified(ty, context))))
+                            Some(JavaType::Object(fully_qualified(ty, context)))
                         })
                     } else {
-                        Some(JavaType::Object(From::from(fully_qualified(ty, context))))
+                        Some(JavaType::Object(fully_qualified(ty, context)))
                     }
                 }
             }
@@ -287,7 +287,7 @@ pub fn generate_jni_function(
         jni_fn_inputs.push(transform_jni_arg(&arg));
     }
 
-    if callbacks.len() > 0 {
+    if !callbacks.is_empty() {
         let cb_base_name = if callbacks.len() > 1 {
             format!("call_{}", native_name_str)
         } else {
@@ -367,18 +367,18 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
         .peekable();
 
     while let Some(arg) = args_iter.next() {
-        let (arg_name, arg_ty) = transform_arg(&arg);
+        let (arg_name, arg_ty) = transform_arg(arg);
 
         jni_cb_inputs.push(quote! { #arg_name: #arg_ty });
         args.push(quote! { #arg_name.into() });
 
-        if is_array_arg(&arg, args_iter.peek().cloned()) {
+        if is_array_arg(arg, args_iter.peek().cloned()) {
             // Handle array arguments
             let val_java_type = rust_ty_to_signature(&arg.ty, context).unwrap();
             arg_java_ty.push(JavaType::Array(Box::new(val_java_type)));
 
             if let Some(len_arg) = args_iter.next() {
-                let (len_arg_name, len_arg_ty) = transform_arg(&len_arg);
+                let (len_arg_name, len_arg_ty) = transform_arg(len_arg);
                 jni_cb_inputs.push(quote! { #len_arg_name: #len_arg_ty });
 
                 stmts.push(quote! {

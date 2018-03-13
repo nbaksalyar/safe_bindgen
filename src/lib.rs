@@ -1,6 +1,22 @@
-//! safe_bindgen is a library based on moz-cheddar for converting Rust source files
+//! `safe_bindgen` is a library based on moz-cheddar for converting Rust source files
 //! into Java and C# bindings.
 //! It is built specifically for the SAFE Client Libs project.
+
+// For explanation of lint checks, run `rustc -W help` or see
+// https://github.com/maidsafe/QA/blob/master/Documentation/Rust%20Lint%20Checks.md
+#![forbid(exceeding_bitshifts, mutable_transmutes, no_mangle_const_items,
+          unknown_crate_types, warnings)]
+#![deny(deprecated, improper_ctypes, non_shorthand_field_patterns, overflowing_literals, plugin_as_library,
+        private_no_mangle_fns, private_no_mangle_statics, stable_features,
+        unconditional_recursion, unknown_lints, unsafe_code, unused, unused_allocation,
+        unused_attributes, unused_comparisons, unused_features, unused_parens, while_true)]
+#![warn(trivial_casts, trivial_numeric_casts, unused_extern_crates, unused_import_braces,
+        unused_qualifications)]
+#![allow(box_pointers, missing_copy_implementations,
+         missing_debug_implementations, variant_size_differences)]
+
+// FIXME: add documentation and deny `missing_documentation`
+#![allow(missing_docs)]
 
 #![cfg_attr(not(feature = "with-syntex"), feature(rustc_private))]
 
@@ -37,7 +53,6 @@ pub use csharp::LangCSharp;
 pub use errors::Level;
 pub use java::LangJava;
 use std::collections::HashMap;
-use std::convert;
 use std::fmt::Display;
 use std::fs;
 use std::io::{Read, Write};
@@ -209,7 +224,7 @@ impl Bindgen {
     ///
     /// This can only fail if there are issues reading the cargo manifest. If there is no cargo
     /// manifest available then the source file defaults to `src/lib.rs`.
-    pub fn new() -> std::result::Result<Self, Error> {
+    pub fn new() -> Result<Self, Error> {
         let source_path = source_file_from_cargo()?;
         let input = path::PathBuf::from(source_path);
 
@@ -225,7 +240,7 @@ impl Bindgen {
     /// This should only be used when not using a `cargo` build system.
     pub fn source_file<T>(&mut self, path: T) -> &mut Self
     where
-        path::PathBuf: convert::From<T>,
+        path::PathBuf: From<T>,
     {
         self.input = path::PathBuf::from(path);
         self
@@ -319,7 +334,7 @@ impl Bindgen {
     }
 
     pub fn write_outputs_or_panic<P: AsRef<Path>>(&self, root: P, outputs: &Outputs) {
-        if let Err(err) = self.write_outputs(root, &outputs) {
+        if let Err(err) = self.write_outputs(root, outputs) {
             self.print_error(&From::from(err));
             panic!("Failed to write output.");
         }
@@ -333,7 +348,7 @@ impl Bindgen {
     /// # Panics
     ///
     /// Panics on any compilation error so that the build script exits and prints output.
-    pub fn run_build<P: AsRef<path::Path>, L: Lang>(&self, lang: &mut L, output_dir: P) {
+    pub fn run_build<P: AsRef<Path>, L: Lang>(&self, lang: &mut L, output_dir: P) {
         let mut outputs = HashMap::new();
         self.compile_or_panic(lang, &mut outputs, true);
         self.write_outputs_or_panic(output_dir, &outputs);
@@ -346,10 +361,10 @@ impl Bindgen {
 }
 
 /// Extract the path to the root source file from a `Cargo.toml`.
-fn source_file_from_cargo() -> std::result::Result<String, Error> {
-    let cargo_toml = path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or(
-        std::ffi::OsString::from(""),
-    )).join("Cargo.toml");
+fn source_file_from_cargo() -> Result<String, Error> {
+    let cargo_toml = path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| {
+        std::ffi::OsString::from("")
+    })).join("Cargo.toml");
 
     // If no `Cargo.toml` assume `src/lib.rs` until told otherwise.
     let default = "src/lib.rs";

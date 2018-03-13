@@ -13,23 +13,20 @@ pub fn imported_mods(module: &ast::Mod) -> Vec<Vec<String>> {
         if let ast::Visibility::Inherited = item.vis {
             continue;
         }
-        match item.node {
-            ast::ItemKind::Use(ref import) => {
-                if let ast::ViewPathGlob(ref path) = import.node {
-                    let mut segments = path.segments.iter();
-                    if path.is_global() {
-                        segments.next();
-                    }
-                    let base_output_path: Vec<String> = segments
-                        .map(|seg| seg.identifier.name.as_str().to_string())
-                        .collect();
+        if let ast::ItemKind::Use(ref import) = item.node {
+            if let ast::ViewPathGlob(ref path) = import.node {
+                let mut segments = path.segments.iter();
+                if path.is_global() {
+                    segments.next();
+                }
+                let base_output_path: Vec<String> = segments
+                    .map(|seg| seg.identifier.name.as_str().to_string())
+                    .collect();
 
-                    if base_output_path[0] == "ffi" {
-                        imported.push(base_output_path);
-                    }
+                if base_output_path[0] == "ffi" {
+                    imported.push(base_output_path);
                 }
             }
-            _ => (),
         }
     }
 
@@ -63,11 +60,10 @@ pub fn parse_mod<L: Lang>(
             _ => Ok(()),
         };
 
-        match res {
-            // Display any non-fatal errors, fatal errors are handled at cause.
-            Err(error) => errors.push(error),
-            Ok(_) => {}  // Item should not be written to header.
-        };
+        // Display any non-fatal errors, fatal errors are handled at cause.
+        if let Err(error) = res {
+            errors.push(error)
+        }
     }
 
     if errors.is_empty() {

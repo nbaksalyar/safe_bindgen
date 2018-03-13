@@ -1200,7 +1200,7 @@ fn try_compile<T: Into<Option<LangCSharp>>>(
         .unwrap();
 
     let mut outputs = Outputs::default();
-    let mut lang = lang.into().unwrap_or_else(|| LangCSharp::new());
+    let mut lang = lang.into().unwrap_or_else(LangCSharp::new);
 
     parse::parse_mod(&mut lang, &ast.module, &mut outputs)?;
     lang.finalise_output(&mut outputs)?;

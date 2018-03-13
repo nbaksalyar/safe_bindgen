@@ -86,7 +86,7 @@ pub fn emit_wrapper_function(
 
         if let Some(callback) = extract_callback(ty) {
             emit!(writer, "On");
-            emit_callback_wrapper_name(writer, &callback);
+            emit_callback_wrapper_name(writer, callback);
         } else {
             let name = param_name(name, index);
 
@@ -513,6 +513,7 @@ fn emit_struct_field(
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(explicit_counter_loop))]
 fn emit_wrapper_function_params(
     writer: &mut IndentedWriter,
     context: &Context,
@@ -546,6 +547,7 @@ fn emit_wrapper_function_params(
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(explicit_counter_loop))]
 fn emit_native_function_params(
     writer: &mut IndentedWriter,
     context: &Context,
@@ -560,7 +562,7 @@ fn emit_native_function_params(
         emit_marshal_as(writer, context, ty, Some(index), " ");
 
         if let Some(callback) = extract_callback(ty) {
-            emit_callback_wrapper_name(writer, &callback);
+            emit_callback_wrapper_name(writer, callback);
         } else {
             emit_type(writer, context, ty, Mode::ExternFunc);
         }
@@ -710,11 +712,10 @@ fn emit_type(writer: &mut IndentedWriter, context: &Context, ty: &Type, mode: Mo
     match *ty {
         Type::Unit => emit!(writer, "void"),
         Type::Bool => emit!(writer, "bool"),
-        Type::CChar => emit!(writer, "sbyte"),
+        Type::CChar | Type::I8 => emit!(writer, "sbyte"),
         Type::Char => emit!(writer, "char"),
         Type::F32 => emit!(writer, "float"),
         Type::F64 => emit!(writer, "double"),
-        Type::I8 => emit!(writer, "sbyte"),
         Type::I16 => emit!(writer, "short"),
         Type::I32 => emit!(writer, "int"),
         Type::I64 => emit!(writer, "long"),
