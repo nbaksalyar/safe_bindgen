@@ -6,6 +6,7 @@ use Level;
 use common::{self, Outputs, append_output, check_no_mangle, is_array_arg, is_result_arg,
              is_user_data_arg, parse_attr, retrieve_docstring};
 use inflector::Inflector;
+use rustfmt;
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use struct_field::{StructField, transform_struct_fields};
@@ -13,7 +14,6 @@ use syntax::abi::Abi;
 use syntax::ast;
 use syntax::codemap;
 use syntax::print::pprust;
-
 mod jni;
 
 pub struct LangJava {
@@ -60,8 +60,40 @@ impl LangJava {
     pub fn set_model_namespace<T: Into<String>>(&mut self, namespace: T) {
         self.context.namespace_model = namespace.into();
     }
-}
 
+    /// Applies rustfmt to JNI code to improve debuggability
+    fn format_jni_output(&self, input: &mut String) {
+        let mut output: Vec<u8> = Vec::with_capacity(input.len() * 2);
+
+        let mut cfg = rustfmt::config::Config::default();
+        cfg.set().write_mode(rustfmt::config::WriteMode::Plain);
+
+        unwrap!(rustfmt::format_input(
+            rustfmt::Input::Text(input.clone()),
+            &cfg,
+            Some(&mut output),
+        ));
+
+        *input = String::from_utf8(output).expect("Invalid Rustfmt output found");
+    }
+
+    /// Adds package info to the NativeBindings Java module and indents lines
+    fn format_native_functions(&self, funcs: &mut String) {
+        // Indent lines
+        let lines = funcs.lines().fold(String::new(), |mut s, line| {
+            s.push_str(&format!("\t{}\n", line));
+            return s;
+        });
+        *funcs = format!(
+            "package {namespace};\n\n
+                         public class NativeBindings {{\n
+                         {lines}\n
+                         }}",
+            namespace = self.context.namespace,
+            lines = lines
+        );
+    }
+}
 impl common::Lang for LangJava {
     /// Convert a Rust function declaration into Java.
     fn parse_fn(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
@@ -216,21 +248,22 @@ impl common::Lang for LangJava {
     }
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
+        match outputs.get_mut(&PathBuf::from("jni.rs")) {
+            Some(input) => {
+                self.format_jni_output(input);
+            }
+            None => {
+                return Err(Error {
+                    level: Level::Error,
+                    span: None,
+                    message: "no jni bindings generated?".to_owned(),
+                })
+            }
+        }
+
         match outputs.get_mut(&PathBuf::from("NativeBindings.java")) {
-            Some(funcs) => {
-                // Indent lines
-                let lines = funcs.lines().fold(String::new(), |mut s, line| {
-                    s.push_str(&format!("\t{}\n", line));
-                    return s;
-                });
-                *funcs = format!(
-                    "package {namespace};\n\n
-                         public class NativeBindings {{\n
-                         {lines}\n
-                         }}",
-                    namespace = self.context.namespace,
-                    lines = lines
-                );
+            Some(input) => {
+                self.format_native_functions(input);
                 Ok(())
             }
             None => Err(Error {

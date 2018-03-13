@@ -19,6 +19,7 @@ extern crate toml;
 #[macro_use]
 extern crate quote;
 extern crate jni;
+extern crate rustfmt;
 
 #[cfg(test)]
 extern crate colored;
@@ -27,7 +28,6 @@ extern crate diff;
 #[cfg(test)]
 #[macro_use]
 extern crate indoc;
-#[cfg(test)]
 #[macro_use]
 extern crate unwrap;
 
