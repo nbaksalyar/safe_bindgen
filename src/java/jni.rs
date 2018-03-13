@@ -382,7 +382,9 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
                 jni_cb_inputs.push(quote! { #len_arg_name: #len_arg_ty });
 
                 stmts.push(quote! {
-                    let #arg_name = jni_unwrap!(slice::from_raw_parts(#arg_name, #len_arg_name).to_java(&env));
+                    let #arg_name = jni_unwrap!(
+                        slice::from_raw_parts(#arg_name, #len_arg_name).to_java(&env)
+                    );
                 });
             } else {
                 // error: no length arg?
@@ -401,7 +403,8 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
                         // Strings
                         "c_char" => {
                             quote! {
-                                let #arg_name: JObject = jni_unwrap!(#arg_name.to_java(&env)).into();
+                                let #arg_name: JObject = jni_unwrap!(#arg_name.to_java(&env))
+                                    .into();
                             }
                         }
                         // Other ptrs
