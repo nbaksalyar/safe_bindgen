@@ -31,8 +31,7 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
                 "c_char" | "u8" | "i8" => "jbyte",
                 "c_short" | "u16" | "i16" => "jshort",
                 "c_int" | "u32" | "i32" => "jint",
-                "c_long" | "u64" | "i64" => "jlong",
-                "c_usize" | "usize" | "isize" => "jlong",
+                "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => "jlong",
                 _ => ty,
             };
 
@@ -85,18 +84,19 @@ fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
                 "c_byte" | "u8" | "i8" => Some(JavaType::Primitive(signature::Primitive::Byte)),
                 "c_short" | "u16" | "i16" => Some(JavaType::Primitive(signature::Primitive::Short)),
                 "c_int" | "u32" | "i32" => Some(JavaType::Primitive(signature::Primitive::Int)),
-                "c_long" | "u64" | "i64" => Some(JavaType::Primitive(signature::Primitive::Long)),
-                "c_usize" | "usize" | "isize" => Some(
-                    JavaType::Primitive(signature::Primitive::Long),
+                "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some(
+                    JavaType::Primitive(
+                        signature::Primitive::Long,
+                    ),
                 ),
                 "c_bool" | "bool" => Some(JavaType::Object(From::from("java/lang/Boolean"))),
                 _ => {
                     if let Some(mapped) = context.type_map.get(ty) {
                         java_ty_to_signature(mapped).or_else(|| {
-                            Some(JavaType::Object(From::from(fully_qualified(ty, context))))
+                            Some(JavaType::Object(fully_qualified(ty, context)))
                         })
                     } else {
-                        Some(JavaType::Object(From::from(fully_qualified(ty, context))))
+                        Some(JavaType::Object(fully_qualified(ty, context)))
                     }
                 }
             }
@@ -127,7 +127,7 @@ fn transform_string_arg(arg_name: &str) -> JniArgResult {
     let arg_name = quote::Ident::new(arg_name);
     let stmt =
         quote! {
-            let #arg_name = CString::from_java(&env, #arg_name);
+            let #arg_name = jni_unwrap!(CString::from_java(&env, #arg_name));
         };
 
     // call arg value(s)
@@ -142,7 +142,7 @@ fn transform_struct_arg(arg_name: &str, arg_ty: &ast::Ty) -> JniArgResult {
     let struct_ty = quote::Ident::new(pprust::ty_to_string(arg_ty));
     let stmt =
         quote! {
-            let #arg_name = #struct_ty::from_java(&env, #arg_name);
+            let #arg_name = jni_unwrap!(#struct_ty::from_java(&env, #arg_name));
         };
 
     // call arg value(s)
@@ -156,7 +156,7 @@ fn transform_array_arg(arg_name: &str) -> JniArgResult {
     let arg_name = quote::Ident::new(arg_name);
     let stmt =
         quote! {
-            let #arg_name = Vec::from_java(&env, #arg_name);
+            let #arg_name = jni_unwrap!(Vec::from_java(&env, #arg_name));
         };
 
     // call arg value(s)
@@ -287,7 +287,7 @@ pub fn generate_jni_function(
         jni_fn_inputs.push(transform_jni_arg(&arg));
     }
 
-    if callbacks.len() > 0 {
+    if !callbacks.is_empty() {
         let cb_base_name = if callbacks.len() > 1 {
             format!("call_{}", native_name_str)
         } else {
@@ -367,22 +367,24 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
         .peekable();
 
     while let Some(arg) = args_iter.next() {
-        let (arg_name, arg_ty) = transform_arg(&arg);
+        let (arg_name, arg_ty) = transform_arg(arg);
 
         jni_cb_inputs.push(quote! { #arg_name: #arg_ty });
         args.push(quote! { #arg_name.into() });
 
-        if is_array_arg(&arg, args_iter.peek().cloned()) {
+        if is_array_arg(arg, args_iter.peek().cloned()) {
             // Handle array arguments
             let val_java_type = rust_ty_to_signature(&arg.ty, context).unwrap();
             arg_java_ty.push(JavaType::Array(Box::new(val_java_type)));
 
             if let Some(len_arg) = args_iter.next() {
-                let (len_arg_name, len_arg_ty) = transform_arg(&len_arg);
+                let (len_arg_name, len_arg_ty) = transform_arg(len_arg);
                 jni_cb_inputs.push(quote! { #len_arg_name: #len_arg_ty });
 
                 stmts.push(quote! {
-                    let #arg_name = slice::from_raw_parts(#arg_name, #len_arg_name).to_java(&env);
+                    let #arg_name = jni_unwrap!(
+                        slice::from_raw_parts(#arg_name, #len_arg_name).to_java(&env)
+                    );
                 });
             } else {
                 // error: no length arg?
@@ -401,20 +403,21 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
                         // Strings
                         "c_char" => {
                             quote! {
-                                let #arg_name: JObject = #arg_name.to_java(&env).into();
+                                let #arg_name: JObject = jni_unwrap!(#arg_name.to_java(&env))
+                                    .into();
                             }
                         }
                         // Other ptrs
                         _ => {
                             quote! {
-                            let #arg_name = (*#arg_name).to_java(&env);
+                            let #arg_name = jni_unwrap!((*#arg_name).to_java(&env));
                         }
                         }
                     }
                 }
                 _ => {
                     quote! {
-                        let #arg_name = #arg_name.to_java(&env);
+                        let #arg_name = jni_unwrap!(#arg_name.to_java(&env));
                     }
                 }
             };
@@ -469,12 +472,12 @@ fn generate_multi_jni_callback(
                 if let Some(cb) = cbs[#callback_index].take() {
                     #(#stmts);*
 
-                    env.call_method(
+                    jni_unwrap!(env.call_method(
                         cb.as_obj(),
                         "call",
                         #arg_ty_str,
                         &[ #(#args),* ],
-                    ).unwrap();
+                    ));
                 }
 
                 if cbs.iter().any(|cb| cb.is_some()) {
@@ -509,12 +512,12 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_name: &str, context: &mut Co
 
                 #(#stmts);*
 
-                env.call_method(
+                jni_unwrap!(env.call_method(
                     cb.as_obj(),
                     "call",
                     #arg_ty_str,
                     &[ #(#args),* ],
-                ).unwrap();
+                ));
             }
         }
     };
@@ -551,26 +554,26 @@ fn generate_struct_to_java(
                         quote! {
                             let arr = env.new_byte_array(
                                 self.#len_field_ident as jni::sys::jsize
-                            ).unwrap();
+                            )?;
                             let slice = unsafe {
                                 slice::from_raw_parts(
                                     self.#field_name as *const i8,
                                     self.#len_field_ident
                                 )
                             };
-                            env.set_byte_array_region(arr, 0, slice).unwrap();
+                            env.set_byte_array_region(arr, 0, slice)?;
                             env.set_field(
                                 output,
                                 #java_field_name,
                                 "[B",
                                 JObject::from(arr).into()
-                            ).unwrap();
+                            )?;
                             env.set_field(
                                 output,
                                 #len_field,
                                 "J",
-                                self.#len_field_ident.to_java(&env).into()
-                            ).unwrap();
+                                self.#len_field_ident.to_java(&env)?.into()
+                            )?;
                         }
                     } else {
                         // Struct array
@@ -579,7 +582,7 @@ fn generate_struct_to_java(
                                 self.#len_field_ident as jni::sys::jsize,
                                 #ty_str,
                                 JObject::null()
-                            ).unwrap();
+                            )?;
                             let items = unsafe {
                                 slice::from_raw_parts(self.#field_name, self.#len_field_ident)
                             };
@@ -587,21 +590,21 @@ fn generate_struct_to_java(
                                 env.set_object_array_element(
                                     arr,
                                     idx as jni::sys::jsize,
-                                    item.to_java(env)
-                                ).unwrap();
+                                    item.to_java(env)?
+                                )?;
                             }
                             env.set_field(
                                 output,
                                 #java_field_name,
                                 "[Ljava/lang/Object;",
                                 JObject::from(arr).into()
-                            ).unwrap();
+                            )?;
                             env.set_field(
                                 output,
                                 #len_field,
                                 "J",
-                                self.#len_field_ident.to_java(&env).into()
-                            ).unwrap();
+                                self.#len_field_ident.to_java(&env)?.into()
+                            )?;
                         }
                     }
                 } else {
@@ -611,13 +614,13 @@ fn generate_struct_to_java(
             StructField::String(ref _f) => {
                 quote! {
                     if !self.#field_name.is_null() {
-                        let #field_name: JObject = self.#field_name.to_java(&env).into();
+                        let #field_name: JObject = self.#field_name.to_java(&env)?.into();
                         env.set_field(
                             output,
                             #java_field_name,
                             "Ljava/lang/String;",
                             #field_name.into()
-                        ).unwrap();
+                        )?;
                     }
                 }
             }
@@ -627,8 +630,8 @@ fn generate_struct_to_java(
                         output,
                         #field_name_str,
                         "Ljava/lang/Object;",
-                        self.#field_name.to_java(&env).into()
-                    ).unwrap();
+                        self.#field_name.to_java(&env)?.into()
+                    )?;
                 }
             }
             StructField::LenField(ref _f) => {
@@ -658,8 +661,8 @@ fn generate_struct_to_java(
                                     output,
                                     #java_field_name,
                                     #signature,
-                                    self.#field_name.to_java(&env).into()
-                                ).unwrap();
+                                    self.#field_name.to_java(&env)?.into()
+                                )?;
                             }
                         } else {
                             quote!{
@@ -667,8 +670,8 @@ fn generate_struct_to_java(
                                     output,
                                     #java_field_name,
                                     "Ljava/lang/Object;",
-                                    self.#field_name.to_java(&env).into()
-                                ).unwrap();
+                                    self.#field_name.to_java(&env)?.into()
+                                )?;
                             }
                         }
                     }
@@ -684,10 +687,10 @@ fn generate_struct_to_java(
 
     quote! {
         impl<'a> ToJava<'a, JObject<'a>> for #struct_ident {
-            fn to_java(&self, env: &'a JNIEnv) -> JObject<'a> {
-                let output = env.new_object(#fully_qualified_name, "()V", &[]).unwrap();
+            fn to_java(&self, env: &'a JNIEnv) -> Result<JObject<'a>, JniError> {
+                let output = env.new_object(#fully_qualified_name, "()V", &[])?;
                 #(#stmts)*
-                output
+                Ok(output)
             }
         }
     }
@@ -745,8 +748,8 @@ fn generate_struct_from_java(
                                 input,
                                 #field_name_str,
                                 "[Ljava/lang/Object;"
-                            ).unwrap().l().unwrap().into_inner() as jni::sys::jbyteArray;
-                            let mut vec = env.convert_byte_array(arr).unwrap();
+                            )?.l()?.into_inner() as jni::sys::jbyteArray;
+                            let mut vec = env.convert_byte_array(arr)?;
                             let #len_field = vec.len();
                             #cap
                             let #field_name = vec.#ptr_mutability();
@@ -761,8 +764,8 @@ fn generate_struct_from_java(
                                 input,
                                 #field_name_str,
                                 "[Ljava/lang/Object;"
-                            ).unwrap().l().unwrap().into_inner() as jni::sys::jarray;
-                            let #len_field = env.get_array_length(arr).unwrap() as usize;
+                            )?.l()?.into_inner() as jni::sys::jarray;
+                            let #len_field = env.get_array_length(arr)? as usize;
 
                             let mut vec = Vec::with_capacity(#len_field);
 
@@ -771,7 +774,7 @@ fn generate_struct_from_java(
                                     arr,
                                     idx as jni::sys::jsize
                                 );
-                                let item = #ty::from_java(&env, item.unwrap());
+                                let item = #ty::from_java(&env, item?)?;
                                 vec.push(item);
                             }
 
@@ -793,8 +796,8 @@ fn generate_struct_from_java(
                         input,
                         #field_name_str,
                         "Ljava/lang/Object;"
-                    ).unwrap().l().unwrap();
-                    let #field_name = #ty::from_java(&env, #field_name);
+                    )?.l()?;
+                    let #field_name = #ty::from_java(&env, #field_name)?;
                 }
             }
             StructField::LenField(ref _f) => {
@@ -803,12 +806,10 @@ fn generate_struct_from_java(
             }
             StructField::String(ref _f) => {
                 quote! {
-                    let #field_name = env.get_field(input, #field_name_str, "Ljava/lang/String;")
-                        .unwrap()
-                        .l()
-                        .unwrap()
+                    let #field_name = env.get_field(input, #field_name_str, "Ljava/lang/String;")?
+                        .l()?
                         .into();
-                    let #field_name = <*mut _>::from_java(env, #field_name);
+                    let #field_name = <*mut _>::from_java(env, #field_name)?;
                 }
             }
             StructField::Primitive(ref f) => {
@@ -850,7 +851,7 @@ fn generate_struct_from_java(
                                     input,
                                     #java_field_name,
                                     #signature
-                                ).unwrap().#unwrap_method.unwrap() as #rust_ty;
+                                )?.#unwrap_method? as #rust_ty;
                             }
                         } else {
                             quote!{
@@ -858,8 +859,8 @@ fn generate_struct_from_java(
                                     input,
                                     #java_field_name,
                                     "Ljava/lang/Object;"
-                                ).unwrap().l().unwrap();
-                                let #field_name = #rust_ty::from_java(&env, #field_name);
+                                )?.l()?;
+                                let #field_name = #rust_ty::from_java(&env, #field_name)?;
                             }
                         }
                     }
@@ -873,12 +874,12 @@ fn generate_struct_from_java(
 
     quote! {
         impl<'a> FromJava<JObject<'a>> for #struct_ident {
-            fn from_java(env: &JNIEnv, input: JObject) -> Self {
+            fn from_java(env: &JNIEnv, input: JObject) -> Result<Self, JniError> {
                 #(#conversions)*
 
-                #struct_ident {
+                Ok(#struct_ident {
                     #(#fields_values),*
-                }
+                })
             }
         }
     }

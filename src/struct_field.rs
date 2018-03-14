@@ -20,10 +20,10 @@ pub enum StructField {
 impl StructField {
     pub fn struct_field(&self) -> &ast::StructField {
         match *self {
-            StructField::Primitive(ref f) => f,
-            StructField::Array { field: ref f, .. } => f,
-            StructField::StructPtr { field: ref f, .. } => f,
-            StructField::String(ref f) => f,
+            StructField::Primitive(ref f) |
+            StructField::Array { field: ref f, .. } |
+            StructField::StructPtr { field: ref f, .. } |
+            StructField::String(ref f) |
             StructField::LenField(ref f) => f,
         }
     }

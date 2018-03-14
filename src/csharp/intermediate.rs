@@ -146,12 +146,10 @@ pub fn transform_function(decl: &ast::FnDecl) -> Option<Function> {
     loop {
         let one = if let Some(param) = carry.take() {
             Some(param)
+        } else if let Some(arg) = iter.next() {
+            Some(try_opt!(transform_function_param(arg)))
         } else {
-            if let Some(arg) = iter.next() {
-                Some(try_opt!(transform_function_param(arg)))
-            } else {
-                None
-            }
+            None
         };
 
         let two = if let Some(arg) = iter.next() {
@@ -303,7 +301,7 @@ fn transform_const_value(expr: &ast::Expr) -> Option<ConstValue> {
 fn transform_const_literal(lit: &ast::Lit) -> Option<ConstValue> {
     let result = match lit.node {
         ast::LitKind::Bool(value) => ConstValue::Bool(value),
-        ast::LitKind::Byte(value) => ConstValue::Int(value as i64),
+        ast::LitKind::Byte(value) => ConstValue::Int(i64::from(value)),
         ast::LitKind::Char(value) => ConstValue::Char(value),
         ast::LitKind::Int(value, _) => ConstValue::Int(value as i64),
         ast::LitKind::Float(ref value, _) |
@@ -362,7 +360,7 @@ fn transform_array(ty: &ast::Ty, size: &ast::Expr) -> Option<Type> {
     };
 
     let ty = match transform_type(ty) {
-        None => return None,
+        None |
         Some(Type::Array { .. }) => return None, // multi-dimensional array not supported yet
         Some(ty) => ty,
     };

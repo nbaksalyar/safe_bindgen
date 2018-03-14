@@ -263,10 +263,10 @@ impl LangCSharp {
                 // Otherwise, check it one of its fields is native, and if it is,
                 // mark the struct as native and reprocess the whole thing again,
                 // to detect structs with newly identified native fields.
-                if snippet.item.fields.iter().any(|field| {
+                let has_native_fields = snippet.item.fields.iter().any(|field| {
                     field.ty.is_dynamic_array() || self.context.is_native_type(&field.ty)
-                })
-                {
+                });
+                if has_native_fields {
                     let _ = self.context.native_types.insert(snippet.name.clone());
                     run = true;
                 }
@@ -283,6 +283,12 @@ impl LangCSharp {
 
     fn is_interface_function(&self, name: &str, item: &Function) -> bool {
         !self.wrapper_function_blacklist.contains(name) && num_callbacks(&item.inputs) <= 1
+    }
+}
+
+impl Default for LangCSharp {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -453,7 +459,7 @@ impl Lang for LangCSharp {
                 return Err(unsupported_generics_error(item, "extern functions"));
             }
 
-            let function = transform_function(&fn_decl).ok_or_else(|| {
+            let function = transform_function(fn_decl).ok_or_else(|| {
                 let string =
                     pprust::fun_to_string(fn_decl, unsafety, constness.node, item.ident, generics);
 
@@ -720,9 +726,7 @@ fn resolve_alias(aliases: &HashMap<String, Type>, new_ty: &mut Type) {
                 return;
             }
         }
-        Type::Pointer(ref mut ty) => {
-            resolve_alias(aliases, ty);
-        }
+        Type::Pointer(ref mut ty) |
         Type::Array(ref mut ty, _) => {
             resolve_alias(aliases, ty);
         }

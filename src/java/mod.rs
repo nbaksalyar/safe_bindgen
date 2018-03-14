@@ -6,6 +6,7 @@ use Level;
 use common::{self, Outputs, append_output, check_no_mangle, is_array_arg, is_result_arg,
              is_user_data_arg, parse_attr, retrieve_docstring};
 use inflector::Inflector;
+use rustfmt;
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use struct_field::{StructField, transform_struct_fields};
@@ -13,7 +14,6 @@ use syntax::abi::Abi;
 use syntax::ast;
 use syntax::codemap;
 use syntax::print::pprust;
-
 mod jni;
 
 pub struct LangJava {
@@ -60,8 +60,40 @@ impl LangJava {
     pub fn set_model_namespace<T: Into<String>>(&mut self, namespace: T) {
         self.context.namespace_model = namespace.into();
     }
-}
 
+    /// Applies rustfmt to JNI code to improve debuggability
+    fn format_jni_output(&self, input: &mut String) {
+        let mut output: Vec<u8> = Vec::with_capacity(input.len() * 2);
+
+        let mut cfg = rustfmt::config::Config::default();
+        cfg.set().write_mode(rustfmt::config::WriteMode::Plain);
+
+        unwrap!(rustfmt::format_input(
+            rustfmt::Input::Text(input.clone()),
+            &cfg,
+            Some(&mut output),
+        ));
+
+        *input = String::from_utf8(output).expect("Invalid Rustfmt output found");
+    }
+
+    /// Adds package info to the NativeBindings Java module and indents lines
+    fn format_native_functions(&self, funcs: &mut String) {
+        // Indent lines
+        let lines = funcs.lines().fold(String::new(), |mut output, line| {
+            output.push_str(&format!("\t{}\n", line));
+            output
+        });
+        *funcs = format!(
+            "package {namespace};\n\n
+                         public class NativeBindings {{\n
+                         {lines}\n
+                         }}",
+            namespace = self.context.namespace,
+            lines = lines
+        );
+    }
+}
 impl common::Lang for LangJava {
     /// Convert a Rust function declaration into Java.
     fn parse_fn(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
@@ -145,13 +177,13 @@ impl common::Lang for LangJava {
 
                 let fields = transform_struct_fields(variants.fields());
 
-                for field in fields.iter() {
+                for field in &fields {
                     let name = field.name().to_camel_case();
                     let struct_field = field.struct_field();
                     let mut ty = rust_to_java(&*struct_field.ty, &self.context)?
                         .unwrap_or_default();
 
-                    if let &StructField::Array { .. } = field {
+                    if let StructField::Array { .. } = *field {
                         // Detect array ptrs: skip the length args and add array to the type sig
                         ty.push_str("[]");
                     }
@@ -216,21 +248,22 @@ impl common::Lang for LangJava {
     }
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
+        match outputs.get_mut(&PathBuf::from("jni.rs")) {
+            Some(input) => {
+                self.format_jni_output(input);
+            }
+            None => {
+                return Err(Error {
+                    level: Level::Error,
+                    span: None,
+                    message: "no jni bindings generated?".to_owned(),
+                })
+            }
+        }
+
         match outputs.get_mut(&PathBuf::from("NativeBindings.java")) {
-            Some(funcs) => {
-                // Indent lines
-                let lines = funcs.lines().fold(String::new(), |mut s, line| {
-                    s.push_str(&format!("\t{}\n", line));
-                    return s;
-                });
-                *funcs = format!(
-                    "package {namespace};\n\n
-                         public class NativeBindings {{\n
-                         {lines}\n
-                         }}",
-                    namespace = self.context.namespace,
-                    lines = lines
-                );
+            Some(input) => {
+                self.format_native_functions(input);
                 Ok(())
             }
             None => Err(Error {
@@ -273,7 +306,7 @@ pub fn callback_name(inputs: &[ast::Arg], context: &Context) -> Result<String, E
             .map(struct_to_java_classname)
             .unwrap_or_default();
 
-        if is_array_arg(&arg, inputs.peek().cloned()) {
+        if is_array_arg(arg, inputs.peek().cloned()) {
             inputs.next();
             arg_type.push_str("ArrayLen");
         }
@@ -310,7 +343,7 @@ pub fn transform_native_fn(
         // Generate function arguments
         let mut java_type = rust_to_java(&arg.ty, context)?.unwrap_or_default();
 
-        if is_array_arg(&arg, fn_args.peek().cloned()) {
+        if is_array_arg(arg, fn_args.peek().cloned()) {
             // This is an array, so add it to the type description
             java_type.push_str("[]");
 
@@ -326,7 +359,7 @@ pub fn transform_native_fn(
             let cb_class = callback_name(&*bare_fn.decl.inputs, context)?;
             let cb_file = PathBuf::from(format!("{}.java", cb_class));
 
-            if let None = outputs.get(&cb_file) {
+            if outputs.get(&cb_file).is_none() {
                 eprintln!("Generating CB {}", cb_class);
 
                 let cb_output = transform_callback(&*arg.ty, &cb_class, context)?
@@ -441,7 +474,7 @@ fn callback_to_java(
         let arg_name = pprust::pat_to_string(&*arg.pat);
         let mut java_type = try_some!(rust_to_java(&*arg.ty, context));
 
-        if is_array_arg(&arg, args_iter.peek().cloned()) {
+        if is_array_arg(arg, args_iter.peek().cloned()) {
             // Detect array ptrs: skip the length args and add array to the type sig
             java_type.push_str("[]");
             args_iter.next();
@@ -548,7 +581,7 @@ fn anon_rust_to_java(
     }
 }
 
-/// Convert a Rust path type (my_mod::MyType) to a C type.
+/// Convert a Rust path type (`my_mod::MyType`) to a Java type.
 ///
 /// Types hidden behind modules are almost certainly custom types (which wouldn't work) except
 /// types in `libc` which we special case.
@@ -608,15 +641,10 @@ fn libc_ty_to_java(ty: &str) -> &str {
         "c_void" => "void",
         "c_float" => "float",
         "c_double" => "double",
-        "c_char" => "byte",
-        "c_schar" => "byte",
-        "c_uchar" => "byte",
-        "c_short" => "short",
-        "c_ushort" => "short",
-        "c_int" => "int",
-        "c_uint" => "int",
-        "c_long" => "long",
-        "c_ulong" => "long",
+        "c_char" | "c_schar" | "c_uchar" => "byte",
+        "c_short" | "c_ushort" => "short",
+        "c_int" | "c_uint" => "int",
+        "c_long" | "c_ulong" => "long",
         // All other types should map over to C or explicitly defined mapping.
         ty => ty,
     }
@@ -628,17 +656,12 @@ fn libc_ty_to_java(ty: &str) -> &str {
 fn osraw_ty_to_java(ty: &str) -> &str {
     match ty {
         "c_void" => "void",
-        "c_char" => "byte",
         "c_double" => "double",
         "c_float" => "float",
-        "c_int" => "int",
-        "c_long" => "long",
-        "c_schar" => "byte",
-        "c_short" => "short",
-        "c_uchar" => "byte",
-        "c_uint" => "int",
-        "c_ulong" => "long",
-        "c_ushort" => "short",
+        "c_char" | "c_schar" | "c_uchar" => "byte",
+        "c_int" | "c_uint" => "int",
+        "c_long" | "c_ulong" => "long",
+        "c_short" | "c_ushort" => "short",
         // All other types should map as-is
         ty => ty,
     }
@@ -657,8 +680,7 @@ fn rust_ty_to_java<'a>(ty: &'a str, context: &Context, use_type_map: bool) -> &'
         "u8" | "i8" => "byte",
         "u16" | "i16" => "short",
         "u32" | "i32" => "int",
-        "u64" | "i64" => "long",
-        "usize" | "isize" => "long",
+        "u64" | "i64" | "usize" | "isize" => "long",
         ty if use_type_map => {
             if let Some(mapping) = context.type_map.get(ty) {
                 mapping
