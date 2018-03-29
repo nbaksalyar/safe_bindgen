@@ -68,6 +68,28 @@ fn fully_qualified(ty: &str, context: &Context) -> String {
     format!("{}/{}", context.namespace_model.replace(".", "/"), ty)
 }
 
+// Converts a Rust type into a Java type signature
+fn path_to_signature(ty: &str, context: &Context) -> Option<JavaType> {
+    match ty {
+        "c_byte" | "u8" | "i8" => Some(JavaType::Primitive(signature::Primitive::Byte)),
+        "c_short" | "u16" | "i16" => Some(JavaType::Primitive(signature::Primitive::Short)),
+        "c_int" | "u32" | "i32" => Some(JavaType::Primitive(signature::Primitive::Int)),
+        "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some(JavaType::Primitive(
+            signature::Primitive::Long,
+        )),
+        "c_bool" | "bool" => Some(JavaType::Object(From::from("java/lang/Boolean"))),
+        _ => {
+            if let Some(mapped) = context.type_map.get(ty) {
+                java_ty_to_signature(mapped).or_else(|| {
+                    Some(JavaType::Object(fully_qualified(ty, context)))
+                })
+            } else {
+                Some(JavaType::Object(fully_qualified(ty, context)))
+            }
+        }
+    }
+}
+
 fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
     match ty.node {
         // Callback
@@ -79,27 +101,7 @@ fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
                 "already checked that there were at least two elements",
             );
             let ty: &str = &ty.identifier.name.as_str();
-
-            match ty {
-                "c_byte" | "u8" | "i8" => Some(JavaType::Primitive(signature::Primitive::Byte)),
-                "c_short" | "u16" | "i16" => Some(JavaType::Primitive(signature::Primitive::Short)),
-                "c_int" | "u32" | "i32" => Some(JavaType::Primitive(signature::Primitive::Int)),
-                "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some(
-                    JavaType::Primitive(
-                        signature::Primitive::Long,
-                    ),
-                ),
-                "c_bool" | "bool" => Some(JavaType::Object(From::from("java/lang/Boolean"))),
-                _ => {
-                    if let Some(mapped) = context.type_map.get(ty) {
-                        java_ty_to_signature(mapped).or_else(|| {
-                            Some(JavaType::Object(fully_qualified(ty, context)))
-                        })
-                    } else {
-                        Some(JavaType::Object(fully_qualified(ty, context)))
-                    }
-                }
-            }
+            path_to_signature(ty, context)
         }
 
         // Standard pointers.
@@ -645,17 +647,10 @@ fn generate_struct_to_java(
                             "already checked that there were at least two elements",
                         );
                         let ty: &str = &ty.identifier.name.as_str();
-
-                        let conv = match ty {
-                            "c_byte" | "i8" | "u8" => Some("B"),
-                            "c_short" | "u16" | "i16" => Some("S"),
-                            "c_int" | "u32" | "i32" => Some("I"),
-                            "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some("J"),
-                            "c_bool" | "bool" => Some("Z"),
-                            _ => None,
-                        };
+                        let conv = path_to_signature(ty, context);
 
                         if let Some(signature) = conv {
+                            let signature = format!("{}", signature);
                             quote! {
                                 env.set_field(
                                     output,
