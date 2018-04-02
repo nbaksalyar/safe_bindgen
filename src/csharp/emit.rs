@@ -324,7 +324,9 @@ pub fn emit_wrapper_struct(
             emit_copy_to_utility_name(writer, context, ty, "List");
             emit!(writer, "(native.{0}Ptr, (int) native.{0}Len);\n", name);
         } else if context.is_native_type(&field.ty) {
-            emit!(writer, "new {0}(native.{0});\n", name)
+            emit!(writer, "new ");
+            emit_type(writer, context, &field.ty, Mode::WrapperStruct);
+            emit!(writer, "(native.{0});\n", name);
         } else {
             emit!(writer, "native.{};\n", name)
         }

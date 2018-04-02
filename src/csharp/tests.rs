@@ -109,7 +109,7 @@ fn native_structs() {
 
         #[repr(C)]
         pub struct Wrapper {
-            entry: Entry,
+            wrapped: Entry,
         }
 
         #[no_mangle]
@@ -189,24 +189,24 @@ fn native_structs() {
 
            [PublicAPI]
            public struct Wrapper {
-             public Entry Entry;
+             public Entry Wrapped;
 
              internal Wrapper(WrapperNative native) {
-               Entry = new Entry(native.Entry);
+               Wrapped = new Entry(native.Wrapped);
              }
 
              internal WrapperNative ToNative() {
                return new WrapperNative() {
-                 Entry = Entry.ToNative()
+                 Wrapped = Wrapped.ToNative()
                };
              }
            }
 
            internal struct WrapperNative {
-             public EntryNative Entry;
+             public EntryNative Wrapped;
 
              internal void Free() {
-               Entry.Free();
+               Wrapped.Free();
              }
            }
 
@@ -1174,7 +1174,6 @@ fn interface() {
     let expected = indoc!(
         "using System;
          using System.Collections.Generic;
-         using System.Runtime.InteropServices;
          using System.Threading.Tasks;
 
          namespace Backend {
