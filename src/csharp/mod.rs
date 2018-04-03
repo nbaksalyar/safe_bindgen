@@ -566,7 +566,6 @@ impl Lang for LangCSharp {
 
                 emit!(writer, "using System;\n");
                 emit!(writer, "using System.Collections.Generic;\n");
-                emit!(writer, "using System.Runtime.InteropServices;\n");
                 emit!(writer, "using System.Threading.Tasks;\n\n");
                 emit!(
                     writer,

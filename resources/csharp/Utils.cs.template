@@ -49,26 +49,28 @@ namespace @Namespace {
       return PrepareTask<bool>();
     }
 
-    public static void CompleteTask<T>(TaskCompletionSource<T> tcs, FfiResult result, T arg) {
+    public static void CompleteTask<T>(TaskCompletionSource<T> tcs, FfiResult result, Func<T> argFunc) {
       if (result.ErrorCode != 0) {
         tcs.SetException(result.ToException());
       } else {
-        tcs.SetResult(arg);
+        tcs.SetResult(argFunc());
       }
     }
 
-    public static void CompleteTask<T>(IntPtr userData, FfiResult result, T arg) {
+    public static void CompleteTask<T>(IntPtr userData, FfiResult result, Func<T> argFunc) {
       var tcs = FromHandlePtr<TaskCompletionSource<T>>(userData);
-      CompleteTask(tcs, result, arg);
+      CompleteTask(tcs, result, argFunc);
     }
 
     public static void CompleteTask(IntPtr userData, FfiResult result) {
-      CompleteTask(userData, result, true);
+      CompleteTask(userData, result, () => true);
     }
 
     public static byte[] CopyToByteArray(IntPtr ptr, int len) {
       var array = new byte[len];
-      Marshal.Copy(ptr, array, 0, len);
+      if (len > 0) {
+        Marshal.Copy(ptr, array, 0, len);
+      }
       return array;
     }
 
@@ -78,7 +80,7 @@ namespace @Namespace {
 
     public static List<T> CopyToObjectList<T>(IntPtr ptr, int len) {
       var list = new List<T>(len);
-      for (int i = 0; i < len; ++i) {
+      for (var i = 0; i < len; ++i) {
         list.Add(Marshal.PtrToStructure<T>(IntPtr.Add(ptr, Marshal.SizeOf<T>() * i)));
       }
 
@@ -105,7 +107,7 @@ namespace @Namespace {
 
       var size = Marshal.SizeOf(list[0]) * list.Count;
       var ptr  = Marshal.AllocHGlobal(size);
-      for (int i = 0; i < list.Count; ++i) {
+      for (var i = 0; i < list.Count; ++i) {
           Marshal.StructureToPtr(list[i], IntPtr.Add(ptr, Marshal.SizeOf<T>() * i), false);
       }
 
