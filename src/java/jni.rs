@@ -852,12 +852,7 @@ fn generate_struct_from_java(
                         } else {
                             let obj_sig = format!("{}", lookup_object_type(ty, context));
                             quote!{
-                                let #field_name = env.get_field(
-                                    input,
-                                    #java_field_name,
-                                    #obj_sig
-                                )?.l()?;
-                                let #field_name = #rust_ty::from_java(&env, #field_name)?;
+                                let #field_name = #rust_ty::from_java(&env, env.get_field(input, #java_field_name, #obj_sig)?.l()?)?;
                             }
                         }
                     }
