@@ -68,6 +68,18 @@ fn fully_qualified(ty: &str, context: &Context) -> String {
     format!("{}/{}", context.namespace_model.replace(".", "/"), ty)
 }
 
+// Checks whether the type string is defined in the type map and if it is
+// then returns the correct Object signature. Otherwise, uses the default `Ljava/lang/Object;`.
+fn lookup_object_type(ty: &str, context: &Context) -> JavaType {
+    if let Some(mapped) = context.type_map.get(ty) {
+        java_ty_to_signature(mapped).unwrap_or_else(|| {
+            JavaType::Object(fully_qualified(ty, context))
+        })
+    } else {
+        JavaType::Object(fully_qualified(ty, context))
+    }
+}
+
 // Converts a Rust type into a Java type signature
 fn path_to_signature(ty: &str, context: &Context) -> Option<JavaType> {
     match ty {
@@ -77,16 +89,8 @@ fn path_to_signature(ty: &str, context: &Context) -> Option<JavaType> {
         "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some(JavaType::Primitive(
             signature::Primitive::Long,
         )),
-        "c_bool" | "bool" => Some(JavaType::Object(From::from("java/lang/Boolean"))),
-        _ => {
-            if let Some(mapped) = context.type_map.get(ty) {
-                java_ty_to_signature(mapped).or_else(|| {
-                    Some(JavaType::Object(fully_qualified(ty, context)))
-                })
-            } else {
-                Some(JavaType::Object(fully_qualified(ty, context)))
-            }
-        }
+        "c_bool" | "bool" => Some(JavaType::Primitive(signature::Primitive::Boolean)),
+        _ => Some(lookup_object_type(ty, context)),
     }
 }
 
@@ -837,10 +841,7 @@ fn generate_struct_from_java(
                             _ => None,
                         };
 
-                        if let Some(conv) = conv {
-                            let signature = conv.0;
-                            let unwrap_method = conv.1;
-
+                        if let Some((signature, unwrap_method)) = conv {
                             quote! {
                                 let #field_name = env.get_field(
                                     input,
@@ -849,11 +850,12 @@ fn generate_struct_from_java(
                                 )?.#unwrap_method? as #rust_ty;
                             }
                         } else {
+                            let obj_sig = format!("{}", lookup_object_type(ty, context));
                             quote!{
                                 let #field_name = env.get_field(
                                     input,
                                     #java_field_name,
-                                    "Ljava/lang/Object;"
+                                    #obj_sig
                                 )?.l()?;
                                 let #field_name = #rust_ty::from_java(&env, #field_name)?;
                             }
