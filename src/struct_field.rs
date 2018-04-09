@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use syntax::{ast, symbol};
 use syntax::print::pprust;
 
+#[derive(Debug)]
 pub enum StructField {
     Primitive(ast::StructField),
     Array {

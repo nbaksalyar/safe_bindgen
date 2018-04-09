@@ -167,13 +167,7 @@ impl common::Lang for LangJava {
             }
 
             if variants.is_struct() {
-                let mut constructor_fields = Vec::new();
-                let mut constructor_assignments = Vec::new();
-
                 buffer.push_str(" {\n");
-
-                // Default constructor
-                buffer.push_str(&format!("\tpublic {name}() {{ }}\n", name = name));
 
                 let fields = transform_struct_fields(variants.fields());
 
@@ -203,19 +197,21 @@ impl common::Lang for LangJava {
                         name = name,
                         capitalized = name.to_class_case(),
                     ));
-
-                    constructor_fields.push(format!("{} {}", ty, name));
-                    constructor_assignments.push(format!("\t\tthis.{name} = {name};", name = name));
                 }
 
+                // Default constructor that should initialise object fields
+                buffer.push_str(&generate_default_constructor(
+                    &name,
+                    &fields,
+                    &self.context,
+                )?);
+
                 // Parametrised constructor
-                buffer.push_str(&format!(
-                    "\tpublic {name}({constructor_fields}) {{\n{constructor_assignments}\n}}\n",
-                    name = name,
-                    constructor_fields = constructor_fields.join(", "),
-                    constructor_assignments =
-                        constructor_assignments.join("\n")
-                ));
+                buffer.push_str(&generate_parametrised_constructor(
+                    &name,
+                    &fields,
+                    &self.context,
+                )?);
 
                 buffer.push_str("}");
 
@@ -273,6 +269,80 @@ impl common::Lang for LangJava {
             }),
         }
     }
+}
+
+/// Generates code for the default constructor initialising class fields with
+/// default values
+fn generate_default_constructor(
+    class_name: &str,
+    fields: &[StructField],
+    context: &Context,
+) -> Result<String, Error> {
+    let mut default_obj_fields = Vec::new();
+
+    for field in fields {
+        let name = field.name().to_camel_case();
+        let struct_field = field.struct_field();
+        let mut ty = rust_to_java(&*struct_field.ty, context)?
+            .unwrap_or_default();
+
+        // Initialise object and array fields with default values to prevent them from being null
+        match *field {
+            StructField::Array { .. } => {
+                default_obj_fields.push(format!(
+                    "\t\tthis.{name} = new {ty} {{}};",
+                    name = name,
+                    ty = ty
+                ));
+            }
+            StructField::StructPtr { .. } => {
+                default_obj_fields.push(format!(
+                    "\t\tthis.{name} = new {ty}();",
+                    name = name,
+                    ty = ty
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(format!(
+        "\tpublic {name}() {{\n{default_obj_fields}\n}}\n",
+        name = class_name,
+        default_obj_fields = default_obj_fields.join("\n")
+    ))
+}
+
+/// Generates code for the parametrised constructor (which is taking arguments to
+/// initialise default values)
+fn generate_parametrised_constructor(
+    class_name: &str,
+    fields: &[StructField],
+    context: &Context,
+) -> Result<String, Error> {
+    let mut constructor_fields = Vec::new();
+    let mut constructor_assignments = Vec::new();
+
+    for field in fields {
+        let name = field.name().to_camel_case();
+        let struct_field = field.struct_field();
+        let mut ty = rust_to_java(&*struct_field.ty, context)?
+            .unwrap_or_default();
+
+        if let StructField::Array { .. } = *field {
+            // Detect array ptrs: skip the length args and add array to the type sig
+            ty.push_str("[]");
+        }
+
+        constructor_fields.push(format!("{} {}", ty, name));
+        constructor_assignments.push(format!("\t\tthis.{name} = {name};", name = name));
+    }
+
+    Ok(format!(
+        "\tpublic {name}({constructor_fields}) {{\n{constructor_assignments}\n}}\n",
+        name = class_name,
+        constructor_fields = constructor_fields.join(", "),
+        constructor_assignments = constructor_assignments.join("\n")
+    ))
 }
 
 /// Transform a struct name into a Java class name
