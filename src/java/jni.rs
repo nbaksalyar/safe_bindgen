@@ -1,9 +1,10 @@
 //! Functions to generate JNI bindings
 
+use super::{Context, Outputs};
+use super::types::callback_name;
 use common::{append_output, is_array_arg, is_user_data_arg};
 use inflector::Inflector;
-use java::{Context, Outputs, callback_name};
-use jni::signature::{self, JavaType, TypeSignature};
+use jni::signature::{self, JavaType, Primitive, TypeSignature};
 use quote;
 use struct_field::StructField;
 use syntax::ast;
@@ -53,16 +54,6 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
     }
 }
 
-fn java_ty_to_signature(s: &str) -> Option<JavaType> {
-    match s {
-        "long" => Some(JavaType::Primitive(signature::Primitive::Long)),
-        "byte[]" => Some(JavaType::Array(
-            Box::new(JavaType::Primitive(signature::Primitive::Byte)),
-        )),
-        _ => None,
-    }
-}
-
 // Produces a fully qualified class name (i.e. with a Java package)
 fn fully_qualified(ty: &str, context: &Context) -> String {
     format!("{}/{}", context.namespace_model.replace(".", "/"), ty)
@@ -72,9 +63,7 @@ fn fully_qualified(ty: &str, context: &Context) -> String {
 // then returns the correct Object signature. Otherwise, uses the default `Ljava/lang/Object;`.
 fn lookup_object_type(ty: &str, context: &Context) -> JavaType {
     if let Some(mapped) = context.type_map.get(ty) {
-        java_ty_to_signature(mapped).unwrap_or_else(|| {
-            JavaType::Object(fully_qualified(ty, context))
-        })
+        (*mapped).clone()
     } else {
         JavaType::Object(fully_qualified(ty, context))
     }
@@ -83,13 +72,13 @@ fn lookup_object_type(ty: &str, context: &Context) -> JavaType {
 // Converts a Rust type into a Java type signature
 fn path_to_signature(ty: &str, context: &Context) -> Option<JavaType> {
     match ty {
-        "c_byte" | "u8" | "i8" => Some(JavaType::Primitive(signature::Primitive::Byte)),
-        "c_short" | "u16" | "i16" => Some(JavaType::Primitive(signature::Primitive::Short)),
-        "c_int" | "u32" | "i32" => Some(JavaType::Primitive(signature::Primitive::Int)),
+        "c_byte" | "u8" | "i8" => Some(JavaType::Primitive(Primitive::Byte)),
+        "c_short" | "u16" | "i16" => Some(JavaType::Primitive(Primitive::Short)),
+        "c_int" | "u32" | "i32" => Some(JavaType::Primitive(Primitive::Int)),
         "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some(JavaType::Primitive(
-            signature::Primitive::Long,
+            Primitive::Long,
         )),
-        "c_bool" | "bool" => Some(JavaType::Primitive(signature::Primitive::Boolean)),
+        "c_bool" | "bool" => Some(JavaType::Primitive(Primitive::Boolean)),
         _ => Some(lookup_object_type(ty, context)),
     }
 }
@@ -822,7 +811,7 @@ fn generate_struct_from_java(
                         if let Some(rewrite_ty) = context.type_map.get(ty) {
                             // Rewrite type (it could be e.g. a handle)
                             ty = match *rewrite_ty {
-                                "long" => "u64",
+                                JavaType::Primitive(Primitive::Long) => "u64",
                                 _ => ty,
                             };
                         }
@@ -852,7 +841,9 @@ fn generate_struct_from_java(
                         } else {
                             let obj_sig = format!("{}", lookup_object_type(ty, context));
                             quote!{
-                                let #field_name = #rust_ty::from_java(&env, env.get_field(input, #java_field_name, #obj_sig)?.l()?)?;
+                                let #field_name = env.get_field(input, #java_field_name, #obj_sig)?
+                                    .l()?;
+                                let #field_name = #rust_ty::from_java(&env, #field_name)?;
                             }
                         }
                     }

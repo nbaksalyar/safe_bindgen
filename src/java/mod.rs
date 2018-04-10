@@ -1,11 +1,15 @@
-//! Functions for converting Rust types to Java types.
+//! Functions for generating Java glue code.
 
+mod jni;
+mod types;
 
 use Error;
 use Level;
-use common::{self, Outputs, append_output, check_no_mangle, is_array_arg, is_result_arg,
-             is_user_data_arg, parse_attr, retrieve_docstring};
+use common::{self, Outputs, append_output, check_no_mangle, is_array_arg, is_user_data_arg,
+             parse_attr, retrieve_docstring};
 use inflector::Inflector;
+use java::types::{callback_name, java_type_to_str, rust_to_java, struct_to_java_classname};
+use jni::signature::JavaType;
 use rustfmt;
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -14,7 +18,6 @@ use syntax::abi::Abi;
 use syntax::ast;
 use syntax::codemap;
 use syntax::print::pprust;
-mod jni;
 
 pub struct LangJava {
     context: Context,
@@ -28,13 +31,13 @@ pub struct Context {
     /// Model namespace (structures go into this one)
     namespace_model: String,
     /// Maps types from Rust to Java
-    type_map: HashMap<&'static str, &'static str>,
+    type_map: HashMap<&'static str, JavaType>,
     /// Keeps track of which JNI callback functions has been generated already
     generated_jni_cbs: BTreeSet<String>,
 }
 
 impl LangJava {
-    pub fn new(type_map: HashMap<&'static str, &'static str>) -> Self {
+    pub fn new(type_map: HashMap<&'static str, JavaType>) -> Self {
         LangJava {
             context: Context {
                 type_map,
@@ -171,33 +174,9 @@ impl common::Lang for LangJava {
 
                 let fields = transform_struct_fields(variants.fields());
 
-                for field in &fields {
-                    let name = field.name().to_camel_case();
-                    let struct_field = field.struct_field();
-                    let mut ty = rust_to_java(&*struct_field.ty, &self.context)?
-                        .unwrap_or_default();
-
-                    if let StructField::Array { .. } = *field {
-                        // Detect array ptrs: skip the length args and add array to the type sig
-                        ty.push_str("[]");
-                    }
-
-                    buffer.push_str(&format!("\tprivate {} {};\n\n", ty, name));
-
-                    buffer.push_str(&format!(
-                        "\tpublic {ty} get{capitalized}() {{\n\t\treturn {name};\n\t}}\n\n",
-                        ty = ty,
-                        name = name,
-                        capitalized = name.to_class_case(),
-                    ));
-                    buffer.push_str(&format!(
-                        "\tpublic void set{capitalized}(final {ty} val) {{\n\t\t{name} \
-                         = val;\n\t}}\n\n",
-                        ty = ty,
-                        name = name,
-                        capitalized = name.to_class_case(),
-                    ));
-                }
+                // Class fields
+                buffer.push_str(&generate_class_fields(&fields, &self.context)?);
+                buffer.push_str("\n");
 
                 // Default constructor that should initialise object fields
                 buffer.push_str(&generate_default_constructor(
@@ -213,6 +192,8 @@ impl common::Lang for LangJava {
                     &self.context,
                 )?);
 
+                // Getters & setters
+                buffer.push_str(&generate_getters_setters(&fields, &self.context)?);
                 buffer.push_str("}");
 
                 let jni = jni::generate_struct(&fields, &orig_name, &name, &self.context);
@@ -271,6 +252,50 @@ impl common::Lang for LangJava {
     }
 }
 
+/// Generates getters and setters for a struct transformed into a Java class
+fn generate_getters_setters(fields: &[StructField], context: &Context) -> Result<String, Error> {
+    let mut buffer = String::new();
+
+    for field in fields {
+        let name = field.name().to_camel_case();
+        let struct_field = field.struct_field();
+        let ty = rust_to_java(&*struct_field.ty, &context)?;
+        let ty = java_type_to_str(&ty)?;
+
+        buffer.push_str(&format!(
+                        "\tpublic {ty} get{capitalized}() {{\n\t\treturn {name};\n\t}}\n\n",
+                        ty = ty,
+                        name = name,
+                        capitalized = name.to_class_case(),
+                    ));
+        buffer.push_str(&format!(
+                        "\tpublic void set{capitalized}(final {ty} val) {{\n\t\t{name} \
+                         = val;\n\t}}\n\n",
+                        ty = ty,
+                        name = name,
+                        capitalized = name.to_class_case(),
+                    ));
+    }
+
+    Ok(buffer)
+}
+
+/// Generates fields for a struct transformed into a Java class
+fn generate_class_fields(fields: &[StructField], context: &Context) -> Result<String, Error> {
+    let mut buffer = String::new();
+
+    for field in fields {
+        let name = field.name().to_camel_case();
+        let struct_field = field.struct_field();
+        let ty = rust_to_java(&*struct_field.ty, &context)?;
+        let ty = java_type_to_str(&ty)?;
+
+        buffer.push_str(&format!("\tprivate {} {};\n", ty, name));
+    }
+
+    Ok(buffer)
+}
+
 /// Generates code for the default constructor initialising class fields with
 /// default values
 fn generate_default_constructor(
@@ -283,30 +308,30 @@ fn generate_default_constructor(
     for field in fields {
         let name = field.name().to_camel_case();
         let struct_field = field.struct_field();
-        let mut ty = rust_to_java(&*struct_field.ty, context)?
-            .unwrap_or_default();
+        let ty = rust_to_java(&*struct_field.ty, context)?;
+        let ty_str = java_type_to_str(&ty)?;
 
         // Initialise object and array fields with default values to prevent them from being null
-        match *field {
-            StructField::Array { .. } => {
+        match ty {
+            JavaType::Array(..) => {
                 default_obj_fields.push(format!(
                     "\t\tthis.{name} = new {ty} {{}};",
                     name = name,
-                    ty = ty
+                    ty = ty_str
                 ));
             }
-            StructField::StructPtr { .. } => {
+            JavaType::Object(obj) => {
                 default_obj_fields.push(format!(
-                    "\t\tthis.{name} = new {ty}();",
+                    "\t\tthis.{name} = new {obj}();",
                     name = name,
-                    ty = ty
+                    obj = obj
                 ));
             }
-            _ => {}
+            _ => (),
         }
     }
     Ok(format!(
-        "\tpublic {name}() {{\n{default_obj_fields}\n}}\n",
+        "\tpublic {name}() {{\n{default_obj_fields}\n\t}}\n",
         name = class_name,
         default_obj_fields = default_obj_fields.join("\n")
     ))
@@ -325,70 +350,19 @@ fn generate_parametrised_constructor(
     for field in fields {
         let name = field.name().to_camel_case();
         let struct_field = field.struct_field();
-        let mut ty = rust_to_java(&*struct_field.ty, context)?
-            .unwrap_or_default();
-
-        if let StructField::Array { .. } = *field {
-            // Detect array ptrs: skip the length args and add array to the type sig
-            ty.push_str("[]");
-        }
+        let ty = rust_to_java(&*struct_field.ty, context)?;
+        let ty = java_type_to_str(&ty)?;
 
         constructor_fields.push(format!("{} {}", ty, name));
         constructor_assignments.push(format!("\t\tthis.{name} = {name};", name = name));
     }
 
     Ok(format!(
-        "\tpublic {name}({constructor_fields}) {{\n{constructor_assignments}\n}}\n",
+        "\tpublic {name}({constructor_fields}) {{\n{constructor_assignments}\n\t}}\n",
         name = class_name,
         constructor_fields = constructor_fields.join(", "),
         constructor_assignments = constructor_assignments.join("\n")
     ))
-}
-
-/// Transform a struct name into a Java class name
-pub fn struct_to_java_classname<S: AsRef<str>>(s: S) -> String {
-    // s.as_ref().to_class_case()
-    let mut c = s.as_ref().chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-    }
-}
-
-/// Get the Java interface name for the callback based on its types
-pub fn callback_name(inputs: &[ast::Arg], context: &Context) -> Result<String, Error> {
-    let mut components = Vec::new();
-    let mut inputs = inputs.iter().peekable();
-
-    while let Some(arg) = inputs.next() {
-        if is_user_data_arg(arg) {
-            // Skip user_data args
-            continue;
-        }
-        if is_result_arg(arg) {
-            // Make sure that a CB taking a single "result: *const FfiResult" param
-            // won't end up being called "CallbackVoid" (but "CallbackResult" instead)
-            components.push(From::from("Result"));
-            continue;
-        }
-
-        let mut arg_type = rust_ty_to_java_class_name(&*arg.ty, context)?
-            .map(struct_to_java_classname)
-            .unwrap_or_default();
-
-        if is_array_arg(arg, inputs.peek().cloned()) {
-            inputs.next();
-            arg_type.push_str("ArrayLen");
-        }
-
-        components.push(arg_type);
-    }
-
-    if components.is_empty() {
-        Ok(From::from("CallbackVoid"))
-    } else {
-        Ok(format!("Callback{}", components.join("")))
-    }
 }
 
 /// Transform a Rust FFI function into a Java native function
@@ -411,12 +385,10 @@ pub fn transform_native_fn(
         let arg_name = pprust::pat_to_string(&*arg.pat);
 
         // Generate function arguments
-        let mut java_type = rust_to_java(&arg.ty, context)?.unwrap_or_default();
+        let mut java_type = rust_to_java(&arg.ty, context)?;
+        let java_type = java_type_to_str(&java_type)?;
 
         if is_array_arg(arg, fn_args.peek().cloned()) {
-            // This is an array, so add it to the type description
-            java_type.push_str("[]");
-
             // Skip the length args - e.g. for a case of `ptr: *const u8, ptr_len: usize`
             // we're going to skip the `len` part.
             fn_args.next();
@@ -432,8 +404,7 @@ pub fn transform_native_fn(
             if outputs.get(&cb_file).is_none() {
                 eprintln!("Generating CB {}", cb_class);
 
-                let cb_output = transform_callback(&*arg.ty, &cb_class, context)?
-                    .unwrap_or_default();
+                let cb_output = transform_callback(&*arg.ty, &cb_class, context)?;
                 let _ = outputs.insert(cb_file, cb_output);
 
                 // Generate JNI callback fn
@@ -459,7 +430,7 @@ pub fn transform_native_fn(
             });
         }
         ast::FunctionRetTy::Default(..) => String::from("public static native void"),
-        ast::FunctionRetTy::Ty(ref ty) => rust_to_java(&*ty, context)?.unwrap_or_default(),
+        ast::FunctionRetTy::Ty(ref ty) => java_type_to_str(&rust_to_java(&*ty, context)?)?,
     };
 
     let java_name = name.to_camel_case();
@@ -492,16 +463,16 @@ pub fn transform_callback<S: AsRef<str>>(
     ty: &ast::Ty,
     class_name: S,
     context: &Context,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
     match ty.node {
-        ast::TyKind::BareFn(ref bare_fn) => Ok(Some(format!(
+        ast::TyKind::BareFn(ref bare_fn) => Ok(format!(
             "package {namespace};\n\n\
              public interface {name} {{\n\
              \tpublic void call({types});\n}}\n",
             namespace = context.namespace_model,
             name = class_name.as_ref(),
-            types = try_some!(callback_to_java(bare_fn, ty.span, context)),
-        ))),
+            types = callback_to_java(bare_fn, ty.span, context)?,
+        )),
         // All other types just have a name associated with them.
         _ => Err(Error {
             level: Level::Error,
@@ -516,18 +487,24 @@ fn callback_to_java(
     fn_ty: &ast::BareFnTy,
     fn_span: codemap::Span,
     context: &Context,
-) -> Result<Option<String>, Error> {
+) -> Result<String, Error> {
     match fn_ty.abi {
         // If it doesn't have a C ABI it can't be called from C.
         Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
-        _ => return Ok(None),
+        _ => {
+            return Err(Error {
+                level: Level::Error,
+                span: Some(fn_span),
+                message: "callbacks that don't have C ABI are not supported".into(),
+            })
+        }
     }
 
     if !fn_ty.lifetimes.is_empty() {
         return Err(Error {
             level: Level::Error,
             span: Some(fn_span),
-            message: "cheddar can not handle lifetimes".into(),
+            message: "can not handle lifetimes".into(),
         });
     }
 
@@ -542,224 +519,18 @@ fn callback_to_java(
 
     while let Some(arg) = args_iter.next() {
         let arg_name = pprust::pat_to_string(&*arg.pat);
-        let mut java_type = try_some!(rust_to_java(&*arg.ty, context));
+        let java_type = rust_to_java(&*arg.ty, context)?;
+        let java_type = java_type_to_str(&java_type)?;
 
         if is_array_arg(arg, args_iter.peek().cloned()) {
             // Detect array ptrs: skip the length args and add array to the type sig
-            java_type.push_str("[]");
             args_iter.next();
         }
 
         args.push(format!("{} {}", java_type, arg_name.to_camel_case()));
     }
 
-    Ok(Some(args.join(", ")))
-}
-
-/// Converts a callback function argument into a Java interface name
-fn callback_arg_to_java(
-    fn_ty: &ast::BareFnTy,
-    fn_span: codemap::Span,
-    context: &Context,
-) -> Result<Option<String>, Error> {
-    match fn_ty.abi {
-        // If it doesn't have a C ABI it can't be called from C.
-        Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
-        _ => return Ok(None),
-    }
-
-    if !fn_ty.lifetimes.is_empty() {
-        return Err(Error {
-            level: Level::Error,
-            span: Some(fn_span),
-            message: "can not handle lifetimes".into(),
-        });
-    }
-
-    Ok(Some(callback_name(&*fn_ty.decl.inputs, context)?))
-}
-
-/// Turn a Rust type with an associated name or type into a C type.
-pub fn rust_to_java(ty: &ast::Ty, context: &Context) -> Result<Option<String>, Error> {
-    match ty.node {
-        // This is a callback ref taken as a function argument
-        ast::TyKind::BareFn(ref bare_fn) => callback_arg_to_java(bare_fn, ty.span, context),
-
-        // All other types just have a name associated with them.
-        _ => anon_rust_to_java(ty, context, true),
-    }
-}
-
-/// Turn a Rust type into a part of the Java class name.
-/// Handles the size types in a special way because Rust has to distinguish
-/// between usize and u64, that's required for JNI bindings to work properly.
-fn rust_ty_to_java_class_name(ty: &ast::Ty, context: &Context) -> Result<Option<String>, Error> {
-    match ty.node {
-        ast::TyKind::Path(None, ref path) => {
-            let primitive_type: &str = &path.segments[0].identifier.name.as_str();
-            if primitive_type == "usize" || primitive_type == "isize" {
-                Ok(Some(From::from("size")))
-            } else {
-                path_to_java(path, context, false)
-            }
-        }
-        _ => anon_rust_to_java(ty, context, false),
-    }
-}
-
-/// Turn a Rust type into a Java type signature.
-fn anon_rust_to_java(
-    ty: &ast::Ty,
-    context: &Context,
-    use_type_map: bool,
-) -> Result<Option<String>, Error> {
-    match ty.node {
-        // Function pointers should not be in this function.
-        ast::TyKind::BareFn(..) => Err(Error {
-            level: Level::Error,
-            span: Some(ty.span),
-            message: "C function pointers must have a name or function declaration \
-                      associated with them"
-                .into(),
-        }),
-
-        // Standard pointers.
-        ast::TyKind::Ptr(ref ptr) => {
-            // Detect strings, which are *const c_char or *mut c_char
-            if pprust::ty_to_string(&ptr.ty) == "c_char" {
-                return Ok(Some("String".into()));
-            }
-            anon_rust_to_java(&ptr.ty, context, use_type_map)
-        }
-
-        // Plain old types.
-        ast::TyKind::Path(None, ref path) => path_to_java(path, context, use_type_map),
-
-        // Possibly void, likely not.
-        _ => {
-            let new_type = pprust::ty_to_string(ty);
-            if new_type == "()" {
-                Ok(Some("void".into()))
-            } else {
-                Err(Error {
-                    level: Level::Error,
-                    span: Some(ty.span),
-                    message: format!("cheddar can not handle the type `{}`", new_type),
-                })
-            }
-        }
-    }
-}
-
-/// Convert a Rust path type (`my_mod::MyType`) to a Java type.
-///
-/// Types hidden behind modules are almost certainly custom types (which wouldn't work) except
-/// types in `libc` which we special case.
-fn path_to_java(
-    path: &ast::Path,
-    context: &Context,
-    use_type_map: bool,
-) -> Result<Option<String>, Error> {
-    // I don't think this is possible.
-    if path.segments.is_empty() {
-        Err(Error {
-            level: Level::Bug,
-            span: Some(path.span),
-            message: "what the fuck have you done to this type?!".into(),
-        })
-    // Types in modules, `my_mod::MyType`.
-    } else if path.segments.len() > 1 {
-        let (ty, module) = path.segments.split_last().expect(
-            "already checked that there were at least two elements",
-        );
-        let ty: &str = &ty.identifier.name.as_str();
-        let mut segments = Vec::with_capacity(module.len());
-        for segment in module {
-            segments.push(String::from(&*segment.identifier.name.as_str()));
-        }
-        let module = segments.join("::");
-        match &*module {
-            "libc" => Ok(Some(libc_ty_to_java(ty).into())),
-            "std::os::raw" => Ok(Some(osraw_ty_to_java(ty).into())),
-            _ => Err(Error {
-                level: Level::Error,
-                span: Some(path.span),
-                message: "cheddar can not handle types in other modules \
-                          (except `libc` and `std::os::raw`)"
-                    .into(),
-            }),
-        }
-    } else {
-        let ty: &str = &path.segments[0].identifier.name.as_str();
-        let mapped = rust_ty_to_java(ty, context, use_type_map);
-
-        Ok(Some(if mapped == ty {
-            // Capitalise custom types, which are structs (most likely)
-            struct_to_java_classname(ty)
-        } else {
-            mapped.into()
-        }))
-    }
-}
-
-/// Convert a Rust type from `libc` into a C type.
-///
-/// Most map straight over but some have to be converted.
-fn libc_ty_to_java(ty: &str) -> &str {
-    match ty {
-        "c_bool" => "boolean",
-        "c_void" => "void",
-        "c_float" => "float",
-        "c_double" => "double",
-        "c_char" | "c_schar" | "c_uchar" => "byte",
-        "c_short" | "c_ushort" => "short",
-        "c_int" | "c_uint" => "int",
-        "c_long" | "c_ulong" => "long",
-        // All other types should map over to C or explicitly defined mapping.
-        ty => ty,
-    }
-}
-
-/// Convert a Rust type from `std::os::raw` into a C type.
-///
-/// These mostly mirror the libc crate.
-fn osraw_ty_to_java(ty: &str) -> &str {
-    match ty {
-        "c_void" => "void",
-        "c_double" => "double",
-        "c_float" => "float",
-        "c_char" | "c_schar" | "c_uchar" => "byte",
-        "c_int" | "c_uint" => "int",
-        "c_long" | "c_ulong" => "long",
-        "c_short" | "c_ushort" => "short",
-        // All other types should map as-is
-        ty => ty,
-    }
-}
-
-/// Convert any Rust type into C.
-///
-/// This includes user-defined types. We currently trust the user not to use types which we don't
-/// know the structure of (like String).
-fn rust_ty_to_java<'a>(ty: &'a str, context: &Context, use_type_map: bool) -> &'a str {
-    match ty {
-        "()" => "void",
-        "bool" => "boolean",
-        "f32" => "float",
-        "f64" => "double",
-        "u8" | "i8" => "byte",
-        "u16" | "i16" => "short",
-        "u32" | "i32" => "int",
-        "u64" | "i64" | "usize" | "isize" => "long",
-        ty if use_type_map => {
-            if let Some(mapping) = context.type_map.get(ty) {
-                mapping
-            } else {
-                libc_ty_to_java(ty)
-            }
-        }
-        ty => libc_ty_to_java(ty),
-    }
+    Ok(args.join(", "))
 }
 
 #[cfg(test)]
