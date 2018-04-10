@@ -218,8 +218,11 @@ fn path_to_java(
         }
         let module = segments.join("::");
         match &*module {
-            "libc" => Ok(libc_ty_to_java(ty).into()),
-            "std::os::raw" => Ok(libc_ty_to_java(ty).into()),
+            "std::os::raw" | "libc" => Ok(
+                rust_ty_to_java(ty)
+                    .unwrap_or_else(|| JavaType::Object(ty.to_string()))
+                    .into(),
+            ),
             _ => Err(Error {
                 level: Level::Error,
                 span: Some(path.span),
@@ -228,57 +231,39 @@ fn path_to_java(
         }
     } else {
         let ty: &str = &path.segments[0].identifier.name.as_str();
-        let mapped = rust_ty_to_java(ty, context, use_type_map);
-        /*
-        Ok(Some(if mapped == ty {
-            // Capitalise custom types, which are structs (most likely)
-            struct_to_java_classname(ty)
-        } else {
-            mapped.into()
-        }))
-         */
+        let mapped = rust_ty_to_java(ty).unwrap_or_else(|| {
+            if !use_type_map {
+                // Unknown type - most likely it's a structure, so convert it into an object
+                return JavaType::Object(struct_to_java_classname(ty));
+            }
+            if let Some(mapping) = context.type_map.get(ty) {
+                (*mapping).clone()
+            } else {
+                JavaType::Object(struct_to_java_classname(ty))
+            }
+        });
         Ok(mapped)
     }
 }
 
-/// Convert a Rust type from `libc` and `std::os::raw` into a Java type.
-/// Most map straight over but some have to be converted.
-fn libc_ty_to_java(ty: &str) -> JavaType {
-    match ty {
-        "c_bool" => JavaType::Primitive(Primitive::Boolean),
-        "c_void" => JavaType::Primitive(Primitive::Void),
-        "c_float" => JavaType::Primitive(Primitive::Float),
-        "c_double" => JavaType::Primitive(Primitive::Double),
-        "c_char" | "c_schar" | "c_uchar" => JavaType::Primitive(Primitive::Byte),
-        "c_short" | "c_ushort" => JavaType::Primitive(Primitive::Short),
-        "c_int" | "c_uint" => JavaType::Primitive(Primitive::Int),
-        "c_long" | "c_ulong" => JavaType::Primitive(Primitive::Long),
-        // All other types should map over to Java classes or explicitly defined mapping.
-        ty => JavaType::Object(ty.to_string()),
-    }
-}
-
-/// Convert any Rust type into Java.
+/// Convert any string representation of a Rust type into Java.
 ///
 /// This includes user-defined types. We currently trust the user not to use types which we don't
 /// know the structure of (like String).
-fn rust_ty_to_java<'a>(ty: &'a str, context: &Context, use_type_map: bool) -> JavaType {
+pub fn rust_ty_to_java<'a>(ty: &'a str) -> Option<JavaType> {
     match ty {
-        "()" => JavaType::Primitive(Primitive::Void), // "void",
-        "bool" => JavaType::Primitive(Primitive::Boolean), // "boolean",
-        "f32" => JavaType::Primitive(Primitive::Float), // "float",
-        "f64" => JavaType::Primitive(Primitive::Double), // "double",
-        "u8" | "i8" => JavaType::Primitive(Primitive::Byte), // "byte",
-        "u16" | "i16" => JavaType::Primitive(Primitive::Short), // "short",
-        "u32" | "i32" => JavaType::Primitive(Primitive::Int), // "int",
-        "u64" | "i64" | "usize" | "isize" => JavaType::Primitive(Primitive::Long), // "long",
-        ty if use_type_map => {
-            if let Some(mapping) = context.type_map.get(ty) {
-                (*mapping).clone()
-            } else {
-                libc_ty_to_java(ty)
-            }
-        }
-        ty => libc_ty_to_java(ty),
+        "c_void" | "()" => Some(JavaType::Primitive(Primitive::Void)), // "void",
+        "c_bool" | "bool" => Some(JavaType::Primitive(Primitive::Boolean)), // "boolean",
+        "c_float" | "f32" => Some(JavaType::Primitive(Primitive::Float)), // "float",
+        "c_double" | "f64" => Some(JavaType::Primitive(Primitive::Double)), // "double",
+        "c_char" | "c_schar" | "c_uchar" | "u8" | "i8" => Some(
+            JavaType::Primitive(Primitive::Byte),
+        ), // "byte",
+        "c_short" | "c_ushort" | "u16" | "i16" => Some(JavaType::Primitive(Primitive::Short)), // "short",
+        "c_int" | "c_uint" | "u32" | "i32" => Some(JavaType::Primitive(Primitive::Int)), // "int",
+        "c_long" | "c_ulong" | "u64" | "i64" | "usize" | "isize" => Some(JavaType::Primitive(
+            Primitive::Long,
+        )), // "long",
+        _ => None, // unknown type
     }
 }

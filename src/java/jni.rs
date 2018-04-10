@@ -1,7 +1,7 @@
 //! Functions to generate JNI bindings
 
 use super::{Context, Outputs};
-use super::types::callback_name;
+use super::types::{callback_name, rust_ty_to_java};
 use common::{append_output, is_array_arg, is_user_data_arg};
 use inflector::Inflector;
 use jni::signature::{self, JavaType, Primitive, TypeSignature};
@@ -69,20 +69,6 @@ fn lookup_object_type(ty: &str, context: &Context) -> JavaType {
     }
 }
 
-// Converts a Rust type into a Java type signature
-fn path_to_signature(ty: &str, context: &Context) -> Option<JavaType> {
-    match ty {
-        "c_byte" | "u8" | "i8" => Some(JavaType::Primitive(Primitive::Byte)),
-        "c_short" | "u16" | "i16" => Some(JavaType::Primitive(Primitive::Short)),
-        "c_int" | "u32" | "i32" => Some(JavaType::Primitive(Primitive::Int)),
-        "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some(JavaType::Primitive(
-            Primitive::Long,
-        )),
-        "c_bool" | "bool" => Some(JavaType::Primitive(Primitive::Boolean)),
-        _ => Some(lookup_object_type(ty, context)),
-    }
-}
-
 fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
     match ty.node {
         // Callback
@@ -94,7 +80,7 @@ fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
                 "already checked that there were at least two elements",
             );
             let ty: &str = &ty.identifier.name.as_str();
-            path_to_signature(ty, context)
+            rust_ty_to_java(ty).or_else(|| Some(lookup_object_type(ty, context)))
         }
 
         // Standard pointers.
@@ -640,27 +626,16 @@ fn generate_struct_to_java(
                             "already checked that there were at least two elements",
                         );
                         let ty: &str = &ty.identifier.name.as_str();
-                        let conv = path_to_signature(ty, context);
-
-                        if let Some(signature) = conv {
-                            let signature = format!("{}", signature);
-                            quote! {
-                                env.set_field(
-                                    output,
-                                    #java_field_name,
-                                    #signature,
-                                    self.#field_name.to_java(&env)?.into()
-                                )?;
-                            }
-                        } else {
-                            quote!{
-                                env.set_field(
-                                    output,
-                                    #java_field_name,
-                                    "Ljava/lang/Object;",
-                                    self.#field_name.to_java(&env)?.into()
-                                )?;
-                            }
+                        let conv =
+                            rust_ty_to_java(ty).unwrap_or_else(|| lookup_object_type(ty, context));
+                        let signature = format!("{}", conv);
+                        quote! {
+                            env.set_field(
+                                output,
+                                #java_field_name,
+                                #signature,
+                                self.#field_name.to_java(&env)?.into()
+                            )?;
                         }
                     }
                     _ => quote!{},
