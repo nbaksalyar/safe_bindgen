@@ -56,7 +56,10 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
 
 // Produces a fully qualified class name (i.e. with a Java package)
 fn fully_qualified(ty: &str, context: &Context) -> String {
-    format!("{}/{}", context.namespace_model.replace(".", "/"), ty)
+    match ty {
+        "String" => "java/lang/String".to_string(),
+        ty => format!("{}/{}", context.namespace_model.replace(".", "/"), ty),
+    }
 }
 
 // Checks whether the type string is defined in the type map and if it is

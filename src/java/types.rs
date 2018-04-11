@@ -165,7 +165,7 @@ fn anon_rust_to_java(
         ast::TyKind::Ptr(ref ptr) => {
             // Detect strings, which are *const c_char or *mut c_char
             if pprust::ty_to_string(&ptr.ty) == "c_char" {
-                return Ok(JavaType::Object("java/lang/String".into()));
+                return Ok(JavaType::Object("String".into()));
             }
             anon_rust_to_java(&ptr.ty, context, use_type_map)
         }
@@ -276,17 +276,15 @@ mod tests {
     #[test]
     fn java_types_to_string() {
         assert_eq!(
-            unwrap!(java_type_to_str(
-                &JavaType::Object("java/lang/String".to_string()),
-            )).as_str(),
+            unwrap!(java_type_to_str(&JavaType::Object("String".to_string()))).as_str(),
             "String"
         );
 
         assert_eq!(
             unwrap!(java_type_to_str(
-                &JavaType::Object("net/maidsafe/Test".to_string()),
+                &JavaType::Object("net.maidsafe.Test".to_string()),
             )).as_str(),
-            "net/maidsafe/Test"
+            "net.maidsafe.Test"
         );
 
         assert_eq!(
