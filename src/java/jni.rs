@@ -709,7 +709,7 @@ fn generate_struct_from_java(
                         quote! {
                             let arr = env.get_field(
                                 input,
-                                #field_name_str,
+                                #java_field_name,
                                 "[Ljava/lang/Object;"
                             )?.l()?.into_inner() as jni::sys::jbyteArray;
                             let mut vec = env.convert_byte_array(arr)?;
@@ -725,7 +725,7 @@ fn generate_struct_from_java(
                         quote! {
                             let arr = env.get_field(
                                 input,
-                                #field_name_str,
+                                #java_field_name,
                                 "[Ljava/lang/Object;"
                             )?.l()?.into_inner() as jni::sys::jarray;
                             let #len_field = env.get_array_length(arr)? as usize;
@@ -757,7 +757,7 @@ fn generate_struct_from_java(
                 quote! {
                     let #field_name = env.get_field(
                         input,
-                        #field_name_str,
+                        #java_field_name,
                         "Ljava/lang/Object;"
                     )?.l()?;
                     let #field_name = #ty::from_java(&env, #field_name)?;
@@ -769,7 +769,7 @@ fn generate_struct_from_java(
             }
             StructField::String(ref _f) => {
                 quote! {
-                    let #field_name = env.get_field(input, #field_name_str, "Ljava/lang/String;")?
+                    let #field_name = env.get_field(input, #java_field_name, "Ljava/lang/String;")?
                         .l()?
                         .into();
                     let #field_name = <*mut _>::from_java(env, #field_name)?;
