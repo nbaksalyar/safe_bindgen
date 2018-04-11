@@ -386,14 +386,15 @@ pub fn transform_native_fn(
 
         // Generate function arguments
         let mut java_type = rust_to_java(&arg.ty, context)?;
-        let java_type = java_type_to_str(&java_type)?;
 
         if is_array_arg(arg, fn_args.peek().cloned()) {
             // Skip the length args - e.g. for a case of `ptr: *const u8, ptr_len: usize`
             // we're going to skip the `len` part.
+            java_type = JavaType::Array(Box::new(java_type));
             fn_args.next();
         }
 
+        let java_type = java_type_to_str(&java_type)?;
         args_str.push(format!("{} {}", java_type, arg_name.to_camel_case()));
 
         // Generate a callback class - if it wasn't generated already
@@ -519,14 +520,15 @@ fn callback_to_java(
 
     while let Some(arg) = args_iter.next() {
         let arg_name = pprust::pat_to_string(&*arg.pat);
-        let java_type = rust_to_java(&*arg.ty, context)?;
-        let java_type = java_type_to_str(&java_type)?;
+        let mut java_type = rust_to_java(&*arg.ty, context)?;
 
         if is_array_arg(arg, args_iter.peek().cloned()) {
             // Detect array ptrs: skip the length args and add array to the type sig
+            java_type = JavaType::Array(Box::new(java_type));
             args_iter.next();
         }
 
+        let java_type = java_type_to_str(&java_type)?;
         args.push(format!("{} {}", java_type, arg_name.to_camel_case()));
     }
 
