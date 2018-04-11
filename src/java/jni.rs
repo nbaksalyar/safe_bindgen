@@ -446,7 +446,7 @@ fn generate_multi_jni_callback(
             unsafe {
                 let env = JVM.as_ref()
                     .map(|vm| vm.attach_current_thread_as_daemon().unwrap())
-                    .unwrap();
+                    .expect("no JVM reference found");
 
                 let mut cbs = Box::from_raw(ctx as *mut [Option<GlobalRef>; #callbacks_count]);
 
@@ -488,7 +488,7 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_name: &str, context: &mut Co
             unsafe {
                 let env = JVM.as_ref()
                     .map(|vm| vm.attach_current_thread_as_daemon().unwrap())
-                    .unwrap();
+                    .expect("no JVM reference found");
                 let cb = convert_cb_from_java(&env, ctx);
 
                 #(#stmts);*
@@ -553,7 +553,7 @@ fn generate_struct_to_java(
                                 output,
                                 #len_field,
                                 "J",
-                                self.#len_field_ident.to_java(&env)?.into()
+                                self.#len_field_ident.to_java(env)?.into()
                             )?;
                         }
                     } else {
@@ -584,7 +584,7 @@ fn generate_struct_to_java(
                                 output,
                                 #len_field,
                                 "J",
-                                self.#len_field_ident.to_java(&env)?.into()
+                                self.#len_field_ident.to_java(env)?.into()
                             )?;
                         }
                     }
@@ -595,7 +595,7 @@ fn generate_struct_to_java(
             StructField::String(ref _f) => {
                 quote! {
                     if !self.#field_name.is_null() {
-                        let #field_name: JObject = self.#field_name.to_java(&env)?.into();
+                        let #field_name: JObject = self.#field_name.to_java(env)?.into();
                         env.set_field(
                             output,
                             #java_field_name,
@@ -611,7 +611,7 @@ fn generate_struct_to_java(
                         output,
                         #field_name_str,
                         "Ljava/lang/Object;",
-                        self.#field_name.to_java(&env)?.into()
+                        self.#field_name.to_java(env)?.into()
                     )?;
                 }
             }
@@ -634,7 +634,7 @@ fn generate_struct_to_java(
                                 output,
                                 #java_field_name,
                                 #signature,
-                                self.#field_name.to_java(&env)?.into()
+                                self.#field_name.to_java(env)?.into()
                             )?;
                         }
                     }
@@ -737,7 +737,7 @@ fn generate_struct_from_java(
                                     arr,
                                     idx as jni::sys::jsize
                                 );
-                                let item = #ty::from_java(&env, item?)?;
+                                let item = #ty::from_java(env, item?)?;
                                 vec.push(item);
                             }
 
@@ -760,7 +760,7 @@ fn generate_struct_from_java(
                         #java_field_name,
                         "Ljava/lang/Object;"
                     )?.l()?;
-                    let #field_name = #ty::from_java(&env, #field_name)?;
+                    let #field_name = #ty::from_java(env, #field_name)?;
                 }
             }
             StructField::LenField(ref _f) => {
@@ -818,7 +818,7 @@ fn generate_struct_from_java(
                             quote!{
                                 let #field_name = env.get_field(input, #java_field_name, #obj_sig)?
                                     .l()?;
-                                let #field_name = #rust_ty::from_java(&env, #field_name)?;
+                                let #field_name = #rust_ty::from_java(env, #field_name)?;
                             }
                         }
                     }
