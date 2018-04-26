@@ -451,8 +451,28 @@ pub fn transform_native_fn(
 
     append_output(buffer, "NativeBindings.java", outputs);
 
+    // Append the function declaration to import it as an "extern fn"
+    let fn_decl_import = pprust::fun_to_string(
+        &fn_decl,
+        ast::Unsafety::Normal,
+        ast::Constness::NotConst,
+        ast::Ident::from_str(name),
+        &ast::Generics::default(),
+    );
     let mut jni =
-        jni::generate_jni_function(fn_decl.inputs.clone(), name, &java_name, context, outputs);
+        format!(
+            "\n#[link(name = \"safe_app\")]\nextern {{ {fndecl}; }}\n",
+            fndecl = fn_decl_import,
+        );
+
+    // Generate the JNI part of the interface
+    jni.push_str(&jni::generate_jni_function(
+        fn_decl.inputs.clone(),
+        name,
+        &java_name,
+        context,
+        outputs,
+    ));
     jni.push_str("\n");
     append_output(jni, "jni.rs", outputs);
 
