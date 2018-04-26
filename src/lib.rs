@@ -59,14 +59,6 @@ use std::io::{Read, Write};
 use std::io::Error as IoError;
 use std::path::{self, Path};
 
-/// Unwraps Result<Option<..>> if it is Ok(Some(..)) else returns.
-macro_rules! try_some {
-    ($expr:expr) => {{ match $expr {
-        Ok(Some(val)) => val,
-        expr => return expr,
-    }}};
-}
-
 mod common;
 // mod lang_c;
 mod csharp;

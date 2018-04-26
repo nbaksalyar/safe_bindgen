@@ -37,7 +37,7 @@ syntex_syntax = {version = "~0.58.1", optional = true}
 toml = "~0.3.2"
 clap = "~2.25.1"
 Inflector = "~0.11.1"
-jni = "~0.9.3"
+jni = "~0.10.1"
 quote = "~0.3.15"
 rustfmt = "~0.10.0"
 unwrap = "~1.1.0"
