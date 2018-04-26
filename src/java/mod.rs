@@ -269,7 +269,7 @@ fn generate_getters_setters(fields: &[StructField], context: &Context) -> Result
                         capitalized = name.to_class_case(),
                     ));
         buffer.push_str(&format!(
-                        "\tpublic void set{capitalized}(final {ty} val) {{\n\t\t{name} \
+                        "\tpublic void set{capitalized}(final {ty} val) {{\n\t\tthis.{name} \
                          = val;\n\t}}\n\n",
                         ty = ty,
                         name = name,
