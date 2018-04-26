@@ -126,7 +126,8 @@ fn main() {
             type_map.insert("Authenticator", JavaType::Primitive(Primitive::Long));
 
             let mut java = LangJava::new(type_map);
-            java.set_namespace(format!("net.maidsafe.{}", "safe_app")); // lib
+            java.set_namespace(format!("net.maidsafe.{}", lib));
+            java.set_model_namespace(format!("net.maidsafe.{}", lib));
             java.set_lib_name(lib);
             bindgen.run_build(&mut java, &output_dir);
         }

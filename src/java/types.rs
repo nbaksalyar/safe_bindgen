@@ -163,8 +163,9 @@ fn anon_rust_to_java(
 
         // Standard pointers.
         ast::TyKind::Ptr(ref ptr) => {
+            let ty_str = pprust::ty_to_string(&ptr.ty);
             // Detect strings, which are *const c_char or *mut c_char
-            if pprust::ty_to_string(&ptr.ty) == "c_char" {
+            if ty_str == "c_char" {
                 return Ok(JavaType::Object("String".into()));
             }
             anon_rust_to_java(&ptr.ty, context, use_type_map)
@@ -272,6 +273,37 @@ pub fn rust_ty_to_java<'a>(ty: &'a str) -> Option<JavaType> {
 mod tests {
     use super::*;
     use jni::signature::{JavaType, Primitive};
+    use syntax::ast::*;
+    use syntax::codemap::DUMMY_SP;
+    use syntax::ptr::P;
+
+    #[test]
+    fn test_rust_to_java() {
+        let context = Context::default();
+
+        assert_eq!(
+            // Check `*const c_char` is correctly converted into `String`
+            unwrap!(rust_to_java(
+                &Ty {
+                    id: DUMMY_NODE_ID,
+                    span: DUMMY_SP,
+                    node: TyKind::Ptr(MutTy {
+                        mutbl: Mutability::Immutable,
+                        ty: P(Ty {
+                            id: DUMMY_NODE_ID,
+                            span: DUMMY_SP,
+                            node: TyKind::Path(
+                                None,
+                                Path::from_ident(DUMMY_SP, Ident::from_str("c_char")),
+                            ),
+                        }),
+                    }),
+                },
+                &context,
+            )),
+            JavaType::Object("String".to_string())
+        );
+    }
 
     #[test]
     fn java_types_to_string() {

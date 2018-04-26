@@ -36,6 +36,18 @@ pub struct Context {
     generated_jni_cbs: BTreeSet<String>,
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Self {
+            lib_name: "safe".to_string(),
+            namespace: "net.maidsafe.dummy".to_string(),
+            namespace_model: "net.maidsafe.dummy".to_string(),
+            type_map: Default::default(),
+            generated_jni_cbs: Default::default(),
+        }
+    }
+}
+
 impl LangJava {
     pub fn new(type_map: HashMap<&'static str, JavaType>) -> Self {
         LangJava {
@@ -170,33 +182,26 @@ impl common::Lang for LangJava {
             }
 
             if variants.is_struct() {
+                let struct_fields = transform_struct_fields(variants.fields());
+                let fields = transform_struct_into_class_fields(&struct_fields, &self.context)?;
+
                 buffer.push_str(" {\n");
 
-                let fields = transform_struct_fields(variants.fields());
-
                 // Class fields
-                buffer.push_str(&generate_class_fields(&fields, &self.context)?);
+                buffer.push_str(&generate_class_fields(&fields)?);
                 buffer.push_str("\n");
 
                 // Default constructor that should initialise object fields
-                buffer.push_str(&generate_default_constructor(
-                    &name,
-                    &fields,
-                    &self.context,
-                )?);
+                buffer.push_str(&generate_default_constructor(&name, &fields)?);
 
                 // Parametrised constructor
-                buffer.push_str(&generate_parametrised_constructor(
-                    &name,
-                    &fields,
-                    &self.context,
-                )?);
+                buffer.push_str(&generate_parametrised_constructor(&name, &fields)?);
 
                 // Getters & setters
-                buffer.push_str(&generate_getters_setters(&fields, &self.context)?);
+                buffer.push_str(&generate_getters_setters(&fields)?);
                 buffer.push_str("}");
 
-                let jni = jni::generate_struct(&fields, &orig_name, &name, &self.context);
+                let jni = jni::generate_struct(&struct_fields, &orig_name, &name, &self.context);
                 append_output(jni, "jni.rs", outputs);
             } else if variants.is_tuple() && variants.fields().len() == 1 {
                 // #[repr(C)] pub struct Foo(Bar);  =>  typedef struct Foo Foo;
@@ -252,28 +257,54 @@ impl common::Lang for LangJava {
     }
 }
 
-/// Generates getters and setters for a struct transformed into a Java class
-fn generate_getters_setters(fields: &[StructField], context: &Context) -> Result<String, Error> {
-    let mut buffer = String::new();
+/// Contains all information necessary to construct a Java class
+/// field, transformed from `StructField`.
+struct JavaClassField {
+    name: String,
+    ty: JavaType,
+    ty_str: String,
+}
+
+/// Transforms a list of struct fields into Java class fields
+fn transform_struct_into_class_fields(
+    fields: &[StructField],
+    context: &Context,
+) -> Result<Vec<JavaClassField>, Error> {
+    let mut class_fields = Vec::new();
 
     for field in fields {
         let name = field.name().to_camel_case();
-        let struct_field = field.struct_field();
-        let ty = rust_to_java(&*struct_field.ty, &context)?;
-        let ty = java_type_to_str(&ty)?;
+        let struct_field = field.struct_field().clone();
+        let mut ty = rust_to_java(&*struct_field.ty, context)?;
+        if let StructField::Array { .. } = *field {
+            // Wrap a type into an array
+            ty = JavaType::Array(Box::new(ty));
+        }
+        let ty_str = java_type_to_str(&ty)?;
 
+        class_fields.push(JavaClassField { name, ty, ty_str });
+    }
+
+    Ok(class_fields)
+}
+
+/// Generates getters and setters for a struct transformed into a Java class
+fn generate_getters_setters(fields: &[JavaClassField]) -> Result<String, Error> {
+    let mut buffer = String::new();
+
+    for field in fields {
         buffer.push_str(&format!(
                         "\tpublic {ty} get{capitalized}() {{\n\t\treturn {name};\n\t}}\n\n",
-                        ty = ty,
-                        name = name,
-                        capitalized = name.to_class_case(),
+                        ty = field.ty_str,
+                        name = field.name,
+                        capitalized = field.name.to_class_case(),
                     ));
         buffer.push_str(&format!(
                         "\tpublic void set{capitalized}(final {ty} val) {{\n\t\tthis.{name} \
                          = val;\n\t}}\n\n",
-                        ty = ty,
-                        name = name,
-                        capitalized = name.to_class_case(),
+                        ty = field.ty_str,
+                        name = field.name,
+                        capitalized = field.name.to_class_case(),
                     ));
     }
 
@@ -281,16 +312,11 @@ fn generate_getters_setters(fields: &[StructField], context: &Context) -> Result
 }
 
 /// Generates fields for a struct transformed into a Java class
-fn generate_class_fields(fields: &[StructField], context: &Context) -> Result<String, Error> {
+fn generate_class_fields(fields: &[JavaClassField]) -> Result<String, Error> {
     let mut buffer = String::new();
 
     for field in fields {
-        let name = field.name().to_camel_case();
-        let struct_field = field.struct_field();
-        let ty = rust_to_java(&*struct_field.ty, &context)?;
-        let ty = java_type_to_str(&ty)?;
-
-        buffer.push_str(&format!("\tprivate {} {};\n", ty, name));
+        buffer.push_str(&format!("\tprivate {} {};\n", field.ty_str, field.name));
     }
 
     Ok(buffer)
@@ -300,30 +326,24 @@ fn generate_class_fields(fields: &[StructField], context: &Context) -> Result<St
 /// default values
 fn generate_default_constructor(
     class_name: &str,
-    fields: &[StructField],
-    context: &Context,
+    fields: &[JavaClassField],
 ) -> Result<String, Error> {
     let mut default_obj_fields = Vec::new();
 
     for field in fields {
-        let name = field.name().to_camel_case();
-        let struct_field = field.struct_field();
-        let ty = rust_to_java(&*struct_field.ty, context)?;
-        let ty_str = java_type_to_str(&ty)?;
-
         // Initialise object and array fields with default values to prevent them from being null
-        match ty {
+        match field.ty {
             JavaType::Array(..) => {
                 default_obj_fields.push(format!(
                     "\t\tthis.{name} = new {ty} {{}};",
-                    name = name,
-                    ty = ty_str
+                    name = field.name,
+                    ty = field.ty_str
                 ));
             }
-            JavaType::Object(obj) => {
+            JavaType::Object(ref obj) => {
                 default_obj_fields.push(format!(
                     "\t\tthis.{name} = new {obj}();",
-                    name = name,
+                    name = field.name,
                     obj = obj
                 ));
             }
@@ -341,20 +361,14 @@ fn generate_default_constructor(
 /// initialise default values)
 fn generate_parametrised_constructor(
     class_name: &str,
-    fields: &[StructField],
-    context: &Context,
+    fields: &[JavaClassField],
 ) -> Result<String, Error> {
     let mut constructor_fields = Vec::new();
     let mut constructor_assignments = Vec::new();
 
     for field in fields {
-        let name = field.name().to_camel_case();
-        let struct_field = field.struct_field();
-        let ty = rust_to_java(&*struct_field.ty, context)?;
-        let ty = java_type_to_str(&ty)?;
-
-        constructor_fields.push(format!("{} {}", ty, name));
-        constructor_assignments.push(format!("\t\tthis.{name} = {name};", name = name));
+        constructor_fields.push(format!("{} {}", field.ty_str, field.name));
+        constructor_assignments.push(format!("\t\tthis.{name} = {name};", name = field.name));
     }
 
     Ok(format!(
