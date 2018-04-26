@@ -219,11 +219,9 @@ fn path_to_java(
         }
         let module = segments.join("::");
         match &*module {
-            "std::os::raw" | "libc" => Ok(
-                rust_ty_to_java(ty)
-                    .unwrap_or_else(|| JavaType::Object(ty.to_string()))
-                    .into(),
-            ),
+            "std::os::raw" | "libc" => Ok(rust_ty_to_java(ty).unwrap_or_else(
+                || JavaType::Object(ty.to_string()),
+            )),
             _ => Err(Error {
                 level: Level::Error,
                 span: Some(path.span),
@@ -251,7 +249,7 @@ fn path_to_java(
 ///
 /// This includes user-defined types. We currently trust the user not to use types which we don't
 /// know the structure of (like String).
-pub fn rust_ty_to_java<'a>(ty: &'a str) -> Option<JavaType> {
+pub fn rust_ty_to_java(ty: &str) -> Option<JavaType> {
     match ty {
         "c_void" | "()" => Some(JavaType::Primitive(Primitive::Void)), // "void",
         "c_bool" | "bool" => Some(JavaType::Primitive(Primitive::Boolean)), // "boolean",

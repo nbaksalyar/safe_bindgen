@@ -467,7 +467,7 @@ pub fn transform_native_fn(
 
     // Append the function declaration to import it as an "extern fn"
     let fn_decl_import = pprust::fun_to_string(
-        &fn_decl,
+        fn_decl,
         ast::Unsafety::Normal,
         ast::Constness::NotConst,
         ast::Ident::from_str(name),
