@@ -260,7 +260,8 @@ pub fn rust_ty_to_java<'a>(ty: &'a str) -> Option<JavaType> {
         "c_char" | "c_schar" | "c_uchar" | "u8" | "i8" => Some(
             JavaType::Primitive(Primitive::Byte),
         ), // "byte",
-        "c_short" | "c_ushort" | "u16" | "i16" => Some(JavaType::Primitive(Primitive::Short)), // "short",
+        "c_short" | "c_ushort" | "u16" | "i16" => Some(JavaType::Primitive(Primitive::Short)),
+        // "short",
         "c_int" | "c_uint" | "u32" | "i32" => Some(JavaType::Primitive(Primitive::Int)), // "int",
         "c_long" | "c_ulong" | "u64" | "i64" | "usize" | "isize" => Some(JavaType::Primitive(
             Primitive::Long,
