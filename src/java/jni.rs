@@ -713,7 +713,7 @@ fn generate_struct_from_java(
                             let arr = env.get_field(
                                 input,
                                 #java_field_name,
-                                "[Ljava/lang/Object;"
+                                "[B"
                             )?.l()?.into_inner() as jni::sys::jbyteArray;
                             let mut vec = env.convert_byte_array(arr)?;
                             let #len_field = vec.len();
