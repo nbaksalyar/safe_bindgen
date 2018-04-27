@@ -33,13 +33,14 @@ pub fn imported_mods(module: &ast::Mod) -> Vec<Vec<String>> {
     imported
 }
 
-/// The manager of moz-cheddar and entry point when the crate is the module.
+/// The manager of bindgen and entry point when the crate is the module.
 ///
 /// Iterates through all items in the module and dispatches to correct methods, then pulls all
 /// the results together into a header.
 pub fn parse_mod<L: Lang>(
     lang: &mut L,
     module: &ast::Mod,
+    module_path: &str,
     outputs: &mut Outputs,
 ) -> Result<(), Vec<Error>> {
     let mut errors = vec![];
@@ -52,11 +53,11 @@ pub fn parse_mod<L: Lang>(
 
         // Dispatch to correct method.
         let res = match item.node {
-            ast::ItemKind::Const(..) => lang.parse_const(item, outputs),
-            ast::ItemKind::Ty(..) => lang.parse_ty(item, outputs),
-            ast::ItemKind::Enum(..) => lang.parse_enum(item, outputs),
-            ast::ItemKind::Struct(..) => lang.parse_struct(item, outputs),
-            ast::ItemKind::Fn(..) => lang.parse_fn(item, outputs),
+            ast::ItemKind::Const(..) => lang.parse_const(item, module_path, outputs),
+            ast::ItemKind::Ty(..) => lang.parse_ty(item, module_path, outputs),
+            ast::ItemKind::Enum(..) => lang.parse_enum(item, module_path, outputs),
+            ast::ItemKind::Struct(..) => lang.parse_struct(item, module_path, outputs),
+            ast::ItemKind::Fn(..) => lang.parse_fn(item, module_path, outputs),
             _ => Ok(()),
         };
 

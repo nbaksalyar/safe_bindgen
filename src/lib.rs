@@ -52,6 +52,7 @@ pub use common::FilterMode;
 pub use csharp::LangCSharp;
 pub use errors::Level;
 pub use java::LangJava;
+pub use lang_c::{LangC, sanitise_id};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
@@ -60,7 +61,7 @@ use std::io::Error as IoError;
 use std::path::{self, Path};
 
 mod common;
-// mod lang_c;
+mod lang_c;
 mod csharp;
 mod java;
 mod output;
@@ -75,6 +76,16 @@ pub struct Error {
     pub level: Level,
     span: Option<syntax::codemap::Span>,
     pub message: String,
+}
+
+impl Error {
+    pub fn error(message: &str) -> Self {
+        Error {
+            level: Level::Error,
+            span: None,
+            message: message.to_string(),
+        }
+    }
 }
 
 impl Display for Error {
@@ -203,8 +214,6 @@ impl Error {
 pub struct Bindgen {
     /// The root source file of the crate.
     input: path::PathBuf,
-    /// Custom C code which is placed after the `#include`s.
-    custom_code: String,
     /// The current parser session.
     ///
     /// Used for printing errors.
@@ -222,7 +231,6 @@ impl Bindgen {
 
         Ok(Bindgen {
             input: input,
-            custom_code: String::new(),
             session: syntax::parse::ParseSess::new(),
         })
     }
@@ -235,16 +243,6 @@ impl Bindgen {
         path::PathBuf: From<T>,
     {
         self.input = path::PathBuf::from(path);
-        self
-    }
-
-    /// Insert custom code before the declarations which are parsed from the Rust source.
-    ///
-    /// If you compile a full header file, this is inserted after the `#include`s.
-    ///
-    /// This can be called multiple times, each time appending more code.
-    pub fn insert_code(&mut self, code: &str) -> &mut Self {
-        self.custom_code.push_str(code);
         self
     }
 
@@ -263,7 +261,7 @@ impl Bindgen {
 
         // Parse the top level mod.
         let krate = syntax::parse::parse_crate_from_file(&self.input, &self.session).unwrap();
-        parse::parse_mod(lang, &krate.module, outputs)?;
+        parse::parse_mod(lang, &krate.module, &unwrap!(self.input.to_str()), outputs)?;
 
         // Parse other mods.
         let modules = parse::imported_mods(&krate.module);
@@ -283,10 +281,7 @@ impl Bindgen {
             eprintln!("Parsing {:?}", mod_path);
 
             let krate = syntax::parse::parse_crate_from_file(&mod_path, &self.session).unwrap();
-            parse::parse_mod(lang, &krate.module, outputs)?;
-
-            // TODO: insert custom_code to each module?
-            // .map(|source| format!("{}\n\n{}", self.custom_code, source))
+            parse::parse_mod(lang, &krate.module, &unwrap!(mod_path.to_str()), outputs)?;
         }
 
         if finalise {

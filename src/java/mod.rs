@@ -14,9 +14,8 @@ use rustfmt;
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use struct_field::{StructField, transform_struct_fields};
+use syntax::{ast, codemap};
 use syntax::abi::Abi;
-use syntax::ast;
-use syntax::codemap;
 use syntax::print::pprust;
 
 pub struct LangJava {
@@ -111,7 +110,12 @@ impl LangJava {
 }
 impl common::Lang for LangJava {
     /// Convert a Rust function declaration into Java.
-    fn parse_fn(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_fn(
+        &mut self,
+        item: &ast::Item,
+        _module: &str,
+        outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let (no_mangle, docs) = parse_attr(&item.attrs, check_no_mangle, |attr| {
             retrieve_docstring(attr, "")
         });
@@ -155,7 +159,12 @@ impl common::Lang for LangJava {
     }
 
     /// Convert a Rust struct into a Java class.
-    fn parse_struct(&mut self, item: &ast::Item, outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_struct(
+        &mut self,
+        item: &ast::Item,
+        _module: &str,
+        outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let (repr_c, docs) = parse_attr(&item.attrs, common::check_repr_c, |attr| {
             retrieve_docstring(attr, "")
         });

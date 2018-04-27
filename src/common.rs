@@ -20,27 +20,52 @@ pub type Outputs = HashMap<PathBuf, String>;
 pub trait Lang {
     /// Convert a Rust constant (`pub const NAME: Type = value;`) into a target
     /// language constant.
-    fn parse_const(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_const(
+        &mut self,
+        _item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
     /// Convert `pub type A = B;` into `typedef B A;`.
-    fn parse_ty(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_ty(
+        &mut self,
+        _item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
     /// Convert a Rust enum into a target language enum.
-    fn parse_enum(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_enum(
+        &mut self,
+        _item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
     /// Convert a Rust struct into a target language struct.
-    fn parse_struct(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_struct(
+        &mut self,
+        _item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
     /// Convert a Rust function declaration into a target language function declaration.
-    fn parse_fn(&mut self, _item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_fn(
+        &mut self,
+        _item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         Ok(())
     }
 

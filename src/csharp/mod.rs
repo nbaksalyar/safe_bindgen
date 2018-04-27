@@ -293,7 +293,12 @@ impl Default for LangCSharp {
 }
 
 impl Lang for LangCSharp {
-    fn parse_ty(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_ty(
+        &mut self,
+        item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());
@@ -325,7 +330,12 @@ impl Lang for LangCSharp {
         Ok(())
     }
 
-    fn parse_const(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_const(
+        &mut self,
+        item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());
@@ -352,7 +362,12 @@ impl Lang for LangCSharp {
         Ok(())
     }
 
-    fn parse_enum(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_enum(
+        &mut self,
+        item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());
@@ -389,7 +404,12 @@ impl Lang for LangCSharp {
         Ok(())
     }
 
-    fn parse_struct(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_struct(
+        &mut self,
+        item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());
@@ -434,7 +454,12 @@ impl Lang for LangCSharp {
         Ok(())
     }
 
-    fn parse_fn(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_fn(
+        &mut self,
+        item: &ast::Item,
+        _module: &str,
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());

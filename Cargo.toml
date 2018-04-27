@@ -9,9 +9,9 @@ description = "A library to automatically generate C and Java files from Rust so
 readme = "README.md"
 keywords = ["c", "header", "ffi"]
 
-homepage = "https://github.com/mozilla/moz-cheddar"
-repository = "https://github.com/mozilla/moz-cheddar"
-documentation = "https://docs.rs/moz-cheddar"
+homepage = "https://github.com/maidsafe/safe_bindgen"
+repository = "https://github.com/maidsafe/safe_bindgen"
+documentation = "https://docs.rs/safe_bindgen"
 
 license = "MIT"
 
