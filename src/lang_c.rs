@@ -1,6 +1,5 @@
 //! Functions for converting Rust types to C types.
 
-
 use Error;
 use Level;
 use common::{Lang, Outputs, append_output, check_no_mangle, check_repr_c, parse_attr,
@@ -10,7 +9,9 @@ use syntax::{ast, codemap, print};
 use syntax::abi::Abi;
 use syntax::print::pprust;
 
-pub struct LangC;
+pub struct LangC {
+    lib_name: String,
+}
 
 /// Compile the header declarations then add the needed `#include`s.
 ///
@@ -21,7 +22,18 @@ pub struct LangC;
 
 impl LangC {
     pub fn new() -> Self {
-        Self {}
+        Self { lib_name: "backend".to_owned() }
+    }
+
+    /// Set the name of the native library.
+    pub fn set_lib_name<T: Into<String>>(&mut self, name: T) {
+        self.lib_name = name.into();
+    }
+}
+
+impl Default for LangC {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -268,18 +280,19 @@ impl Lang for LangC {
     }
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
-        // TODO: insert custom code into each module
-        // Ok(format!(
-        //     "#include <stdint.h>\n#include <stdbool.h>\n\n{}",
-        //     code
-        // ))
+        let mut module_includes = String::new();
 
-        for (module, text) in outputs.iter_mut() {
-            *text = wrap_guard(
-                &wrap_extern(&text),
-                module.to_str().expect("invalid module path"),
-            );
+        for (module, value) in outputs.iter_mut() {
+            let header_name = module.to_str().expect("invalid module path");
+            let code = format!("#include <stdint.h>\n#include <stdbool.h>\n\n{}", value);
+
+            *value = wrap_guard(&wrap_extern(&code), header_name);
+
+            module_includes.push_str(&format!("#include \"{}\"\n", header_name));
         }
+
+        outputs.insert(From::from(format!("{}.h", self.lib_name)), module_includes);
+
         Ok(())
     }
 }
@@ -376,6 +389,8 @@ fn anon_rust_to_c(ty: &ast::Ty) -> Result<String, Error> {
             message: "C function pointers must have a name or function declaration associated with them"
                 .into(),
         }),
+        // Fixed-length arrays, converted into pointers.
+        ast::TyKind::Array(ref ty, _) => Ok(format!("*{}", anon_rust_to_c(ty)?)),
         // Standard pointers.
         ast::TyKind::Ptr(ref ptr) => ptr_to_c(ptr),
         // Plain old types.
@@ -484,7 +499,7 @@ fn fn_ptr_to_c(
     Ok(full_declaration)
 }
 
-/// Convert a Rust path type (my_mod::MyType) to a C type.
+/// Convert a Rust path type (e.g. `my_mod::MyType`) to a C type.
 ///
 /// Types hidden behind modules are almost certainly custom types (which wouldn't work) except
 /// types in `libc` which we special case.
@@ -635,18 +650,14 @@ fn wrap_guard(code: &str, id: &str) -> String {
 /// Transform a module name into a header name
 fn header_name(module: &str) -> Result<String, Error> {
     let path = Path::new(module);
-    let module_stem = path.file_stem()
-        .ok_or_else(|| Error::error("Can't find file stem"))?
-        .to_str()
-        .ok_or_else(|| Error::error("Invalid result string"))?;
+    let module_stem = unwrap!(unwrap!(path.file_stem()).to_str());
 
-    let header_name = if module_stem == "mod" {
-        path.parent()
-            .ok_or_else(|| Error::error("Can't find the module parent"))?
-            .file_name()
-            .ok_or_else(|| Error::error("Can't find the module name"))?
-            .to_str()
-            .ok_or_else(|| Error::error("Invalid result string"))?
+    let header_name = if module_stem == "lib" {
+        // Unwrap lib name - <lib_name>/src/lib.rs
+        unwrap!(unwrap!(unwrap!(unwrap!(path.parent()).parent()).file_name()).to_str())
+    } else if module_stem == "mod" {
+        // Unwrap module name - <mod_name>/mod.rs
+        unwrap!(unwrap!(unwrap!(path.parent()).file_name()).to_str())
     } else {
         module_stem
     };

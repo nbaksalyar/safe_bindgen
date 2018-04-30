@@ -60,6 +60,7 @@ fn main() {
     match lang {
         "c" => {
             let mut lang = LangC::new();
+            lang.set_lib_name(lib);
             bindgen.run_build(&mut lang, &output_dir)
         }
         "csharp" => {
