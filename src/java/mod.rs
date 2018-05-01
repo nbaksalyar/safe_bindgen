@@ -113,7 +113,7 @@ impl common::Lang for LangJava {
     fn parse_fn(
         &mut self,
         item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let (no_mangle, docs) = parse_attr(&item.attrs, check_no_mangle, |attr| {
@@ -162,7 +162,7 @@ impl common::Lang for LangJava {
     fn parse_struct(
         &mut self,
         item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let (repr_c, docs) = parse_attr(&item.attrs, common::check_repr_c, |attr| {

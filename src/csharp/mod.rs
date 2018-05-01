@@ -296,7 +296,7 @@ impl Lang for LangCSharp {
     fn parse_ty(
         &mut self,
         item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
@@ -333,7 +333,7 @@ impl Lang for LangCSharp {
     fn parse_const(
         &mut self,
         item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
@@ -365,7 +365,7 @@ impl Lang for LangCSharp {
     fn parse_enum(
         &mut self,
         item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
@@ -407,7 +407,7 @@ impl Lang for LangCSharp {
     fn parse_struct(
         &mut self,
         item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
@@ -457,7 +457,7 @@ impl Lang for LangCSharp {
     fn parse_fn(
         &mut self,
         item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let name = item.ident.name.as_str();

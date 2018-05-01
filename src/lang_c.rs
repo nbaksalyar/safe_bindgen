@@ -4,13 +4,19 @@ use Error;
 use Level;
 use common::{Lang, Outputs, append_output, check_no_mangle, check_repr_c, parse_attr,
              retrieve_docstring};
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::fmt::{self, Display, Formatter};
+use std::path;
 use syntax::{ast, codemap, print};
 use syntax::abi::Abi;
 use syntax::print::pprust;
 
 pub struct LangC {
     lib_name: String,
+    // Ordered list of header files to be included in the top-level header
+    modules: Vec<String>,
+    // Unordered set of header files
+    modules_uniq: BTreeSet<String>,
 }
 
 /// Compile the header declarations then add the needed `#include`s.
@@ -19,15 +25,35 @@ pub struct LangC {
 ///
 /// - `stdint.h`
 /// - `stdbool.h`
-
 impl LangC {
     pub fn new() -> Self {
-        Self { lib_name: "backend".to_owned() }
+        Self {
+            lib_name: "backend".to_owned(),
+            modules: vec![],
+            modules_uniq: Default::default(),
+        }
     }
 
     /// Set the name of the native library.
     pub fn set_lib_name<T: Into<String>>(&mut self, name: T) {
         self.lib_name = name.into();
+    }
+
+    fn append_to_header(
+        &mut self,
+        buffer: String,
+        module: &[String],
+        outputs: &mut Outputs,
+    ) -> Result<(), Error> {
+        let header = header_name(module, &self.lib_name)?;
+        append_output(buffer, &header, outputs);
+
+        if !self.modules_uniq.contains(&header) {
+            self.modules.push(header.clone());
+            self.modules_uniq.insert(header);
+        }
+
+        Ok(())
     }
 }
 
@@ -44,7 +70,7 @@ impl Lang for LangC {
     fn parse_ty(
         &mut self,
         item: &ast::Item,
-        module: &str,
+        module: &[String],
         outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let (_, docs) = parse_attr(&item.attrs, |_| true, |attr| retrieve_docstring(attr, ""));
@@ -72,8 +98,7 @@ impl Lang for LangC {
         };
 
         buffer.push_str(&format!("typedef {};\n\n", new_type));
-
-        append_output(buffer, &header_name(module)?, outputs);
+        self.append_to_header(buffer, module, outputs)?;
 
         Ok(())
     }
@@ -87,7 +112,7 @@ impl Lang for LangC {
     fn parse_enum(
         &mut self,
         item: &ast::Item,
-        module: &str,
+        module: &[String],
         outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let (repr_c, docs) = parse_attr(
@@ -142,8 +167,7 @@ impl Lang for LangC {
         }
 
         buffer.push_str(&format!("}} {};\n\n", name));
-
-        append_output(buffer, &header_name(module)?, outputs);
+        self.append_to_header(buffer, module, outputs)?;
 
         Ok(())
     }
@@ -157,7 +181,7 @@ impl Lang for LangC {
     fn parse_struct(
         &mut self,
         item: &ast::Item,
-        module: &str,
+        module: &[String],
         outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let (repr_c, docs) = parse_attr(
@@ -224,8 +248,7 @@ impl Lang for LangC {
         }
 
         buffer.push_str(&format!(" {};\n\n", name));
-
-        append_output(buffer, &header_name(module)?, outputs);
+        self.append_to_header(buffer, module, outputs)?;
 
         Ok(())
     }
@@ -239,7 +262,7 @@ impl Lang for LangC {
     fn parse_fn(
         &mut self,
         item: &ast::Item,
-        module: &str,
+        module: &[String],
         outputs: &mut Outputs,
     ) -> Result<(), Error> {
         let (no_mangle, docs) = parse_attr(&item.attrs, check_no_mangle, |attr| {
@@ -267,7 +290,20 @@ impl Lang for LangC {
                 });
             }
 
-            transform_native_fn(&*fn_decl, &docs, &format!("{}", name), module, outputs)?;
+            transform_native_fn(
+                &*fn_decl,
+                &docs,
+                &format!("{}", name),
+                module,
+                &self.lib_name,
+                outputs,
+            )?;
+
+            let header = header_name(module, &self.lib_name)?;
+            if !self.modules_uniq.contains(&header) {
+                self.modules.push(header.clone());
+                self.modules_uniq.insert(header);
+            }
 
             Ok(())
         } else {
@@ -280,14 +316,18 @@ impl Lang for LangC {
     }
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
-        let mut module_includes = String::new();
-
+        // Wrap modules with common includes
         for (module, value) in outputs.iter_mut() {
             let header_name = module.to_str().expect("invalid module path");
             let code = format!("#include <stdint.h>\n#include <stdbool.h>\n\n{}", value);
 
             *value = wrap_guard(&wrap_extern(&code), header_name);
+        }
 
+        // Generate a top-level header
+        let mut module_includes = String::new();
+
+        for header_name in &self.modules {
             module_includes.push_str(&format!("#include \"{}\"\n", header_name));
         }
 
@@ -302,7 +342,8 @@ pub fn transform_native_fn(
     fn_decl: &ast::FnDecl,
     docs: &str,
     name: &str,
-    module: &str,
+    module: &[String],
+    lib_name: &str,
     outputs: &mut Outputs,
 ) -> Result<(), Error> {
     // Handle the case when the return type is a function pointer (which requires that the
@@ -324,7 +365,10 @@ pub fn transform_native_fn(
         if args.is_empty() {
             String::from("void")
         } else {
-            args.join(", ")
+            args.into_iter()
+                .map(|cty| format!("{}", cty))
+                .collect::<Vec<_>>()
+                .join(", ")
         }
     );
 
@@ -339,7 +383,7 @@ pub fn transform_native_fn(
             });
         }
         ast::FunctionRetTy::Default(..) => format!("void {}", buf),
-        ast::FunctionRetTy::Ty(ref ty) => rust_to_c(&*ty, &buf)?,
+        ast::FunctionRetTy::Ty(ref ty) => format!("{}", rust_to_c(&*ty, &buf)?),
     };
 
     let mut output = String::new();
@@ -347,40 +391,26 @@ pub fn transform_native_fn(
     output.push_str(&full_declaration);
     output.push_str(";\n\n");
 
-    append_output(output, &header_name(module)?, outputs);
+    append_output(output, &header_name(module, lib_name)?, outputs);
 
     Ok(())
 }
 
 /// Turn a Rust type with an associated name or type into a C type.
-pub fn rust_to_c(ty: &ast::Ty, assoc: &str) -> Result<String, Error> {
+pub fn rust_to_c(ty: &ast::Ty, assoc: &str) -> Result<CTypeNamed, Error> {
     match ty.node {
         // Function pointers make life an absolute pain here.
-        ast::TyKind::BareFn(ref bare_fn) => fn_ptr_to_c(bare_fn, ty.span, assoc),
-        // Special case Options wrapping function pointers.
-        ast::TyKind::Path(None, ref path) => {
-            if path.segments.len() == 1 && path.segments[0].identifier.name == "Option" {
-                if let Some(ref param) = path.segments[0].parameters {
-                    if let ast::PathParameters::AngleBracketed(ref d) = **param {
-                        assert!(d.lifetimes.is_empty() && d.bindings.is_empty());
-                        if d.types.len() == 1 {
-                            if let ast::TyKind::BareFn(ref bare_fn) = d.types[0].node {
-                                return fn_ptr_to_c(bare_fn, ty.span, assoc);
-                            }
-                        }
-                    }
-                }
-            }
-
-            Ok(format!("{} {}", anon_rust_to_c(ty)?, assoc))
-        }
+        ast::TyKind::BareFn(ref bare_fn) => Ok(CTypeNamed(
+            Default::default(),
+            fn_ptr_to_c(bare_fn, ty.span, assoc)?,
+        )),
         // All other types just have a name associated with them.
-        _ => Ok(format!("{} {}", anon_rust_to_c(ty)?, assoc)),
+        _ => Ok(CTypeNamed(assoc.to_string(), anon_rust_to_c(ty)?)),
     }
 }
 
 /// Turn a Rust type into a C type.
-fn anon_rust_to_c(ty: &ast::Ty) -> Result<String, Error> {
+fn anon_rust_to_c(ty: &ast::Ty) -> Result<CType, Error> {
     match ty.node {
         // Function pointers should not be in this function.
         ast::TyKind::BareFn(..) => Err(Error {
@@ -390,7 +420,9 @@ fn anon_rust_to_c(ty: &ast::Ty) -> Result<String, Error> {
                 .into(),
         }),
         // Fixed-length arrays, converted into pointers.
-        ast::TyKind::Array(ref ty, _) => Ok(format!("*{}", anon_rust_to_c(ty)?)),
+        ast::TyKind::Array(ref ty, _) => {
+            Ok(CType::Ptr(Box::new(anon_rust_to_c(ty)?), CPtrType::Const))
+        }
         // Standard pointers.
         ast::TyKind::Ptr(ref ptr) => ptr_to_c(ptr),
         // Plain old types.
@@ -399,7 +431,8 @@ fn anon_rust_to_c(ty: &ast::Ty) -> Result<String, Error> {
         _ => {
             let new_type = print::pprust::ty_to_string(ty);
             if new_type == "()" {
-                Ok("void".into())
+                // Ok("void".into())
+                Ok(CType::Void)
             } else {
                 Err(Error {
                     level: Level::Error,
@@ -412,16 +445,16 @@ fn anon_rust_to_c(ty: &ast::Ty) -> Result<String, Error> {
 }
 
 /// Turn a Rust pointer (*mut or *const) into the correct C form.
-fn ptr_to_c(ty: &ast::MutTy) -> Result<String, Error> {
+fn ptr_to_c(ty: &ast::MutTy) -> Result<CType, Error> {
     let new_type = anon_rust_to_c(&ty.ty)?;
     let const_spec = match ty.mutbl {
         // *const T
-        ast::Mutability::Immutable => " const",
+        ast::Mutability::Immutable => CPtrType::Const,
         // *mut T
-        ast::Mutability::Mutable => "",
+        ast::Mutability::Mutable => CPtrType::Mutable,
     };
 
-    Ok(format!("{}{}*", new_type, const_spec))
+    Ok(CType::Ptr(Box::new(new_type), const_spec))
 }
 
 /// Turn a Rust function pointer into a C function pointer.
@@ -439,18 +472,7 @@ fn ptr_to_c(ty: &ast::MutTy) -> Result<String, Error> {
 /// ```
 ///
 /// where `inner` could either be a name or the rest of a function declaration.
-fn fn_ptr_to_c(
-    fn_ty: &ast::BareFnTy,
-    fn_span: codemap::Span,
-    inner: &str,
-) -> Result<String, Error> {
-    /*
-    match fn_ty.abi {
-        // If it doesn't have a C ABI it can't be called from C.
-        Abi::C | Abi::Cdecl | Abi::Stdcall | Abi::Fastcall | Abi::System => {}
-        _ => return Ok(None),
-    }
-*/
+fn fn_ptr_to_c(fn_ty: &ast::BareFnTy, fn_span: codemap::Span, inner: &str) -> Result<CType, Error> {
     if !fn_ty.lifetimes.is_empty() {
         return Err(Error {
             level: Level::Error,
@@ -461,29 +483,22 @@ fn fn_ptr_to_c(
 
     let fn_decl: &ast::FnDecl = &*fn_ty.decl;
 
-    let mut buf_without_return = format!("(*{})(", inner);
-
-    let has_args = !fn_decl.inputs.is_empty();
-
-    for arg in &fn_decl.inputs {
-        let arg_name = print::pprust::pat_to_string(&*arg.pat);
-        let arg_type = rust_to_c(&*arg.ty, &arg_name)?;
-        buf_without_return.push_str(&arg_type);
-        buf_without_return.push_str(", ");
-    }
-
-    if has_args {
-        // Remove the trailing comma and space.
-        buf_without_return.pop();
-        buf_without_return.pop();
+    let args = if fn_decl.inputs.is_empty() {
+        // No args
+        vec![]
     } else {
-        buf_without_return.push_str("void");
-    }
-
-    buf_without_return.push(')');
+        let mut args = vec![];
+        for arg in &fn_decl.inputs {
+            let arg_name = print::pprust::pat_to_string(&*arg.pat);
+            let arg_type = rust_to_c(&*arg.ty, &arg_name)?;
+            args.push(arg_type);
+        }
+        args
+    };
 
     let output_type = &fn_decl.output;
-    let full_declaration = match *output_type {
+
+    let return_type = match *output_type {
         ast::FunctionRetTy::Ty(ref ty) if ty.node == ast::TyKind::Never => {
             return Err(Error {
                 level: Level::Error,
@@ -491,28 +506,32 @@ fn fn_ptr_to_c(
                 message: "panics across a C boundary are naughty!".into(),
             });
         }
-        ast::FunctionRetTy::Default(..) => format!("void {}", buf_without_return),
-        ast::FunctionRetTy::Ty(ref ty) => rust_to_c(&*ty, &buf_without_return)?,
+        ast::FunctionRetTy::Default(..) => CType::Void,
+        ast::FunctionRetTy::Ty(ref ty) => anon_rust_to_c(&*ty)?,
     };
 
-
-    Ok(full_declaration)
+    Ok(CType::FnDecl {
+        inner: inner.to_string(),
+        args,
+        return_type: Box::new(return_type),
+    })
 }
 
 /// Convert a Rust path type (e.g. `my_mod::MyType`) to a C type.
 ///
 /// Types hidden behind modules are almost certainly custom types (which wouldn't work) except
 /// types in `libc` which we special case.
-fn path_to_c(path: &ast::Path) -> Result<String, Error> {
-    // I don't think this is possible.
+fn path_to_c(path: &ast::Path) -> Result<CType, Error> {
     if path.segments.is_empty() {
-        Err(Error {
+        return Err(Error {
             level: Level::Bug,
             span: Some(path.span),
-            message: "what the fuck have you done to this type?!".into(),
-        })
+            message: "invalid type".into(),
+        });
+    }
+
     // Types in modules, `my_mod::MyType`.
-    } else if path.segments.len() > 1 {
+    if path.segments.len() > 1 {
         let (ty, module) = path.segments.split_last().expect(
             "already checked that there were at least two elements",
         );
@@ -542,48 +561,48 @@ fn path_to_c(path: &ast::Path) -> Result<String, Error> {
 /// Convert a Rust type from `libc` into a C type.
 ///
 /// Most map straight over but some have to be converted.
-fn libc_ty_to_c(ty: &str) -> &str {
+fn libc_ty_to_c(ty: &str) -> CType {
     match ty {
-        "c_void" => "void",
-        "c_float" => "float",
-        "c_double" => "double",
-        "c_char" => "char",
-        "c_schar" => "signed char",
-        "c_uchar" => "unsigned char",
-        "c_short" => "short",
-        "c_ushort" => "unsigned short",
-        "c_int" => "int",
-        "c_uint" => "unsigned int",
-        "c_long" => "long",
-        "c_ulong" => "unsigned long",
-        "c_longlong" => "long long",
-        "c_ulonglong" => "unsigned long long",
+        "c_void" => CType::Void,
+        "c_float" => CType::Native("float"),
+        "c_double" => CType::Native("double"),
+        "c_char" => CType::Native("char"),
+        "c_schar" => CType::Native("signed char"),
+        "c_uchar" => CType::Native("unsigned char"),
+        "c_short" => CType::Native("short"),
+        "c_ushort" => CType::Native("unsigned short"),
+        "c_int" => CType::Native("int"),
+        "c_uint" => CType::Native("unsigned int"),
+        "c_long" => CType::Native("long"),
+        "c_ulong" => CType::Native("unsigned long"),
+        "c_longlong" => CType::Native("long long"),
+        "c_ulonglong" => CType::Native("unsigned long long"),
         // All other types should map over to C.
-        ty => ty,
+        ty => CType::Mapping(ty.to_string()),
     }
 }
 
 /// Convert a Rust type from `std::os::raw` into a C type.
 ///
 /// These mostly mirror the libc crate.
-fn osraw_ty_to_c(ty: &str) -> &str {
+fn osraw_ty_to_c(ty: &str) -> CType {
     match ty {
-        "c_void" => "void",
-        "c_char" => "char",
-        "c_double" => "double",
-        "c_float" => "float",
-        "c_int" => "int",
-        "c_long" => "long",
-        "c_longlong" => "long long",
-        "c_schar" => "signed char",
-        "c_short" => "short",
-        "c_uchar" => "unsigned char",
-        "c_uint" => "unsigned int",
-        "c_ulong" => "unsigned long",
-        "c_ulonglong" => "unsigned long long",
-        "c_ushort" => "unsigned short",
+        "c_void" => CType::Void,
+        "c_char" => CType::Native("char"),
+        "c_double" => CType::Native("double"),
+        "c_float" => CType::Native("float"),
+        "c_int" => CType::Native("int"),
+        "c_long" => CType::Native("long"),
+        "c_longlong" => CType::Native("long long"),
+        "c_schar" => CType::Native("signed char"),
+        "c_short" => CType::Native("short"),
+        "c_uchar" => CType::Native("unsigned char"),
+        "c_uint" => CType::Native("unsigned int"),
+        "c_ulong" => CType::Native("unsigned long"),
+        "c_ulonglong" => CType::Native("unsigned long long"),
+        "c_ushort" => CType::Native("unsigned short"),
         // All other types should map over to C.
-        ty => ty,
+        ty => CType::Mapping(ty.to_string()),
     }
 }
 
@@ -591,23 +610,22 @@ fn osraw_ty_to_c(ty: &str) -> &str {
 ///
 /// This includes user-defined types. We currently trust the user not to use types which we don't
 /// know the structure of (like String).
-fn rust_ty_to_c(ty: &str) -> &str {
+fn rust_ty_to_c(ty: &str) -> CType {
     match ty {
-        "()" => "void",
-        "f32" => "float",
-        "f64" => "double",
-        "i8" => "int8_t",
-        "i16" => "int16_t",
-        "i32" => "int32_t",
-        "i64" => "int64_t",
-        "isize" => "intptr_t",
-        "u8" => "uint8_t",
-        "u16" => "uint16_t",
-        "u32" => "uint32_t",
-        "u64" => "uint64_t",
-        "usize" => "uintptr_t",
-        // Fallback to libc because these types could be not fully-qualified ones:
-        // https://github.com/mozilla/moz-cheddar/issues/7
+        "()" => CType::Void,
+        "f32" => CType::Native("float"),
+        "f64" => CType::Native("double"),
+        "i8" => CType::Native("int8_t"),
+        "i16" => CType::Native("int16_t"),
+        "i32" => CType::Native("int32_t"),
+        "i64" => CType::Native("int64_t"),
+        "isize" => CType::Native("intptr_t"),
+        "u8" => CType::Native("uint8_t"),
+        "u16" => CType::Native("uint16_t"),
+        "u32" => CType::Native("uint32_t"),
+        "u64" => CType::Native("uint64_t"),
+        "usize" => CType::Native("uintptr_t"),
+        "bool" => CType::Native("bool"),
         ty => libc_ty_to_c(ty),
     }
 }
@@ -648,21 +666,20 @@ fn wrap_guard(code: &str, id: &str) -> String {
 }
 
 /// Transform a module name into a header name
-fn header_name(module: &str) -> Result<String, Error> {
-    let path = Path::new(module);
-    let module_stem = unwrap!(unwrap!(path.file_stem()).to_str());
+fn header_name(module: &[String], lib_name: &str) -> Result<String, Error> {
+    let mut module_name: Vec<String> = module.iter().cloned().collect::<_>();
+    if module_name[0] == "ffi" {
+        module_name[0] = lib_name.to_string();
 
-    let header_name = if module_stem == "lib" {
-        // Unwrap lib name - <lib_name>/src/lib.rs
-        unwrap!(unwrap!(unwrap!(unwrap!(path.parent()).parent()).file_name()).to_str())
-    } else if module_stem == "mod" {
-        // Unwrap module name - <mod_name>/mod.rs
-        unwrap!(unwrap!(unwrap!(path.parent()).file_name()).to_str())
-    } else {
-        module_stem
-    };
+        // Top-level module for a library - e.g. safe_app/safe_app.h
+        if module_name.len() == 1 {
+            module_name.push(lib_name.to_string());
+        }
+    }
 
-    Ok(format!("{}.h", header_name))
+    let header_name = format!("{}.h", module_name.join(&path::MAIN_SEPARATOR.to_string()));
+
+    Ok(header_name)
 }
 
 /// Remove illegal characters from the identifier.
@@ -676,6 +693,81 @@ pub fn sanitise_id(id: &str) -> String {
         .collect()
 }
 
+#[derive(Debug)]
+pub struct CTypeNamed(String, CType);
+
+impl Display for CTypeNamed {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self.1 {
+            // Function declarations don't need to be prefixed, so it's a
+            // special case
+            CType::FnDecl { .. } => write!(f, "{}", self.1),
+
+            // For all other cases we add a type prefix
+            _ => write!(f, "{} {}", self.1, self.0),
+        }
+
+    }
+}
+
+#[derive(Debug)]
+pub enum CPtrType {
+    Const,
+    Mutable,
+}
+
+impl Display for CPtrType {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            CPtrType::Const => write!(f, " const"),
+            CPtrType::Mutable => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum CType {
+    Void,
+    Mapping(String),
+    Native(&'static str),
+    Ptr(Box<CType>, CPtrType),
+    FnDecl {
+        inner: String,
+        args: Vec<CTypeNamed>,
+        return_type: Box<CType>,
+    },
+}
+
+impl Display for CType {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            CType::Void => write!(f, "void"),
+            CType::Mapping(ref s) => write!(f, "{}", s),
+            CType::Native(ref s) => write!(f, "{}", s),
+            CType::Ptr(ref cty, ref ptrty) => write!(f, "{}{}*", cty, ptrty),
+            CType::FnDecl {
+                ref inner,
+                ref args,
+                ref return_type,
+            } => {
+                write!(
+                    f,
+                    "{} (*{})({})",
+                    return_type,
+                    inner,
+                    if args.is_empty() {
+                        "void".to_string()
+                    } else {
+                        args.iter()
+                            .map(|cty| format!("{}", cty))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    }
+                )
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {

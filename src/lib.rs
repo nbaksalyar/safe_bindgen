@@ -261,7 +261,12 @@ impl Bindgen {
 
         // Parse the top level mod.
         let krate = syntax::parse::parse_crate_from_file(&self.input, &self.session).unwrap();
-        parse::parse_mod(lang, &krate.module, unwrap!(self.input.to_str()), outputs)?;
+        parse::parse_mod(
+            lang,
+            &krate.module,
+            &[unwrap!(self.input.to_str()).to_string()],
+            outputs,
+        )?;
 
         // Parse other mods.
         let modules = parse::imported_mods(&krate.module);
@@ -278,10 +283,10 @@ impl Bindgen {
                 ));
             }
 
-            eprintln!("Parsing {:?}", mod_path);
+            eprintln!("Parsing {} ({:?})", module.join("::"), mod_path);
 
             let krate = syntax::parse::parse_crate_from_file(&mod_path, &self.session).unwrap();
-            parse::parse_mod(lang, &krate.module, unwrap!(mod_path.to_str()), outputs)?;
+            parse::parse_mod(lang, &krate.module, &module, outputs)?;
         }
 
         if finalise {

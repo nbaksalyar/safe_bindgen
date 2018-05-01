@@ -40,7 +40,7 @@ pub fn imported_mods(module: &ast::Mod) -> Vec<Vec<String>> {
 pub fn parse_mod<L: Lang>(
     lang: &mut L,
     module: &ast::Mod,
-    module_path: &str,
+    module_path: &[String],
     outputs: &mut Outputs,
 ) -> Result<(), Vec<Error>> {
     let mut errors = vec![];

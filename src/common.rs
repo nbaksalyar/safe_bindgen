@@ -23,7 +23,7 @@ pub trait Lang {
     fn parse_const(
         &mut self,
         _item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         Ok(())
@@ -33,7 +33,7 @@ pub trait Lang {
     fn parse_ty(
         &mut self,
         _item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         Ok(())
@@ -43,7 +43,7 @@ pub trait Lang {
     fn parse_enum(
         &mut self,
         _item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         Ok(())
@@ -53,7 +53,7 @@ pub trait Lang {
     fn parse_struct(
         &mut self,
         _item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         Ok(())
@@ -63,7 +63,7 @@ pub trait Lang {
     fn parse_fn(
         &mut self,
         _item: &ast::Item,
-        _module: &str,
+        _module: &[String],
         _outputs: &mut Outputs,
     ) -> Result<(), Error> {
         Ok(())
