@@ -48,7 +48,7 @@ impl LangC {
     /// Adds manual C code into the top-level header - can be useful for typedefs,
     /// like e.g. opaque pointers.
     pub fn add_custom_code(&mut self, code: &str) {
-        self.custom_code.push_str(&code);
+        self.custom_code.push_str(code);
     }
 
     fn add_dependencies(&mut self, module: &[String], cty: &CType) -> Result<(), Error> {
@@ -329,7 +329,7 @@ impl Lang for LangC {
                 return Err(Error {
                     level: Level::Error,
                     span: Some(item.span),
-                    message: "bindgen can not handle unit or tuple `#[repr(C)]` structs with >1 members"
+                    message: "can not handle unit or tuple `#[repr(C)]` structs with >1 members"
                         .into(),
                 });
             }
@@ -481,7 +481,7 @@ fn anon_rust_to_c(ty: &ast::Ty) -> Result<CType, Error> {
         ast::TyKind::BareFn(..) => Err(Error {
             level: Level::Error,
             span: Some(ty.span),
-            message: "C function pointers must have a name or function declaration associated with them"
+            message: "C function ptrs must have a name or function declaration associated with them"
                 .into(),
         }),
         // Fixed-length arrays, converted into pointers.
@@ -612,7 +612,7 @@ fn path_to_c(path: &ast::Path) -> Result<CType, Error> {
             _ => Err(Error {
                 level: Level::Error,
                 span: Some(path.span),
-                message: "bindgen can not handle types in other modules (except `libc` and `std::os::raw`)"
+                message: "can not handle types in other modules (except `libc` and `std::os::raw`)"
                     .into(),
             }),
         }

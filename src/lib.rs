@@ -353,7 +353,7 @@ impl Bindgen {
     }
 }
 
-/// Convert a path into a top-level module name (e.g. "ffi_utils/src/lib.rs" -> "ffi_libs")
+/// Convert a path into a top-level module name (e.g. `ffi_utils/src/lib.rs` -> `ffi_libs`)
 fn convert_lib_path_to_module<P: AsRef<Path>>(path: &P) -> Vec<String> {
     let mut res = Vec::new();
     let path = path.as_ref();
