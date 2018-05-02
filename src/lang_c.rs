@@ -744,7 +744,7 @@ pub fn sanitise_id(id: &str) -> String {
         .collect()
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct CTypeNamed(String, CType);
 
 impl Display for CTypeNamed {
@@ -761,7 +761,7 @@ impl Display for CTypeNamed {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum CPtrType {
     Const,
     Mutable,
@@ -776,7 +776,7 @@ impl Display for CPtrType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum CType {
     Void,
     Mapping(String),
@@ -846,6 +846,9 @@ impl Display for CType {
 
 #[cfg(test)]
 mod test {
+    use super::CType;
+    use syntax::ast;
+
     #[test]
     fn sanitise_id() {
         assert!(super::sanitise_id("") == "");
@@ -854,7 +857,7 @@ mod test {
         assert!(super::sanitise_id("filename.h") == "filenameh");
     }
 
-    fn ty(source: &str) -> ::syntax::ast::Ty {
+    fn ty(source: &str) -> ast::Ty {
         let sess = ::syntax::parse::ParseSess::new();
         let result = {
             let mut parser =
@@ -876,36 +879,39 @@ mod test {
     #[test]
     fn pure_rust_types() {
         let type_map = [
-            ("()", "void"),
-            ("f32", "float"),
-            ("f64", "double"),
-            ("i8", "int8_t"),
-            ("i16", "int16_t"),
-            ("i32", "int32_t"),
-            ("i64", "int64_t"),
-            ("isize", "intptr_t"),
-            ("u8", "uint8_t"),
-            ("u16", "uint16_t"),
-            ("u32", "uint32_t"),
-            ("u64", "uint64_t"),
-            ("usize", "uintptr_t"),
+            ("()", CType::Void),
+            ("f32", CType::Native("float")),
+            ("f64", CType::Native("double")),
+            ("i8", CType::Native("int8_t")),
+            ("i16", CType::Native("int16_t")),
+            ("i32", CType::Native("int32_t")),
+            ("i64", CType::Native("int64_t")),
+            ("isize", CType::Native("intptr_t")),
+            ("u8", CType::Native("uint8_t")),
+            ("u16", CType::Native("uint16_t")),
+            ("u32", CType::Native("uint32_t")),
+            ("u64", CType::Native("uint64_t")),
+            ("usize", CType::Native("uintptr_t")),
         ];
 
         let name = "gabriel";
 
-        for &(rust_type, correct_c_type) in &type_map {
+        for &(rust_type, ref correct_c_type) in &type_map {
             let parsed_c_type = super::anon_rust_to_c(&ty(rust_type)).expect(&format!(
                 "error while parsing {:?} with no name",
                 rust_type
             ));
-            assert_eq!(parsed_c_type, correct_c_type);
+            assert_eq!(&parsed_c_type, correct_c_type);
 
             let parsed_c_type = super::rust_to_c(&ty(rust_type), name).expect(&format!(
                 "error while parsing {:?} with name {:?}",
                 rust_type,
                 name
             ));
-            assert_eq!(parsed_c_type, format!("{} {}", correct_c_type, name));
+            assert_eq!(
+                format!("{}", parsed_c_type),
+                format!("{} {}", correct_c_type, name)
+            );
         }
     }
 
@@ -939,14 +945,17 @@ mod test {
                 "error while parsing {:?} with no name",
                 rust_type
             ));
-            assert_eq!(parsed_c_type, correct_c_type);
+            assert_eq!(format!("{}", parsed_c_type), correct_c_type);
 
             let parsed_c_type = super::rust_to_c(&ty(rust_type), name).expect(&format!(
                 "error while parsing {:?} with name {:?}",
                 rust_type,
                 name
             ));
-            assert_eq!(parsed_c_type, format!("{} {}", correct_c_type, name));
+            assert_eq!(
+                format!("{}", parsed_c_type),
+                format!("{} {}", correct_c_type, name)
+            );
         }
     }
 
@@ -959,7 +968,7 @@ mod test {
             "error while parsing {:?} with no name",
             source
         ));
-        assert_eq!(parsed_type, "uint8_t const*");
+        assert_eq!(format!("{}", parsed_type), "uint8_t const*");
 
         let source = "*const ()";
         let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
@@ -967,14 +976,14 @@ mod test {
             source,
             name
         ));
-        assert_eq!(parsed_type, format!("void const* {}", name));
+        assert_eq!(format!("{}", parsed_type), format!("void const* {}", name));
 
         let source = "*const *const f64";
         let parsed_type = super::anon_rust_to_c(&ty(source)).expect(&format!(
             "error while parsing {:?} with no name",
             source
         ));
-        assert_eq!(parsed_type, "double const* const*");
+        assert_eq!(format!("{}", parsed_type), "double const* const*");
 
         let source = "*const *const i64";
         let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
@@ -982,7 +991,10 @@ mod test {
             source,
             name
         ));
-        assert_eq!(parsed_type, format!("int64_t const* const* {}", name));
+        assert_eq!(
+            format!("{}", parsed_type),
+            format!("int64_t const* const* {}", name)
+        );
     }
 
     #[test]
@@ -994,7 +1006,7 @@ mod test {
             "error while parsing {:?} with no name",
             source
         ));
-        assert_eq!(parsed_type, "uint16_t*");
+        assert_eq!(format!("{}", parsed_type), "uint16_t*");
 
         let source = "*mut f32";
         let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
@@ -1002,14 +1014,14 @@ mod test {
             source,
             name
         ));
-        assert_eq!(parsed_type, format!("float* {}", name));
+        assert_eq!(format!("{}", parsed_type), format!("float* {}", name));
 
         let source = "*mut *mut *mut i32";
         let parsed_type = super::anon_rust_to_c(&ty(source)).expect(&format!(
             "error while parsing {:?} with no name",
             source
         ));
-        assert_eq!(parsed_type, "int32_t***");
+        assert_eq!(format!("{}", parsed_type), "int32_t***");
 
         let source = "*mut *mut i8";
         let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
@@ -1017,7 +1029,7 @@ mod test {
             source,
             name
         ));
-        assert_eq!(parsed_type, format!("int8_t** {}", name));
+        assert_eq!(format!("{}", parsed_type), format!("int8_t** {}", name));
     }
 
     #[test]
@@ -1029,7 +1041,7 @@ mod test {
             "error while parsing {:?} with no name",
             source
         ));
-        assert_eq!(parsed_type, "bool const** const*");
+        assert_eq!(format!("{}", parsed_type), "bool const** const*");
 
         let source = "*mut *mut *const libc::c_ulonglong";
         let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
@@ -1037,7 +1049,10 @@ mod test {
             source,
             name
         ));
-        assert_eq!(parsed_type, format!("unsigned long long const*** {}", name));
+        assert_eq!(
+            format!("{}", parsed_type),
+            format!("unsigned long long const*** {}", name)
+        );
 
         let source = "*const *mut *mut i8";
         let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
@@ -1045,7 +1060,10 @@ mod test {
             source,
             name
         ));
-        assert_eq!(parsed_type, format!("int8_t** const* {}", name));
+        assert_eq!(
+            format!("{}", parsed_type),
+            format!("int8_t** const* {}", name)
+        );
     }
 
     #[test]
@@ -1073,15 +1091,10 @@ mod test {
             source,
             name
         ));
-        assert_eq!(parsed_type, format!("double (*{})(int hi)", name));
-
-        let source = "Option<extern fn(hi: libc::c_int) -> libc::c_double>";
-        let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
-            "error while parsing {:?} with name {:?}",
-            source,
-            name
-        ));
-        assert_eq!(parsed_type, format!("double (*{})(int hi)", name));
+        assert_eq!(
+            format!("{}", parsed_type),
+            format!("double (*{})(int hi)", name)
+        );
     }
 
     #[test]
@@ -1093,7 +1106,7 @@ mod test {
             "error while parsing {:?} with no name",
             source
         ));
-        assert_eq!(parsed_type, "MyType");
+        assert_eq!(format!("{}", parsed_type), "MyType");
 
         let source = "SomeType";
         let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
@@ -1101,7 +1114,7 @@ mod test {
             source,
             name
         ));
-        assert_eq!(parsed_type, format!("SomeType {}", name));
+        assert_eq!(format!("{}", parsed_type), format!("SomeType {}", name));
 
         let source = "my_mod::MyType";
         let parsed_type = super::anon_rust_to_c(&ty(source));

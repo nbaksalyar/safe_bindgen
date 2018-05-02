@@ -1,5 +1,6 @@
 //! `safe_bindgen` is a library based on moz-cheddar for converting Rust source files
 //! into Java and C# bindings.
+//!
 //! It is built specifically for the SAFE Client Libs project.
 
 // For explanation of lint checks, run `rustc -W help` or see
