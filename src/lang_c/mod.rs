@@ -443,7 +443,10 @@ impl Lang for LangC {
             module_includes.push_str(&format!("#include \"{}\"\n", header_name));
         }
 
-        outputs.insert(format!("{}.h", self.lib_name), module_includes);
+        outputs.insert(
+            format!("{}.h", self.lib_name),
+            wrap_guard(&module_includes, &format!("{}_root", self.lib_name)),
+        );
 
         Ok(())
     }

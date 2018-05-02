@@ -60,7 +60,7 @@ use std::fmt::Display;
 use std::fs;
 use std::io::{Read, Write};
 use std::io::Error as IoError;
-use std::path::{self, Path, PathBuf};
+use std::path::{self, Component, Path, PathBuf};
 
 mod common;
 mod lang_c;
@@ -264,8 +264,10 @@ impl Bindgen {
 
         // Parse the top level mod.
         let krate = syntax::parse::parse_crate_from_file(&self.input, &self.session).unwrap();
-        eprintln!("Parsing {}", mod_path);
-        parse::parse_mod(lang, &krate.module, &[mod_path], outputs)?;
+        let module = convert_lib_path_to_module(&PathBuf::from(mod_path.clone()));
+        eprintln!("Parsing {} ({:?})", module.join("::"), mod_path);
+
+        parse::parse_mod(lang, &krate.module, &module, outputs)?;
 
         // Parse other mods.
         let modules = parse::imported_mods(&krate.module);
@@ -349,6 +351,26 @@ impl Bindgen {
     pub fn print_error(&self, error: &Error) {
         error.print(&self.session);
     }
+}
+
+/// Convert a path into a top-level module name (e.g. "ffi_utils/src/lib.rs" -> "ffi_libs")
+fn convert_lib_path_to_module<P: AsRef<Path>>(path: &P) -> Vec<String> {
+    let mut res = Vec::new();
+    let path = path.as_ref();
+
+    for component in path.components() {
+        if let Component::Normal(path) = component {
+            let path = unwrap!(path.to_str());
+            res.push(path.to_string());
+        }
+    }
+
+    // Cut off the "src/lib.rs" part
+    if res[(res.len() - 2)..] == ["src", "lib.rs"] {
+        res = res[..(res.len() - 2)].to_vec();
+    }
+
+    res
 }
 
 /// Extract the path to the root source file from a `Cargo.toml`.
