@@ -54,7 +54,7 @@ pub use common::FilterMode;
 pub use csharp::LangCSharp;
 pub use errors::Level;
 pub use java::LangJava;
-pub use lang_c::{LangC, sanitise_id};
+pub use lang_c::LangC;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
