@@ -21,6 +21,7 @@ pub struct LangC {
     lib_name: String,
     decls: BTreeMap<String, String>,
     deps: BTreeMap<String, Vec<String>>,
+    custom_code: String,
 }
 
 /// Compile the header declarations then add the needed `#include`s.
@@ -35,12 +36,19 @@ impl LangC {
             lib_name: "backend".to_owned(),
             decls: BTreeMap::new(),
             deps: BTreeMap::new(),
+            custom_code: Default::default(),
         }
     }
 
     /// Set the name of the native library.
     pub fn set_lib_name<T: Into<String>>(&mut self, name: T) {
         self.lib_name = name.into();
+    }
+
+    /// Adds manual C code into the top-level header - can be useful for typedefs,
+    /// like e.g. opaque pointers.
+    pub fn add_custom_code(&mut self, code: &str) {
+        self.custom_code.push_str(&code);
     }
 
     fn add_dependencies(&mut self, module: &[String], cty: &CType) -> Result<(), Error> {
@@ -430,22 +438,23 @@ impl Lang for LangC {
             }
         }
 
-        // Topologically sort dependencies
+        // Build a full dependency graph and topologically sort dependencies
         depgraph.extend_with_edges(&edges);
-
-        let mut module_includes = String::new();
         let sorted_deps = unwrap!(algo::toposort(&depgraph, None));
 
-        // Generate a top-level header
+        // Generate a top-level header and add custom user code
+        let mut top_level_header = String::new();
+        if !self.custom_code.is_empty() {
+            top_level_header.push_str(&format!("{}\n", self.custom_code));
+        }
         for node_id in sorted_deps {
             let header_name = &node_ids_map[&node_id];
-
-            module_includes.push_str(&format!("#include \"{}\"\n", header_name));
+            top_level_header.push_str(&format!("#include \"{}\"\n", header_name));
         }
 
         outputs.insert(
             format!("{}.h", self.lib_name),
-            wrap_guard(&module_includes, &format!("{}_root", self.lib_name)),
+            wrap_guard(&top_level_header, &format!("{}_root", self.lib_name)),
         );
 
         Ok(())
@@ -710,7 +719,7 @@ fn wrap_guard(code: &str, id: &str) -> String {
 #ifndef bindgen_{0}
 #define bindgen_{0}
 
- {1}
+{1}
 
 #endif
 ",
