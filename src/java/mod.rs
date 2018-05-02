@@ -12,7 +12,6 @@ use java::types::{callback_name, java_type_to_str, rust_to_java, struct_to_java_
 use jni::signature::JavaType;
 use rustfmt;
 use std::collections::{BTreeSet, HashMap};
-use std::path::PathBuf;
 use struct_field::{StructField, transform_struct_fields};
 use syntax::{ast, codemap};
 use syntax::abi::Abi;
@@ -239,7 +238,7 @@ impl common::Lang for LangJava {
     }
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
-        match outputs.get_mut(&PathBuf::from("jni.rs")) {
+        match outputs.get_mut("jni.rs") {
             Some(input) => {
                 self.format_jni_output(input);
             }
@@ -252,7 +251,7 @@ impl common::Lang for LangJava {
             }
         }
 
-        match outputs.get_mut(&PathBuf::from("NativeBindings.java")) {
+        match outputs.get_mut("NativeBindings.java") {
             Some(input) => {
                 self.format_native_functions(input);
                 Ok(())
@@ -423,7 +422,7 @@ pub fn transform_native_fn(
         // Generate a callback class - if it wasn't generated already
         if let ast::TyKind::BareFn(ref bare_fn) = arg.ty.node {
             let cb_class = callback_name(&*bare_fn.decl.inputs, context)?;
-            let cb_file = PathBuf::from(format!("{}.java", cb_class));
+            let cb_file = format!("{}.java", cb_class);
 
             if outputs.get(&cb_file).is_none() {
                 eprintln!("Generating CB {}", cb_class);

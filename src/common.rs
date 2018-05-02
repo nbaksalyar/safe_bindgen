@@ -2,7 +2,6 @@
 
 use Error;
 use std::collections::hash_map::{Entry, HashMap};
-use std::path::PathBuf;
 use syntax::abi::Abi;
 use syntax::ast;
 use syntax::print::pprust;
@@ -14,7 +13,7 @@ pub enum FilterMode {
 }
 
 /// Outputs several files as a result of an AST transformation.
-pub type Outputs = HashMap<PathBuf, String>;
+pub type Outputs = HashMap<String, String>;
 
 /// Target language support
 pub trait Lang {
@@ -77,7 +76,7 @@ pub trait Lang {
 
 /// Append or create new output file
 pub fn append_output(text: String, file: &str, o: &mut Outputs) {
-    match o.entry(From::from(file)) {
+    match o.entry(file.to_string()) {
         Entry::Occupied(o) => o.into_mut().push_str(&text),
         Entry::Vacant(v) => {
             let _ = v.insert(text);

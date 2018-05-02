@@ -4,7 +4,9 @@ use Error;
 use Level;
 use common::{Lang, Outputs, append_output, check_no_mangle, check_repr_c, parse_attr,
              retrieve_docstring};
-use std::collections::BTreeSet;
+use petgraph::{Graph, algo};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::btree_map::Entry;
 use std::fmt::{self, Display, Formatter};
 use std::path;
 use syntax::{ast, codemap, print};
@@ -13,10 +15,8 @@ use syntax::print::pprust;
 
 pub struct LangC {
     lib_name: String,
-    // Ordered list of header files to be included in the top-level header
-    modules: Vec<String>,
-    // Unordered set of header files
-    modules_uniq: BTreeSet<String>,
+    decls: BTreeMap<String, String>,
+    deps: BTreeMap<String, Vec<String>>,
 }
 
 /// Compile the header declarations then add the needed `#include`s.
@@ -29,14 +29,31 @@ impl LangC {
     pub fn new() -> Self {
         Self {
             lib_name: "backend".to_owned(),
-            modules: vec![],
-            modules_uniq: Default::default(),
+            decls: BTreeMap::new(),
+            deps: BTreeMap::new(),
         }
     }
 
     /// Set the name of the native library.
     pub fn set_lib_name<T: Into<String>>(&mut self, name: T) {
         self.lib_name = name.into();
+    }
+
+    fn add_dependencies(&mut self, module: &[String], cty: &CType) -> Result<(), Error> {
+        let deps = cty.dependencies();
+
+        if !deps.is_empty() {
+            let header = header_name(module, &self.lib_name)?;
+
+            match self.deps.entry(header) {
+                Entry::Occupied(o) => o.into_mut().extend(deps.into_iter()),
+                Entry::Vacant(v) => {
+                    let _ = v.insert(deps);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn append_to_header(
@@ -47,11 +64,69 @@ impl LangC {
     ) -> Result<(), Error> {
         let header = header_name(module, &self.lib_name)?;
         append_output(buffer, &header, outputs);
+        Ok(())
+    }
 
-        if !self.modules_uniq.contains(&header) {
-            self.modules.push(header.clone());
-            self.modules_uniq.insert(header);
+    /// Transform a Rust FFI function into a C function decl
+    pub fn transform_native_fn(
+        &mut self,
+        fn_decl: &ast::FnDecl,
+        docs: &str,
+        name: &str,
+        module: &[String],
+        outputs: &mut Outputs,
+    ) -> Result<(), Error> {
+        // Handle the case when the return type is a function pointer (which requires that the
+        // entire declaration is wrapped by the function pointer type) by first creating the name
+        // and parameters, then passing that whole thing to `rust_to_c`.
+        let fn_args = fn_decl.inputs.clone();
+        let mut args = Vec::new();
+
+        // Arguments
+        for arg in &fn_args {
+            let arg_name = pprust::pat_to_string(&*arg.pat);
+            let c_ty = rust_to_c(&arg.ty, &arg_name)?;
+            self.add_dependencies(module, &c_ty.1)?;
+            args.push(c_ty);
         }
+
+        let buf = format!(
+            "{}({})",
+            name,
+            if args.is_empty() {
+                String::from("void")
+            } else {
+                args.into_iter()
+                    .map(|cty| format!("{}", cty))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        );
+
+        // Generate return type
+        let output_type = &fn_decl.output;
+        let full_declaration = match *output_type {
+            ast::FunctionRetTy::Ty(ref ty) if ty.node == ast::TyKind::Never => {
+                return Err(Error {
+                    level: Level::Error,
+                    span: Some(ty.span),
+                    message: "panics across a C boundary are naughty!".into(),
+                });
+            }
+            ast::FunctionRetTy::Default(..) => format!("void {}", buf),
+            ast::FunctionRetTy::Ty(ref ty) => {
+                let c_ty = rust_to_c(&*ty, &buf)?;
+                self.add_dependencies(module, &c_ty.1)?;
+                format!("{}", c_ty)
+            }
+        };
+
+        let mut output = String::new();
+        output.push_str(docs);
+        output.push_str(&full_declaration);
+        output.push_str(";\n\n");
+
+        append_output(output, &header_name(module, &self.lib_name)?, outputs);
 
         Ok(())
     }
@@ -99,6 +174,11 @@ impl Lang for LangC {
 
         buffer.push_str(&format!("typedef {};\n\n", new_type));
         self.append_to_header(buffer, module, outputs)?;
+
+        self.decls.insert(
+            name.to_string(),
+            header_name(module, &self.lib_name)?,
+        );
 
         Ok(())
     }
@@ -224,7 +304,9 @@ impl Lang for LangC {
                         Some(name) => name.name.as_str(),
                         None => unreachable!("a tuple struct snuck through"),
                     };
+
                     let ty = rust_to_c(&*field.ty, &name)?;
+                    self.add_dependencies(module, &ty.1)?;
                     buffer.push_str(&format!("\t{};\n", ty));
                 }
 
@@ -249,6 +331,11 @@ impl Lang for LangC {
 
         buffer.push_str(&format!(" {};\n\n", name));
         self.append_to_header(buffer, module, outputs)?;
+
+        self.decls.insert(
+            name.to_string(),
+            header_name(module, &self.lib_name)?,
+        );
 
         Ok(())
     }
@@ -290,20 +377,13 @@ impl Lang for LangC {
                 });
             }
 
-            transform_native_fn(
+            self.transform_native_fn(
                 &*fn_decl,
                 &docs,
                 &format!("{}", name),
                 module,
-                &self.lib_name,
                 outputs,
             )?;
-
-            let header = header_name(module, &self.lib_name)?;
-            if !self.modules_uniq.contains(&header) {
-                self.modules.push(header.clone());
-                self.modules_uniq.insert(header);
-            }
 
             Ok(())
         } else {
@@ -316,18 +396,48 @@ impl Lang for LangC {
     }
 
     fn finalise_output(&mut self, outputs: &mut Outputs) -> Result<(), Error> {
+        let mut depgraph = Graph::<String, String>::new();
+        let nodes_map: HashMap<String, _> = outputs
+            .keys()
+            .map(|m| (m.clone(), depgraph.add_node(m.clone())))
+            .collect();
+        let node_ids_map: HashMap<_, String> = nodes_map
+            .iter()
+            .map(|(k, v)| (v.clone(), k.clone()))
+            .collect();
+        let mut edges = BTreeSet::new();
+
         // Wrap modules with common includes
-        for (module, value) in outputs.iter_mut() {
-            let header_name = module.to_str().expect("invalid module path");
+        for (header_name, value) in outputs.iter_mut() {
             let code = format!("#include <stdint.h>\n#include <stdbool.h>\n\n{}", value);
 
             *value = wrap_guard(&wrap_extern(&code), header_name);
+
+            // Building a graph of dependencies
+            if let Some(module_deps) = self.deps.get(header_name) {
+                for dep in module_deps {
+                    if let Some(mod_name) = self.decls.get(dep) {
+                        let pred = mod_name.to_string();
+                        let succ = header_name.to_string();
+                        if pred == succ {
+                            continue;
+                        }
+                        let _ = edges.insert((nodes_map[&pred], nodes_map[&succ]));
+                    }
+                }
+            }
         }
 
-        // Generate a top-level header
-        let mut module_includes = String::new();
+        // Topologically sort dependencies
+        depgraph.extend_with_edges(&edges);
 
-        for header_name in &self.modules {
+        let mut module_includes = String::new();
+        let sorted_deps = unwrap!(algo::toposort(&depgraph, None));
+
+        // Generate a top-level header
+        for node_id in sorted_deps {
+            let header_name = &node_ids_map[&node_id];
+
             module_includes.push_str(&format!("#include \"{}\"\n", header_name));
         }
 
@@ -335,65 +445,6 @@ impl Lang for LangC {
 
         Ok(())
     }
-}
-
-/// Transform a Rust FFI function into a C function decl
-pub fn transform_native_fn(
-    fn_decl: &ast::FnDecl,
-    docs: &str,
-    name: &str,
-    module: &[String],
-    lib_name: &str,
-    outputs: &mut Outputs,
-) -> Result<(), Error> {
-    // Handle the case when the return type is a function pointer (which requires that the
-    // entire declaration is wrapped by the function pointer type) by first creating the name
-    // and parameters, then passing that whole thing to `rust_to_c`.
-    let fn_args = fn_decl.inputs.clone();
-    let mut args = Vec::new();
-
-    // Arguments
-    for arg in &fn_args {
-        let arg_name = pprust::pat_to_string(&*arg.pat);
-
-        args.push(rust_to_c(&arg.ty, &arg_name)?);
-    }
-
-    let buf = format!(
-        "{}({})",
-        name,
-        if args.is_empty() {
-            String::from("void")
-        } else {
-            args.into_iter()
-                .map(|cty| format!("{}", cty))
-                .collect::<Vec<_>>()
-                .join(", ")
-        }
-    );
-
-    // Generate return type
-    let output_type = &fn_decl.output;
-    let full_declaration = match *output_type {
-        ast::FunctionRetTy::Ty(ref ty) if ty.node == ast::TyKind::Never => {
-            return Err(Error {
-                level: Level::Error,
-                span: Some(ty.span),
-                message: "panics across a C boundary are naughty!".into(),
-            });
-        }
-        ast::FunctionRetTy::Default(..) => format!("void {}", buf),
-        ast::FunctionRetTy::Ty(ref ty) => format!("{}", rust_to_c(&*ty, &buf)?),
-    };
-
-    let mut output = String::new();
-    output.push_str(docs);
-    output.push_str(&full_declaration);
-    output.push_str(";\n\n");
-
-    append_output(output, &header_name(module, lib_name)?, outputs);
-
-    Ok(())
 }
 
 /// Turn a Rust type with an associated name or type into a C type.
@@ -736,6 +787,30 @@ pub enum CType {
         args: Vec<CTypeNamed>,
         return_type: Box<CType>,
     },
+}
+
+impl CType {
+    fn dependencies(&self) -> Vec<String> {
+        match *self {
+            CType::FnDecl {
+                ref args,
+                ref return_type,
+                ..
+            } => {
+                return_type
+                    .dependencies()
+                    .iter()
+                    .cloned()
+                    .chain(args.iter().flat_map(
+                        |&CTypeNamed(_, ref cty)| cty.dependencies(),
+                    ))
+                    .collect()
+            }
+            CType::Ptr(ref cty, _) => cty.dependencies(),
+            CType::Mapping(ref mapping) => vec![mapping.clone()],
+            _ => Default::default(),
+        }
+    }
 }
 
 impl Display for CType {

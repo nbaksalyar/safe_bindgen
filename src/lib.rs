@@ -36,6 +36,7 @@ extern crate toml;
 extern crate quote;
 extern crate jni;
 extern crate rustfmt;
+extern crate petgraph;
 
 #[cfg(test)]
 extern crate colored;
@@ -58,7 +59,7 @@ use std::fmt::Display;
 use std::fs;
 use std::io::{Read, Write};
 use std::io::Error as IoError;
-use std::path::{self, Path};
+use std::path::{self, Path, PathBuf};
 
 mod common;
 mod lang_c;
@@ -213,7 +214,7 @@ impl Error {
 /// ```
 pub struct Bindgen {
     /// The root source file of the crate.
-    input: path::PathBuf,
+    input: PathBuf,
     /// The current parser session.
     ///
     /// Used for printing errors.
@@ -227,7 +228,7 @@ impl Bindgen {
     /// manifest available then the source file defaults to `src/lib.rs`.
     pub fn new() -> Result<Self, Error> {
         let source_path = source_file_from_cargo()?;
-        let input = path::PathBuf::from(source_path);
+        let input = PathBuf::from(source_path);
 
         Ok(Bindgen {
             input: input,
@@ -240,9 +241,9 @@ impl Bindgen {
     /// This should only be used when not using a `cargo` build system.
     pub fn source_file<T>(&mut self, path: T) -> &mut Self
     where
-        path::PathBuf: From<T>,
+        PathBuf: From<T>,
     {
-        self.input = path::PathBuf::from(path);
+        self.input = PathBuf::from(path);
         self
     }
 
@@ -258,15 +259,12 @@ impl Bindgen {
         finalise: bool,
     ) -> Result<(), Vec<Error>> {
         let base_path = self.input.parent().unwrap();
+        let mod_path = unwrap!(self.input.to_str()).to_string();
 
         // Parse the top level mod.
         let krate = syntax::parse::parse_crate_from_file(&self.input, &self.session).unwrap();
-        parse::parse_mod(
-            lang,
-            &krate.module,
-            &[unwrap!(self.input.to_str()).to_string()],
-            outputs,
-        )?;
+        eprintln!("Parsing {}", mod_path);
+        parse::parse_mod(lang, &krate.module, &[mod_path], outputs)?;
 
         // Parse other mods.
         let modules = parse::imported_mods(&krate.module);
@@ -311,7 +309,7 @@ impl Bindgen {
         let root = root.as_ref();
 
         for (path, contents) in outputs {
-            let full_path = root.join(path);
+            let full_path = root.join(PathBuf::from(path));
 
             if let Some(parent_dirs) = full_path.parent() {
                 fs::create_dir_all(parent_dirs)?;

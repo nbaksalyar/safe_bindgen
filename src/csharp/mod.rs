@@ -15,7 +15,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::btree_map::Entry;
 use std::fmt::{Display, Write};
 use std::mem;
-use std::path::PathBuf;
 use syntax::ast;
 use syntax::print::pprust;
 
@@ -573,7 +572,7 @@ impl Lang for LangCSharp {
             emit!(writer, "}}\n");
 
             outputs.insert(
-                PathBuf::from(self.context.functions_section.path.clone()),
+                self.context.functions_section.path.clone(),
                 writer.into_inner(),
             );
 
@@ -626,7 +625,7 @@ impl Lang for LangCSharp {
                 emit!(writer, "}}\n");
 
                 outputs.insert(
-                    PathBuf::from(self.context.interface_section.path.clone()),
+                    self.context.interface_section.path.clone(),
                     writer.into_inner(),
                 );
             }
@@ -672,7 +671,7 @@ impl Lang for LangCSharp {
             emit!(writer, "}}\n");
 
             outputs.insert(
-                PathBuf::from(self.context.consts_section.path.clone()),
+                self.context.consts_section.path.clone(),
                 writer.into_inner(),
             );
 
@@ -715,10 +714,7 @@ impl Lang for LangCSharp {
             writer.unindent();
             emit!(writer, "}}\n");
 
-            outputs.insert(
-                PathBuf::from(self.context.types_section.path.clone()),
-                writer.into_inner(),
-            );
+            outputs.insert(self.context.types_section.path.clone(), writer.into_inner());
         }
 
         // Utilities
@@ -726,10 +722,7 @@ impl Lang for LangCSharp {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
             emit_utilities(&mut writer, &self.context);
 
-            outputs.insert(
-                PathBuf::from(self.context.utils_section.path.clone()),
-                writer.into_inner(),
-            );
+            outputs.insert(self.context.utils_section.path.clone(), writer.into_inner());
         }
 
         // Other cleanup.
