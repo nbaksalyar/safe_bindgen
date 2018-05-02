@@ -405,10 +405,8 @@ impl Lang for LangC {
             .keys()
             .map(|m| (m.clone(), depgraph.add_node(m.clone())))
             .collect();
-        let node_ids_map: HashMap<_, String> = nodes_map
-            .iter()
-            .map(|(k, v)| (v.clone(), k.clone()))
-            .collect();
+        let node_ids_map: HashMap<_, String> =
+            nodes_map.iter().map(|(k, v)| (*v, k.clone())).collect();
         let mut edges = BTreeSet::new();
 
         // Wrap modules with common includes
@@ -445,7 +443,7 @@ impl Lang for LangC {
             module_includes.push_str(&format!("#include \"{}\"\n", header_name));
         }
 
-        outputs.insert(From::from(format!("{}.h", self.lib_name)), module_includes);
+        outputs.insert(format!("{}.h", self.lib_name), module_includes);
 
         Ok(())
     }
@@ -597,8 +595,8 @@ fn path_to_c(path: &ast::Path) -> Result<CType, Error> {
         }
         let module = segments.join("::");
         match &*module {
-            "libc" => Ok(libc_ty_to_c(ty).into()),
-            "std::os::raw" => Ok(osraw_ty_to_c(ty).into()),
+            "libc" => Ok(libc_ty_to_c(ty)),
+            "std::os::raw" => Ok(osraw_ty_to_c(ty)),
             _ => Err(Error {
                 level: Level::Error,
                 span: Some(path.span),
@@ -607,9 +605,7 @@ fn path_to_c(path: &ast::Path) -> Result<CType, Error> {
             }),
         }
     } else {
-        Ok(
-            rust_ty_to_c(&path.segments[0].identifier.name.as_str()).into(),
-        )
+        Ok(rust_ty_to_c(&path.segments[0].identifier.name.as_str()))
     }
 }
 
@@ -722,7 +718,7 @@ fn wrap_guard(code: &str, id: &str) -> String {
 
 /// Transform a module name into a header name
 fn header_name(module: &[String], lib_name: &str) -> Result<String, Error> {
-    let mut module_name: Vec<String> = module.iter().cloned().collect::<_>();
+    let mut module_name: Vec<String> = module.to_vec();
     if module_name[0] == "ffi" {
         module_name[0] = lib_name.to_string();
 

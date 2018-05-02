@@ -77,7 +77,7 @@ impl Display for CType {
         match *self {
             CType::Void => write!(f, "void"),
             CType::Mapping(ref s) => write!(f, "{}", s),
-            CType::Native(ref s) => write!(f, "{}", s),
+            CType::Native(s) => write!(f, "{}", s),
             CType::Ptr(ref cty, ref ptrty) => write!(f, "{}{}*", cty, ptrty),
             CType::FnDecl {
                 ref inner,

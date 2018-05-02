@@ -232,7 +232,7 @@ impl common::Lang for LangJava {
 
         buffer.push_str("\n\n");
 
-        outputs.insert(From::from(format!("{}.java", name)), buffer);
+        outputs.insert(format!("{}.java", name), buffer);
 
         Ok(())
     }
