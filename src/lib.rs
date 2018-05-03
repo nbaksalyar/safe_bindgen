@@ -1,5 +1,6 @@
 //! `safe_bindgen` is a library based on moz-cheddar for converting Rust source files
 //! into Java and C# bindings.
+//!
 //! It is built specifically for the SAFE Client Libs project.
 
 // For explanation of lint checks, run `rustc -W help` or see
@@ -36,6 +37,7 @@ extern crate toml;
 extern crate quote;
 extern crate jni;
 extern crate rustfmt;
+extern crate petgraph;
 
 #[cfg(test)]
 extern crate colored;
@@ -52,15 +54,16 @@ pub use common::FilterMode;
 pub use csharp::LangCSharp;
 pub use errors::Level;
 pub use java::LangJava;
+pub use lang_c::LangC;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
 use std::io::{Read, Write};
 use std::io::Error as IoError;
-use std::path::{self, Path};
+use std::path::{self, Component, Path, PathBuf};
 
 mod common;
-// mod lang_c;
+mod lang_c;
 mod csharp;
 mod java;
 mod output;
@@ -75,6 +78,16 @@ pub struct Error {
     pub level: Level,
     span: Option<syntax::codemap::Span>,
     pub message: String,
+}
+
+impl Error {
+    pub fn error(message: &str) -> Self {
+        Error {
+            level: Level::Error,
+            span: None,
+            message: message.to_string(),
+        }
+    }
 }
 
 impl Display for Error {
@@ -202,9 +215,7 @@ impl Error {
 /// ```
 pub struct Bindgen {
     /// The root source file of the crate.
-    input: path::PathBuf,
-    /// Custom C code which is placed after the `#include`s.
-    custom_code: String,
+    input: PathBuf,
     /// The current parser session.
     ///
     /// Used for printing errors.
@@ -218,11 +229,10 @@ impl Bindgen {
     /// manifest available then the source file defaults to `src/lib.rs`.
     pub fn new() -> Result<Self, Error> {
         let source_path = source_file_from_cargo()?;
-        let input = path::PathBuf::from(source_path);
+        let input = PathBuf::from(source_path);
 
         Ok(Bindgen {
             input: input,
-            custom_code: String::new(),
             session: syntax::parse::ParseSess::new(),
         })
     }
@@ -232,19 +242,9 @@ impl Bindgen {
     /// This should only be used when not using a `cargo` build system.
     pub fn source_file<T>(&mut self, path: T) -> &mut Self
     where
-        path::PathBuf: From<T>,
+        PathBuf: From<T>,
     {
-        self.input = path::PathBuf::from(path);
-        self
-    }
-
-    /// Insert custom code before the declarations which are parsed from the Rust source.
-    ///
-    /// If you compile a full header file, this is inserted after the `#include`s.
-    ///
-    /// This can be called multiple times, each time appending more code.
-    pub fn insert_code(&mut self, code: &str) -> &mut Self {
-        self.custom_code.push_str(code);
+        self.input = PathBuf::from(path);
         self
     }
 
@@ -260,10 +260,14 @@ impl Bindgen {
         finalise: bool,
     ) -> Result<(), Vec<Error>> {
         let base_path = self.input.parent().unwrap();
+        let mod_path = unwrap!(self.input.to_str()).to_string();
 
         // Parse the top level mod.
         let krate = syntax::parse::parse_crate_from_file(&self.input, &self.session).unwrap();
-        parse::parse_mod(lang, &krate.module, outputs)?;
+        let module = convert_lib_path_to_module(&PathBuf::from(mod_path.clone()));
+        eprintln!("Parsing {} ({:?})", module.join("::"), mod_path);
+
+        parse::parse_mod(lang, &krate.module, &module, outputs)?;
 
         // Parse other mods.
         let modules = parse::imported_mods(&krate.module);
@@ -280,13 +284,10 @@ impl Bindgen {
                 ));
             }
 
-            eprintln!("Parsing {:?}", mod_path);
+            eprintln!("Parsing {} ({:?})", module.join("::"), mod_path);
 
             let krate = syntax::parse::parse_crate_from_file(&mod_path, &self.session).unwrap();
-            parse::parse_mod(lang, &krate.module, outputs)?;
-
-            // TODO: insert custom_code to each module?
-            // .map(|source| format!("{}\n\n{}", self.custom_code, source))
+            parse::parse_mod(lang, &krate.module, &module, outputs)?;
         }
 
         if finalise {
@@ -311,7 +312,7 @@ impl Bindgen {
         let root = root.as_ref();
 
         for (path, contents) in outputs {
-            let full_path = root.join(path);
+            let full_path = root.join(PathBuf::from(path));
 
             if let Some(parent_dirs) = full_path.parent() {
                 fs::create_dir_all(parent_dirs)?;
@@ -350,6 +351,26 @@ impl Bindgen {
     pub fn print_error(&self, error: &Error) {
         error.print(&self.session);
     }
+}
+
+/// Convert a path into a top-level module name (e.g. `ffi_utils/src/lib.rs` -> `ffi_libs`)
+fn convert_lib_path_to_module<P: AsRef<Path>>(path: &P) -> Vec<String> {
+    let mut res = Vec::new();
+    let path = path.as_ref();
+
+    for component in path.components() {
+        if let Component::Normal(path) = component {
+            let path = unwrap!(path.to_str());
+            res.push(path.to_string());
+        }
+    }
+
+    // Cut off the "src/lib.rs" part
+    if res[(res.len() - 2)..] == ["src", "lib.rs"] {
+        res = res[..(res.len() - 2)].to_vec();
+    }
+
+    res
 }
 
 /// Extract the path to the root source file from a `Cargo.toml`.

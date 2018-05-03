@@ -1,5 +1,4 @@
 use super::*;
-use std::path::Path;
 
 macro_rules! compile {
     ($lang:expr, $rust:tt) => {
@@ -1190,7 +1189,7 @@ fn interface() {
 fn try_compile<T: Into<Option<LangCSharp>>>(
     lang: T,
     rust_src: String,
-) -> Result<HashMap<PathBuf, String>, Vec<Error>> {
+) -> Result<HashMap<String, String>, Vec<Error>> {
     use parse;
     use syntax;
 
@@ -1201,16 +1200,14 @@ fn try_compile<T: Into<Option<LangCSharp>>>(
     let mut outputs = Outputs::default();
     let mut lang = lang.into().unwrap_or_else(LangCSharp::new);
 
-    parse::parse_mod(&mut lang, &ast.module, &mut outputs)?;
+    parse::parse_mod(&mut lang, &ast.module, &[Default::default()], &mut outputs)?;
     lang.finalise_output(&mut outputs)?;
 
     Ok(outputs)
 }
 
-fn fetch<'a>(outputs: &'a HashMap<PathBuf, String>, name: &str) -> &'a str {
-    outputs.get(Path::new(name)).map(String::as_str).unwrap_or(
-        "",
-    )
+fn fetch<'a>(outputs: &'a HashMap<String, String>, name: &str) -> &'a str {
+    outputs.get(name).map(String::as_str).unwrap_or("")
 }
 
 fn format_diff(left: &str, right: &str) -> String {

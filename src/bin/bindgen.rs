@@ -4,7 +4,7 @@ extern crate clap;
 extern crate jni;
 
 use jni::signature::{JavaType, Primitive};
-use safe_bindgen::{Bindgen, LangCSharp, LangJava};
+use safe_bindgen::{Bindgen, LangC, LangCSharp, LangJava};
 use std::collections::HashMap;
 
 fn main() {
@@ -29,7 +29,7 @@ fn main() {
                 .takes_value(true)
                 .required(true)
                 .help("target language")
-                .possible_values(&["csharp", "java"]),
+                .possible_values(&["csharp", "java", "c"]),
         )
         .arg(
             clap::Arg::with_name("LIB")
@@ -58,6 +58,11 @@ fn main() {
     };
 
     match lang {
+        "c" => {
+            let mut lang = LangC::new();
+            lang.set_lib_name(lib);
+            bindgen.run_build(&mut lang, &output_dir)
+        }
         "csharp" => {
             let mut lang = LangCSharp::new();
             lang.set_lib_name(lib);

@@ -15,7 +15,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::btree_map::Entry;
 use std::fmt::{Display, Write};
 use std::mem;
-use std::path::PathBuf;
 use syntax::ast;
 use syntax::print::pprust;
 
@@ -293,7 +292,12 @@ impl Default for LangCSharp {
 }
 
 impl Lang for LangCSharp {
-    fn parse_ty(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_ty(
+        &mut self,
+        item: &ast::Item,
+        _module: &[String],
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());
@@ -325,7 +329,12 @@ impl Lang for LangCSharp {
         Ok(())
     }
 
-    fn parse_const(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_const(
+        &mut self,
+        item: &ast::Item,
+        _module: &[String],
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());
@@ -352,7 +361,12 @@ impl Lang for LangCSharp {
         Ok(())
     }
 
-    fn parse_enum(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_enum(
+        &mut self,
+        item: &ast::Item,
+        _module: &[String],
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());
@@ -389,7 +403,12 @@ impl Lang for LangCSharp {
         Ok(())
     }
 
-    fn parse_struct(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_struct(
+        &mut self,
+        item: &ast::Item,
+        _module: &[String],
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());
@@ -434,7 +453,12 @@ impl Lang for LangCSharp {
         Ok(())
     }
 
-    fn parse_fn(&mut self, item: &ast::Item, _outputs: &mut Outputs) -> Result<(), Error> {
+    fn parse_fn(
+        &mut self,
+        item: &ast::Item,
+        _module: &[String],
+        _outputs: &mut Outputs,
+    ) -> Result<(), Error> {
         let name = item.ident.name.as_str();
         if self.is_ignored(&name) {
             return Ok(());
@@ -548,7 +572,7 @@ impl Lang for LangCSharp {
             emit!(writer, "}}\n");
 
             outputs.insert(
-                PathBuf::from(self.context.functions_section.path.clone()),
+                self.context.functions_section.path.clone(),
                 writer.into_inner(),
             );
 
@@ -601,7 +625,7 @@ impl Lang for LangCSharp {
                 emit!(writer, "}}\n");
 
                 outputs.insert(
-                    PathBuf::from(self.context.interface_section.path.clone()),
+                    self.context.interface_section.path.clone(),
                     writer.into_inner(),
                 );
             }
@@ -647,7 +671,7 @@ impl Lang for LangCSharp {
             emit!(writer, "}}\n");
 
             outputs.insert(
-                PathBuf::from(self.context.consts_section.path.clone()),
+                self.context.consts_section.path.clone(),
                 writer.into_inner(),
             );
 
@@ -690,10 +714,7 @@ impl Lang for LangCSharp {
             writer.unindent();
             emit!(writer, "}}\n");
 
-            outputs.insert(
-                PathBuf::from(self.context.types_section.path.clone()),
-                writer.into_inner(),
-            );
+            outputs.insert(self.context.types_section.path.clone(), writer.into_inner());
         }
 
         // Utilities
@@ -701,10 +722,7 @@ impl Lang for LangCSharp {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
             emit_utilities(&mut writer, &self.context);
 
-            outputs.insert(
-                PathBuf::from(self.context.utils_section.path.clone()),
-                writer.into_inner(),
-            );
+            outputs.insert(self.context.utils_section.path.clone(), writer.into_inner());
         }
 
         // Other cleanup.
