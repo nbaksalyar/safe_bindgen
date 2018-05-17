@@ -387,14 +387,22 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
                         // Strings
                         "c_char" => {
                             quote! {
-                                let #arg_name: JObject = jni_unwrap!(#arg_name.to_java(&env))
-                                    .into();
+                                let #arg_name: JObject = if #arg_name.is_null() {
+                                    JObject::null()
+                                } else {
+                                    jni_unwrap!(#arg_name.to_java(&env))
+                                        .into()
+                                };
                             }
                         }
                         // Other ptrs
                         _ => {
                             quote! {
-                            let #arg_name = jni_unwrap!((*#arg_name).to_java(&env));
+                                let #arg_name = if #arg_name.is_null() {
+                                    JObject::null()
+                                } else {
+                                    jni_unwrap!((*#arg_name).to_java(&env))
+                                };
                         }
                         }
                     }
