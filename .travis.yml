@@ -9,7 +9,7 @@ os:
 language: rust
 rust:
   - 1.24.0
-  - nightly-2018-02-05
+  # - nightly-2018-02-05
 sudo: false
 branches:
   only:

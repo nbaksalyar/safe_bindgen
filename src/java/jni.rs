@@ -387,14 +387,22 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
                         // Strings
                         "c_char" => {
                             quote! {
-                                let #arg_name: JObject = jni_unwrap!(#arg_name.to_java(&env))
-                                    .into();
+                                let #arg_name: JObject = if #arg_name.is_null() {
+                                    JObject::null()
+                                } else {
+                                    jni_unwrap!(#arg_name.to_java(&env))
+                                        .into()
+                                };
                             }
                         }
                         // Other ptrs
                         _ => {
                             quote! {
-                            let #arg_name = jni_unwrap!((*#arg_name).to_java(&env));
+                                let #arg_name = if #arg_name.is_null() {
+                                    JObject::null()
+                                } else {
+                                    jni_unwrap!((*#arg_name).to_java(&env))
+                                };
                         }
                         }
                     }
@@ -560,6 +568,13 @@ fn generate_struct_to_java(
                             )?;
                         }
                     } else {
+                        let signature = format!(
+                            "{}",
+                            JavaType::Array(
+                                Box::new(unwrap!(rust_ty_to_signature(&ptr.ty, context))),
+                            )
+                        );
+
                         // Struct array
                         quote! {
                             let arr = env.new_object_array(
@@ -580,7 +595,7 @@ fn generate_struct_to_java(
                             env.set_field(
                                 output,
                                 #java_field_name,
-                                "[Ljava/lang/Object;",
+                                #signature,
                                 JObject::from(arr).into()
                             )?;
                             env.set_field(
@@ -608,12 +623,14 @@ fn generate_struct_to_java(
                     }
                 }
             }
-            StructField::StructPtr { .. } => {
+            StructField::StructPtr { ref ty, .. } => {
+                let signature = format!("{}", unwrap!(rust_ty_to_signature(&ty.ty, context)));
+
                 quote! {
                     env.set_field(
                         output,
                         #field_name_str,
-                        "Ljava/lang/Object;",
+                        #signature,
                         self.#field_name.to_java(env)?.into()
                     )?;
                 }
@@ -724,12 +741,18 @@ fn generate_struct_from_java(
                     } else {
                         // Struct array
                         let ty = quote::Ident::new(ty_str);
+                        let signature = format!(
+                            "{}",
+                            JavaType::Array(
+                                Box::new(unwrap!(rust_ty_to_signature(&ptr.ty, context))),
+                            )
+                        );
 
                         quote! {
                             let arr = env.get_field(
                                 input,
                                 #java_field_name,
-                                "[Ljava/lang/Object;"
+                                #signature
                             )?.l()?.into_inner() as jni::sys::jarray;
                             let #len_field = env.get_array_length(arr)? as usize;
 
@@ -755,13 +778,15 @@ fn generate_struct_from_java(
             }
             StructField::StructPtr { ref ty, .. } => {
                 let ty_str = pprust::ty_to_string(&ty.ty);
+                let signature = format!("{}", unwrap!(rust_ty_to_signature(&ty.ty, context)));
+
                 let ty = quote::Ident::new(ty_str);
 
                 quote! {
                     let #field_name = env.get_field(
                         input,
                         #java_field_name,
-                        "Ljava/lang/Object;"
+                        #signature
                     )?.l()?;
                     let #field_name = #ty::from_java(env, #field_name)?;
                 }
