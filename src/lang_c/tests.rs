@@ -19,12 +19,10 @@ fn ty(source: &str) -> ast::Ty {
 
     match result {
         Ok(p) => (*p).clone(),
-        _ => {
-            panic!(
-                "internal testing error: could not parse type from {:?}",
-                source
-            )
-        }
+        _ => panic!(
+            "internal testing error: could not parse type from {:?}",
+            source
+        ),
     }
 }
 
@@ -49,16 +47,13 @@ fn pure_rust_types() {
     let name = "gabriel";
 
     for &(rust_type, ref correct_c_type) in &type_map {
-        let parsed_c_type = super::anon_rust_to_c(&ty(rust_type)).expect(&format!(
-            "error while parsing {:?} with no name",
-            rust_type
-        ));
+        let parsed_c_type = super::anon_rust_to_c(&ty(rust_type))
+            .expect(&format!("error while parsing {:?} with no name", rust_type));
         assert_eq!(&parsed_c_type, correct_c_type);
 
         let parsed_c_type = super::rust_to_c(&ty(rust_type), name).expect(&format!(
             "error while parsing {:?} with name {:?}",
-            rust_type,
-            name
+            rust_type, name
         ));
         assert_eq!(
             format!("{}", parsed_c_type),
@@ -93,16 +88,13 @@ fn libc_types() {
     let name = "lucifer";
 
     for &(rust_type, correct_c_type) in &type_map {
-        let parsed_c_type = super::anon_rust_to_c(&ty(rust_type)).expect(&format!(
-            "error while parsing {:?} with no name",
-            rust_type
-        ));
+        let parsed_c_type = super::anon_rust_to_c(&ty(rust_type))
+            .expect(&format!("error while parsing {:?} with no name", rust_type));
         assert_eq!(format!("{}", parsed_c_type), correct_c_type);
 
         let parsed_c_type = super::rust_to_c(&ty(rust_type), name).expect(&format!(
             "error while parsing {:?} with name {:?}",
-            rust_type,
-            name
+            rust_type, name
         ));
         assert_eq!(
             format!("{}", parsed_c_type),
@@ -116,32 +108,26 @@ fn const_pointers() {
     let name = "maalik";
 
     let source = "*const u8";
-    let parsed_type = super::anon_rust_to_c(&ty(source)).expect(&format!(
-        "error while parsing {:?} with no name",
-        source
-    ));
+    let parsed_type = super::anon_rust_to_c(&ty(source))
+        .expect(&format!("error while parsing {:?} with no name", source));
     assert_eq!(format!("{}", parsed_type), "uint8_t const*");
 
     let source = "*const ()";
     let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
         "error while parsing {:?} with name {:?}",
-        source,
-        name
+        source, name
     ));
     assert_eq!(format!("{}", parsed_type), format!("void const* {}", name));
 
     let source = "*const *const f64";
-    let parsed_type = super::anon_rust_to_c(&ty(source)).expect(&format!(
-        "error while parsing {:?} with no name",
-        source
-    ));
+    let parsed_type = super::anon_rust_to_c(&ty(source))
+        .expect(&format!("error while parsing {:?} with no name", source));
     assert_eq!(format!("{}", parsed_type), "double const* const*");
 
     let source = "*const *const i64";
     let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
         "error while parsing {:?} with name {:?}",
-        source,
-        name
+        source, name
     ));
     assert_eq!(
         format!("{}", parsed_type),
@@ -154,32 +140,26 @@ fn mut_pointers() {
     let name = "raphael";
 
     let source = "*mut u16";
-    let parsed_type = super::anon_rust_to_c(&ty(source)).expect(&format!(
-        "error while parsing {:?} with no name",
-        source
-    ));
+    let parsed_type = super::anon_rust_to_c(&ty(source))
+        .expect(&format!("error while parsing {:?} with no name", source));
     assert_eq!(format!("{}", parsed_type), "uint16_t*");
 
     let source = "*mut f32";
     let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
         "error while parsing {:?} with name {:?}",
-        source,
-        name
+        source, name
     ));
     assert_eq!(format!("{}", parsed_type), format!("float* {}", name));
 
     let source = "*mut *mut *mut i32";
-    let parsed_type = super::anon_rust_to_c(&ty(source)).expect(&format!(
-        "error while parsing {:?} with no name",
-        source
-    ));
+    let parsed_type = super::anon_rust_to_c(&ty(source))
+        .expect(&format!("error while parsing {:?} with no name", source));
     assert_eq!(format!("{}", parsed_type), "int32_t***");
 
     let source = "*mut *mut i8";
     let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
         "error while parsing {:?} with name {:?}",
-        source,
-        name
+        source, name
     ));
     assert_eq!(format!("{}", parsed_type), format!("int8_t** {}", name));
 }
@@ -189,17 +169,14 @@ fn mixed_pointers() {
     let name = "samael";
 
     let source = "*const *mut *const bool";
-    let parsed_type = super::anon_rust_to_c(&ty(source)).expect(&format!(
-        "error while parsing {:?} with no name",
-        source
-    ));
+    let parsed_type = super::anon_rust_to_c(&ty(source))
+        .expect(&format!("error while parsing {:?} with no name", source));
     assert_eq!(format!("{}", parsed_type), "bool const** const*");
 
     let source = "*mut *mut *const libc::c_ulonglong";
     let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
         "error while parsing {:?} with name {:?}",
-        source,
-        name
+        source, name
     ));
     assert_eq!(
         format!("{}", parsed_type),
@@ -209,8 +186,7 @@ fn mixed_pointers() {
     let source = "*const *mut *mut i8";
     let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
         "error while parsing {:?} with name {:?}",
-        source,
-        name
+        source, name
     ));
     assert_eq!(
         format!("{}", parsed_type),
@@ -240,8 +216,7 @@ fn function_pointers() {
     let source = "extern fn(hi: libc::c_int) -> libc::c_double";
     let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
         "error while parsing {:?} with name {:?}",
-        source,
-        name
+        source, name
     ));
     assert_eq!(
         format!("{}", parsed_type),
@@ -254,17 +229,14 @@ fn paths() {
     let name = "zachariel";
 
     let source = "MyType";
-    let parsed_type = super::anon_rust_to_c(&ty(source)).expect(&format!(
-        "error while parsing {:?} with no name",
-        source
-    ));
+    let parsed_type = super::anon_rust_to_c(&ty(source))
+        .expect(&format!("error while parsing {:?} with no name", source));
     assert_eq!(format!("{}", parsed_type), "MyType");
 
     let source = "SomeType";
     let parsed_type = super::rust_to_c(&ty(source), name).expect(&format!(
         "error while parsing {:?} with name {:?}",
-        source,
-        name
+        source, name
     ));
     assert_eq!(format!("{}", parsed_type), format!("SomeType {}", name));
 

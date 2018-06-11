@@ -3,19 +3,21 @@
 mod jni;
 mod types;
 
-use Error;
-use Level;
-use common::{self, Outputs, append_output, check_no_mangle, is_array_arg, is_user_data_arg,
-             parse_attr, retrieve_docstring};
+use common::{
+    self, append_output, check_no_mangle, is_array_arg, is_user_data_arg, parse_attr,
+    retrieve_docstring, Outputs,
+};
 use inflector::Inflector;
 use java::types::{callback_name, java_type_to_str, rust_to_java, struct_to_java_classname};
 use jni::signature::JavaType;
 use rustfmt;
 use std::collections::{BTreeSet, HashMap};
-use struct_field::{StructField, transform_struct_fields};
-use syntax::{ast, codemap};
+use struct_field::{transform_struct_fields, StructField};
 use syntax::abi::Abi;
 use syntax::print::pprust;
+use syntax::{ast, codemap};
+use Error;
+use Level;
 
 pub struct LangJava {
     context: Context,
@@ -302,18 +304,18 @@ fn generate_getters_setters(fields: &[JavaClassField]) -> Result<String, Error> 
 
     for field in fields {
         buffer.push_str(&format!(
-                        "\tpublic {ty} get{capitalized}() {{\n\t\treturn {name};\n\t}}\n\n",
-                        ty = field.ty_str,
-                        name = field.name,
-                        capitalized = field.name.to_class_case(),
-                    ));
+            "\tpublic {ty} get{capitalized}() {{\n\t\treturn {name};\n\t}}\n\n",
+            ty = field.ty_str,
+            name = field.name,
+            capitalized = field.name.to_class_case(),
+        ));
         buffer.push_str(&format!(
-                        "\tpublic void set{capitalized}(final {ty} val) {{\n\t\tthis.{name} \
-                         = val;\n\t}}\n\n",
-                        ty = field.ty_str,
-                        name = field.name,
-                        capitalized = field.name.to_class_case(),
-                    ));
+            "\tpublic void set{capitalized}(final {ty} val) {{\n\t\tthis.{name} \
+             = val;\n\t}}\n\n",
+            ty = field.ty_str,
+            name = field.name,
+            capitalized = field.name.to_class_case(),
+        ));
     }
 
     Ok(buffer)
@@ -481,11 +483,10 @@ pub fn transform_native_fn(
         ast::Ident::from_str(name),
         &ast::Generics::default(),
     );
-    let mut jni =
-        format!(
-            "\n#[link(name = \"safe_app\")]\nextern {{ {fndecl}; }}\n",
-            fndecl = fn_decl_import,
-        );
+    let mut jni = format!(
+        "\n#[link(name = \"safe_app\")]\nextern {{ {fndecl}; }}\n",
+        fndecl = fn_decl_import,
+    );
 
     // Generate the JNI part of the interface
     jni.push_str(&jni::generate_jni_function(
@@ -611,9 +612,7 @@ mod tests {
         let inputs = get_inputs("fn dummy() {}");
         assert_eq!("CallbackVoid", unwrap!(callback_name(&inputs, &context)));
 
-        let inputs = get_inputs(
-            "fn dummy(user_data: *mut c_void, result: *const FfiResult) {}",
-        );
+        let inputs = get_inputs("fn dummy(user_data: *mut c_void, result: *const FfiResult) {}");
         assert_eq!("CallbackResult", unwrap!(callback_name(&inputs, &context)));
 
         let inputs = get_inputs(

@@ -14,7 +14,7 @@ macro_rules! try_opt {
             Some(value) => value,
             None => return None,
         }
-    }
+    };
 }
 
 #[derive(Clone, Debug)]
@@ -111,7 +111,6 @@ pub struct EnumVariant {
     pub value: Option<i64>,
 }
 
-
 pub fn transform_type(input: &ast::Ty) -> Option<Type> {
     match input.node {
         ast::TyKind::Array(ref ty, ref size) => transform_array(ty, size),
@@ -130,12 +129,10 @@ pub fn transform_type(input: &ast::Ty) -> Option<Type> {
 pub fn transform_function(decl: &ast::FnDecl) -> Option<Function> {
     let output = match decl.output {
         ast::FunctionRetTy::Default(..) => Type::Unit,
-        ast::FunctionRetTy::Ty(ref ty) => {
-            match transform_type(ty) {
-                Some(ty) => ty,
-                None => return None,
-            }
-        }
+        ast::FunctionRetTy::Ty(ref ty) => match transform_type(ty) {
+            Some(ty) => ty,
+            None => return None,
+        },
     };
 
     let mut inputs = Vec::with_capacity(decl.inputs.len());
@@ -160,12 +157,8 @@ pub fn transform_function(decl: &ast::FnDecl) -> Option<Function> {
 
         if let Some(one) = one {
             if let Some(two) = two {
-                if let Some(new_one) = transform_ptr_and_len_to_array(
-                    &one.0,
-                    &one.1,
-                    &two.0,
-                    &two.1,
-                )
+                if let Some(new_one) =
+                    transform_ptr_and_len_to_array(&one.0, &one.1, &two.0, &two.1)
                 {
                     inputs.push(new_one);
                 } else {
@@ -236,7 +229,9 @@ pub fn transform_struct(fields: &[ast::StructField]) -> Option<Struct> {
         })
         .collect();
 
-    fields.map(|fields| Struct { fields: process_struct_fields(fields) })
+    fields.map(|fields| Struct {
+        fields: process_struct_fields(fields),
+    })
 }
 
 /// Is the given parameter an `user_data` for a callback?
@@ -304,8 +299,9 @@ fn transform_const_literal(lit: &ast::Lit) -> Option<ConstValue> {
         ast::LitKind::Byte(value) => ConstValue::Int(i64::from(value)),
         ast::LitKind::Char(value) => ConstValue::Char(value),
         ast::LitKind::Int(value, _) => ConstValue::Int(value as i64),
-        ast::LitKind::Float(ref value, _) |
-        ast::LitKind::FloatUnsuffixed(ref value) => ConstValue::Float(value.as_str().to_string()),
+        ast::LitKind::Float(ref value, _) | ast::LitKind::FloatUnsuffixed(ref value) => {
+            ConstValue::Float(value.as_str().to_string())
+        }
         ast::LitKind::Str(ref value, ..) => ConstValue::String(value.as_str().to_string()),
         // TODO: LitKind::ByteStr
         _ => return None,
@@ -327,14 +323,13 @@ fn transform_const_struct(path: &ast::Path, fields: &[ast::Field]) -> Option<Con
     let name = pprust::path_to_string(path);
     let fields: Option<BTreeMap<_, _>> = fields
         .into_iter()
-        .map(|field| if let Some(value) = transform_const_value(
-            &*field.expr,
-        )
-        {
-            let name = field.ident.node.name.as_str().to_string();
-            Some((name, value))
-        } else {
-            None
+        .map(|field| {
+            if let Some(value) = transform_const_value(&*field.expr) {
+                let name = field.ident.node.name.as_str().to_string();
+                Some((name, value))
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -360,8 +355,7 @@ fn transform_array(ty: &ast::Ty, size: &ast::Expr) -> Option<Type> {
     };
 
     let ty = match transform_type(ty) {
-        None |
-        Some(Type::Array { .. }) => return None, // multi-dimensional array not supported yet
+        None | Some(Type::Array { .. }) => return None, // multi-dimensional array not supported yet
         Some(ty) => ty,
     };
 
@@ -432,9 +426,7 @@ fn transform_path(input: &ast::Ty) -> Option<Type> {
     let output = match full.as_str() {
         "bool" => Type::Bool,
         "char" => Type::Char,
-        "c_char" |
-        "libc::c_char" |
-        "std::os::raw::c_char" => Type::CChar,
+        "c_char" | "libc::c_char" | "std::os::raw::c_char" => Type::CChar,
         "f32" => Type::F32,
         "f64" => Type::F64,
         "i8" => Type::I8,
@@ -447,9 +439,7 @@ fn transform_path(input: &ast::Ty) -> Option<Type> {
         "u32" => Type::U32,
         "u64" => Type::U64,
         "usize" => Type::USize,
-        "c_void" |
-        "libc::c_void" |
-        "std::os::raw::c_void" => Type::Unit,
+        "c_void" | "libc::c_void" | "std::os::raw::c_void" => Type::Unit,
         "str" => Type::String,
         name => Type::User(name.to_string()),
     };
@@ -510,12 +500,8 @@ fn process_struct_fields(mut input: Vec<StructField>) -> Vec<StructField> {
 
     loop {
         if let Some(field1) = iter.next() {
-            if let Some((name, ty)) = transform_ptr_and_len_to_array(
-                &field0.name,
-                &field0.ty,
-                &field1.name,
-                &field1.ty,
-            )
+            if let Some((name, ty)) =
+                transform_ptr_and_len_to_array(&field0.name, &field0.ty, &field1.name, &field1.ty)
             {
                 output.push(StructField {
                     docs: String::new(),

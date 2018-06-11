@@ -1,8 +1,8 @@
 //! Functions for actually parsing the source file.
 
-use Error;
 use common::{Lang, Outputs};
 use syntax::ast;
+use Error;
 
 /// Returns a list of FFI submodules imported in a top-level module
 pub fn imported_mods(module: &ast::Mod) -> Vec<Vec<String>> {

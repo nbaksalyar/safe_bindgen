@@ -1,12 +1,12 @@
 //! Functions for converting Rust types to Java types.
 
-use {Error, Level};
 use common::{is_array_arg, is_result_arg, is_user_data_arg};
 use java::Context;
 use jni::signature::{JavaType, Primitive};
-use syntax::{ast, codemap};
 use syntax::abi::Abi;
 use syntax::print::pprust;
+use syntax::{ast, codemap};
+use {Error, Level};
 
 fn primitive_type_to_str(ty: &Primitive) -> &str {
     match *ty {
@@ -26,12 +26,10 @@ fn primitive_type_to_str(ty: &Primitive) -> &str {
 pub fn java_type_to_str(ty: &JavaType) -> Result<String, Error> {
     match *ty {
         JavaType::Primitive(ref primitive) => Ok(primitive_type_to_str(primitive).to_string()),
-        JavaType::Object(ref obj) => {
-            match obj.as_str() {
-                "java/lang/String" => Ok("String".into()),
-                _ => Ok(obj.to_string()),
-            }
-        }
+        JavaType::Object(ref obj) => match obj.as_str() {
+            "java/lang/String" => Ok("String".into()),
+            _ => Ok(obj.to_string()),
+        },
         JavaType::Array(ref boxed) => Ok(format!("{}[]", java_type_to_str(&*boxed)?)),
         JavaType::Method(..) => Err(Error {
             level: Level::Error,
@@ -112,9 +110,10 @@ fn callback_arg_to_java(
         });
     }
 
-    Ok(JavaType::Object(
-        callback_name(&*fn_ty.decl.inputs, context)?,
-    ))
+    Ok(JavaType::Object(callback_name(
+        &*fn_ty.decl.inputs,
+        context,
+    )?))
 }
 
 /// Turn a Rust type with an associated name or type into a C type.
@@ -209,9 +208,10 @@ fn path_to_java(
 
     // Types in modules, `my_mod::MyType`.
     if path.segments.len() > 1 {
-        let (ty, module) = path.segments.split_last().expect(
-            "already checked that there were at least two elements",
-        );
+        let (ty, module) = path
+            .segments
+            .split_last()
+            .expect("already checked that there were at least two elements");
         let ty: &str = &ty.identifier.name.as_str();
         let mut segments = Vec::with_capacity(module.len());
         for segment in module {
@@ -219,9 +219,9 @@ fn path_to_java(
         }
         let module = segments.join("::");
         match &*module {
-            "std::os::raw" | "libc" => Ok(rust_ty_to_java(ty).unwrap_or_else(
-                || JavaType::Object(ty.to_string()),
-            )),
+            "std::os::raw" | "libc" => {
+                Ok(rust_ty_to_java(ty).unwrap_or_else(|| JavaType::Object(ty.to_string())))
+            }
             _ => Err(Error {
                 level: Level::Error,
                 span: Some(path.span),
@@ -255,15 +255,15 @@ pub fn rust_ty_to_java(ty: &str) -> Option<JavaType> {
         "c_bool" | "bool" => Some(JavaType::Primitive(Primitive::Boolean)), // "boolean",
         "c_float" | "f32" => Some(JavaType::Primitive(Primitive::Float)), // "float",
         "c_double" | "f64" => Some(JavaType::Primitive(Primitive::Double)), // "double",
-        "c_char" | "c_schar" | "c_uchar" | "u8" | "i8" => Some(
-            JavaType::Primitive(Primitive::Byte),
-        ), // "byte",
+        "c_char" | "c_schar" | "c_uchar" | "u8" | "i8" => {
+            Some(JavaType::Primitive(Primitive::Byte))
+        } // "byte",
         "c_short" | "c_ushort" | "u16" | "i16" => Some(JavaType::Primitive(Primitive::Short)),
         // "short",
         "c_int" | "c_uint" | "u32" | "i32" => Some(JavaType::Primitive(Primitive::Int)), // "int",
-        "c_long" | "c_ulong" | "u64" | "i64" | "usize" | "isize" => Some(JavaType::Primitive(
-            Primitive::Long,
-        )), // "long",
+        "c_long" | "c_ulong" | "u64" | "i64" | "usize" | "isize" => {
+            Some(JavaType::Primitive(Primitive::Long))
+        } // "long",
         _ => None, // unknown type
     }
 }
@@ -312,16 +312,18 @@ mod tests {
         );
 
         assert_eq!(
-            unwrap!(java_type_to_str(
-                &JavaType::Object("net.maidsafe.Test".to_string()),
-            )).as_str(),
+            unwrap!(java_type_to_str(&JavaType::Object(
+                "net.maidsafe.Test".to_string()
+            ),))
+                .as_str(),
             "net.maidsafe.Test"
         );
 
         assert_eq!(
-            unwrap!(java_type_to_str(&JavaType::Array(
-                Box::new(JavaType::Primitive(Primitive::Byte)),
-            ))).as_str(),
+            unwrap!(java_type_to_str(&JavaType::Array(Box::new(
+                JavaType::Primitive(Primitive::Byte)
+            ),)))
+                .as_str(),
             "byte[]"
         );
     }

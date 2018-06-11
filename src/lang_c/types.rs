@@ -15,7 +15,6 @@ impl Display for CTypeNamed {
             // For all other cases we add a type prefix
             _ => write!(f, "{} {}", self.1, self.0),
         }
-
     }
 }
 
@@ -55,16 +54,15 @@ impl CType {
                 ref args,
                 ref return_type,
                 ..
-            } => {
-                return_type
-                    .dependencies()
-                    .iter()
-                    .cloned()
-                    .chain(args.iter().flat_map(
-                        |&CTypeNamed(_, ref cty)| cty.dependencies(),
-                    ))
-                    .collect()
-            }
+            } => return_type
+                .dependencies()
+                .iter()
+                .cloned()
+                .chain(
+                    args.iter()
+                        .flat_map(|&CTypeNamed(_, ref cty)| cty.dependencies()),
+                )
+                .collect(),
             CType::Ptr(ref cty, _) => cty.dependencies(),
             CType::Mapping(ref mapping) => vec![mapping.clone()],
             _ => Default::default(),
@@ -83,22 +81,20 @@ impl Display for CType {
                 ref inner,
                 ref args,
                 ref return_type,
-            } => {
-                write!(
-                    f,
-                    "{} (*{})({})",
-                    return_type,
-                    inner,
-                    if args.is_empty() {
-                        "void".to_string()
-                    } else {
-                        args.iter()
-                            .map(|cty| format!("{}", cty))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    }
-                )
-            }
+            } => write!(
+                f,
+                "{} (*{})({})",
+                return_type,
+                inner,
+                if args.is_empty() {
+                    "void".to_string()
+                } else {
+                    args.iter()
+                        .map(|cty| format!("{}", cty))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            ),
         }
     }
 }

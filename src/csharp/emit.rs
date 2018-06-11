@@ -1,7 +1,7 @@
 //! Utilities for emiting fragments of the target language code.
 
-use super::Context;
 use super::intermediate::*;
+use super::Context;
 use inflector::Inflector;
 use output::IndentedWriter;
 use std::fmt::Write;
@@ -94,14 +94,12 @@ pub fn emit_wrapper_function(
             let name = param_name(name, index);
 
             match *ty {
-                Type::Array(_, ArraySize::Dynamic) => {
-                    emit!(
-                        writer,
-                        "{0}?.ToArray(), ({1}) ({0}?.Count ?? 0)",
-                        name,
-                        LEN_TYPE
-                    )
-                }
+                Type::Array(_, ArraySize::Dynamic) => emit!(
+                    writer,
+                    "{0}?.ToArray(), ({1}) ({0}?.Count ?? 0)",
+                    name,
+                    LEN_TYPE
+                ),
                 Type::Pointer(ref ty) => {
                     emit_pointer_use(writer, context, ty, &name.to_camel_case(), Mode::ExternFunc)
                 }
@@ -205,8 +203,7 @@ pub fn emit_const(writer: &mut IndentedWriter, context: &Context, name: &str, it
     emit!(writer, "public ");
 
     match item.value {
-        ConstValue::Array(..) |
-        ConstValue::Struct(..) => emit!(writer, "static readonly "),
+        ConstValue::Array(..) | ConstValue::Struct(..) => emit!(writer, "static readonly "),
         _ => emit!(writer, "const "),
     }
 
@@ -742,40 +739,41 @@ fn emit_type(writer: &mut IndentedWriter, context: &Context, ty: &Type, mode: Mo
             }
         }
         Type::String => emit!(writer, "string"),
-        Type::Pointer(ref ty) => {
-            match **ty {
-                Type::Array(ref ty, ref size) => emit_array(writer, context, ty, size, mode),
-                Type::User(ref name) => {
-                    if mode == Mode::Callback || mode == Mode::Const ||
-                        mode == Mode::NormalStruct ||
-                        mode == Mode::WrapperStruct ||
-                        context.is_opaque(name)
-                    {
-                        emit!(writer, "IntPtr")
-                    } else if mode == Mode::Generic {
-                        emit!(writer, "{}", name)
-                    } else if mode == Mode::ExternFunc && context.is_native_name(name) {
-                        emit!(writer, "ref {}Native", name)
-                    } else {
-                        emit!(writer, "ref {}", name)
-                    }
+        Type::Pointer(ref ty) => match **ty {
+            Type::Array(ref ty, ref size) => emit_array(writer, context, ty, size, mode),
+            Type::User(ref name) => {
+                if mode == Mode::Callback
+                    || mode == Mode::Const
+                    || mode == Mode::NormalStruct
+                    || mode == Mode::WrapperStruct
+                    || context.is_opaque(name)
+                {
+                    emit!(writer, "IntPtr")
+                } else if mode == Mode::Generic {
+                    emit!(writer, "{}", name)
+                } else if mode == Mode::ExternFunc && context.is_native_name(name) {
+                    emit!(writer, "ref {}Native", name)
+                } else {
+                    emit!(writer, "ref {}", name)
                 }
-                Type::Pointer(_) => {
-                    if mode == Mode::WrapperFunc || mode == Mode::ExternFunc {
-                        emit!(writer, "out IntPtr")
-                    } else {
-                        emit!(writer, "IntPtr")
-                    }
-                }
-                _ => emit!(writer, "IntPtr"),
             }
-        }
+            Type::Pointer(_) => {
+                if mode == Mode::WrapperFunc || mode == Mode::ExternFunc {
+                    emit!(writer, "out IntPtr")
+                } else {
+                    emit!(writer, "IntPtr")
+                }
+            }
+            _ => emit!(writer, "IntPtr"),
+        },
         Type::Array(ref ty, ref size) => emit_array(writer, context, ty, size, mode),
         Type::Function(..) => unimplemented!(),
         Type::User(ref name) => {
-            if context.is_native_name(name) &&
-                (mode == Mode::Callback || mode == Mode::Const || mode == Mode::ExternFunc ||
-                     mode == Mode::NormalStruct)
+            if context.is_native_name(name)
+                && (mode == Mode::Callback
+                    || mode == Mode::Const
+                    || mode == Mode::ExternFunc
+                    || mode == Mode::NormalStruct)
             {
                 emit!(writer, "{}Native", name)
             } else {
@@ -792,8 +790,8 @@ fn emit_array(
     size: &ArraySize,
     mode: Mode,
 ) {
-    if (mode == Mode::WrapperFunc || mode == Mode::WrapperStruct || mode == Mode::Generic) &&
-        *size == ArraySize::Dynamic
+    if (mode == Mode::WrapperFunc || mode == Mode::WrapperStruct || mode == Mode::Generic)
+        && *size == ArraySize::Dynamic
     {
         emit!(writer, "List<");
         emit_type(writer, context, ty, mode);
@@ -821,19 +819,15 @@ fn emit_args(
         let name = param_name(name, offset + index);
         match *ty {
             Type::Array(ref ty, ref size) => emit_array_use(writer, context, ty, size, &name),
-            Type::Pointer(ref ty) => {
-                match **ty {
-                    Type::Array(ref ty, ref size) => {
-                        emit_array_use(writer, context, ty, size, &name)
-                    }
-                    Type::User(ref type_name) if context.is_native_name(type_name) => {
-                        emit!(writer, "new {}(", type_name);
-                        emit_pointer_use(writer, context, ty, &name, mode);
-                        emit!(writer, ")");
-                    }
-                    _ => emit_pointer_use(writer, context, ty, &name, mode),
+            Type::Pointer(ref ty) => match **ty {
+                Type::Array(ref ty, ref size) => emit_array_use(writer, context, ty, size, &name),
+                Type::User(ref type_name) if context.is_native_name(type_name) => {
+                    emit!(writer, "new {}(", type_name);
+                    emit_pointer_use(writer, context, ty, &name, mode);
+                    emit!(writer, ")");
                 }
-            }
+                _ => emit_pointer_use(writer, context, ty, &name, mode),
+            },
             Type::User(ref type_name) if context.is_native_name(type_name) => {
                 emit!(writer, "new {}({})", type_name, name);
             }
@@ -852,8 +846,9 @@ fn emit_pointer_use(
 ) {
     match *ty {
         Type::User(ref pointee)
-            if mode == Mode::WrapperFunc ||
-                   mode == Mode::ExternFunc && !context.is_opaque(pointee) => {
+            if mode == Mode::WrapperFunc
+                || mode == Mode::ExternFunc && !context.is_opaque(pointee) =>
+        {
             emit!(writer, "ref {}", name);
         }
         Type::User(ref pointee) if mode == Mode::Callback && !context.is_opaque(pointee) => {
@@ -982,7 +977,6 @@ fn emit_copy_utility_suffix(
             if add_type {
                 if context.is_native_name(name) {
                     emit!(writer, "<{}Native>", name);
-
                 } else {
                     emit!(writer, "<{}>", name);
                 }
