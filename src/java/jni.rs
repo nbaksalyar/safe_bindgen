@@ -562,18 +562,15 @@ fn generate_struct_to_java(
                             )?;
                         }
                     } else {
-                        let signature = format!(
-                            "{}",
-                            JavaType::Array(Box::new(unwrap!(rust_ty_to_signature(
-                                &ptr.ty, context
-                            ))),)
-                        );
+                        let full_ty = unwrap!(rust_ty_to_signature(&ptr.ty, context));
+                        let signature = format!("{}", JavaType::Array(Box::new(full_ty.clone()),));
+                        let full_ty_str = format!("{}", full_ty);
 
                         // Struct array
                         quote! {
                             let arr = env.new_object_array(
                                 self.#len_field_ident as jni::sys::jsize,
-                                #ty_str,
+                                #full_ty_str,
                                 JObject::null()
                             )?;
                             let items = unsafe {
