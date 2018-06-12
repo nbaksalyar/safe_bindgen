@@ -6,17 +6,17 @@ mod tests;
 
 use self::emit::*;
 use self::intermediate::*;
-use Error;
-use Level;
 use common::{self, FilterMode, Lang, Outputs};
 use inflector::Inflector;
 use output::IndentedWriter;
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Display, Write};
 use std::mem;
 use syntax::ast;
 use syntax::print::pprust;
+use Error;
+use Level;
 
 const INDENT_WIDTH: usize = 2;
 
@@ -86,7 +86,6 @@ impl Section {
         }
     }
 }
-
 
 impl LangCSharp {
     pub fn new() -> Self {
@@ -312,15 +311,13 @@ impl Lang for LangCSharp {
                 return Ok(());
             }
 
-            let ty = transform_type(ty).ok_or_else(|| {
-                Error {
-                    level: Level::Error,
-                    span: Some(ty.span),
-                    message: format!(
-                        "bindgen can not handle the type `{}`",
-                        pprust::ty_to_string(ty)
-                    ),
-                }
+            let ty = transform_type(ty).ok_or_else(|| Error {
+                level: Level::Error,
+                span: Some(ty.span),
+                message: format!(
+                    "bindgen can not handle the type `{}`",
+                    pprust::ty_to_string(ty)
+                ),
             })?;
 
             self.aliases.insert(name.to_string(), ty);
@@ -343,15 +340,13 @@ impl Lang for LangCSharp {
         let docs = common::parse_attr(&item.attrs, |_| true, retrieve_docstring).1;
 
         if let ast::ItemKind::Const(ref ty, ref expr) = item.node {
-            let item = transform_const(ty, expr).ok_or_else(|| {
-                Error {
-                    level: Level::Error,
-                    span: Some(expr.span),
-                    message: format!(
-                        "bindgen can not handle constant {}",
-                        pprust::item_to_string(item)
-                    ),
-                }
+            let item = transform_const(ty, expr).ok_or_else(|| Error {
+                level: Level::Error,
+                span: Some(expr.span),
+                message: format!(
+                    "bindgen can not handle constant {}",
+                    pprust::item_to_string(item)
+                ),
             })?;
             let name = name.to_string();
 
@@ -385,15 +380,13 @@ impl Lang for LangCSharp {
                 return Err(unsupported_generics_error(item, "enums"));
             }
 
-            let item = transform_enum(variants).ok_or_else(|| {
-                Error {
-                    level: Level::Error,
-                    span: Some(item.span),
-                    message: format!(
-                        "bindgen can not handle enum {}",
-                        pprust::item_to_string(item)
-                    ),
-                }
+            let item = transform_enum(variants).ok_or_else(|| Error {
+                level: Level::Error,
+                span: Some(item.span),
+                message: format!(
+                    "bindgen can not handle enum {}",
+                    pprust::item_to_string(item)
+                ),
             })?;
             let name = name.to_string();
 
@@ -435,15 +428,13 @@ impl Lang for LangCSharp {
                 });
             }
 
-            let item = transform_struct(variants.fields()).ok_or_else(|| {
-                Error {
-                    level: Level::Error,
-                    span: Some(item.span),
-                    message: format!(
-                        "bindgen can not handle struct {}",
-                        pprust::item_to_string(item)
-                    ),
-                }
+            let item = transform_struct(variants.fields()).ok_or_else(|| Error {
+                level: Level::Error,
+                span: Some(item.span),
+                message: format!(
+                    "bindgen can not handle struct {}",
+                    pprust::item_to_string(item)
+                ),
             })?;
             let name = name.to_string();
             self.structs.push(Snippet { docs, name, item });
@@ -580,9 +571,7 @@ impl Lang for LangCSharp {
             let functions: Vec<_> = mem::replace(&mut self.functions, Vec::new());
             let mut functions = functions
                 .into_iter()
-                .filter(|snippet| {
-                    self.is_interface_function(&snippet.name, &snippet.item)
-                })
+                .filter(|snippet| self.is_interface_function(&snippet.name, &snippet.item))
                 .peekable();
 
             if functions.peek().is_some() {
@@ -674,7 +663,6 @@ impl Lang for LangCSharp {
                 self.context.consts_section.path.clone(),
                 writer.into_inner(),
             );
-
         }
 
         // Types
@@ -743,8 +731,7 @@ fn resolve_alias(aliases: &HashMap<String, Type>, new_ty: &mut Type) {
                 return;
             }
         }
-        Type::Pointer(ref mut ty) |
-        Type::Array(ref mut ty, _) => {
+        Type::Pointer(ref mut ty) | Type::Array(ref mut ty, _) => {
             resolve_alias(aliases, ty);
         }
         Type::Function(ref mut fun) => {

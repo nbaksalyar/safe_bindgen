@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
-use syntax::{ast, symbol};
 use syntax::print::pprust;
+use syntax::{ast, symbol};
 
 #[derive(Debug)]
 pub enum StructField {
@@ -21,11 +21,11 @@ pub enum StructField {
 impl StructField {
     pub fn struct_field(&self) -> &ast::StructField {
         match *self {
-            StructField::Primitive(ref f) |
-            StructField::Array { field: ref f, .. } |
-            StructField::StructPtr { field: ref f, .. } |
-            StructField::String(ref f) |
-            StructField::LenField(ref f) => f,
+            StructField::Primitive(ref f)
+            | StructField::Array { field: ref f, .. }
+            | StructField::StructPtr { field: ref f, .. }
+            | StructField::String(ref f)
+            | StructField::LenField(ref f) => f,
         }
     }
 
@@ -100,9 +100,10 @@ fn is_array_meta_field(field: &ast::StructField) -> bool {
     let str_name = field.ident.unwrap().name.as_str();
 
     if let ast::TyKind::Path(None, ref path) = field.ty.node {
-        let (ty, _module) = path.segments.split_last().expect(
-            "already checked that there were at least two elements",
-        );
+        let (ty, _module) = path
+            .segments
+            .split_last()
+            .expect("already checked that there were at least two elements");
         let ty: &str = &ty.identifier.name.as_str();
 
         ty == "usize" && (str_name.ends_with("_len") || str_name.ends_with("_cap"))

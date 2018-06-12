@@ -1,10 +1,10 @@
 //! Functions common for all target languages.
 
-use Error;
 use std::collections::hash_map::{Entry, HashMap};
 use syntax::abi::Abi;
 use syntax::ast;
 use syntax::print::pprust;
+use Error;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum FilterMode {
@@ -94,32 +94,29 @@ pub fn check_no_mangle(attr: &ast::Attribute) -> bool {
 
 /// Check the function argument is `user_data: *mut c_void`
 pub fn is_user_data_arg(arg: &ast::Arg) -> bool {
-    pprust::pat_to_string(&*arg.pat) == "user_data" &&
-        pprust::ty_to_string(&*arg.ty) == "*mut c_void"
+    pprust::pat_to_string(&*arg.pat) == "user_data"
+        && pprust::ty_to_string(&*arg.ty) == "*mut c_void"
 }
 
 /// Check the function argument is `result: *const FfiResult`
 pub fn is_result_arg(arg: &ast::Arg) -> bool {
-    pprust::pat_to_string(&*arg.pat) == "result" &&
-        pprust::ty_to_string(&*arg.ty) == "*const FfiResult"
+    pprust::pat_to_string(&*arg.pat) == "result"
+        && pprust::ty_to_string(&*arg.ty) == "*const FfiResult"
 }
 
 /// Check the function argument is a length argument for a *const u8 pointer
 pub fn is_ptr_len_arg(ty: &ast::Ty, arg_name: &str) -> bool {
-    pprust::ty_to_string(ty) == "usize" &&
-        (arg_name.ends_with("_len") || arg_name == "len" || arg_name == "size")
+    pprust::ty_to_string(ty) == "usize"
+        && (arg_name.ends_with("_len") || arg_name == "len" || arg_name == "size")
 }
-
 
 /// Detect array ptrs and skip the length args - e.g. for a case of
 /// `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
 pub fn is_array_arg(arg: &ast::Arg, next_arg: Option<&ast::Arg>) -> bool {
     if let ast::TyKind::Ptr(..) = arg.ty.node {
-        !is_result_arg(arg) &&
-            next_arg
-                .map(|arg| {
-                    is_ptr_len_arg(&*arg.ty, &pprust::pat_to_string(&*arg.pat))
-                })
+        !is_result_arg(arg)
+            && next_arg
+                .map(|arg| is_ptr_len_arg(&*arg.ty, &pprust::pat_to_string(&*arg.pat)))
                 .unwrap_or(false)
     } else {
         false

@@ -5,39 +5,43 @@
 
 // For explanation of lint checks, run `rustc -W help` or see
 // https://github.com/maidsafe/QA/blob/master/Documentation/Rust%20Lint%20Checks.md
-#![forbid(exceeding_bitshifts, mutable_transmutes, no_mangle_const_items,
-          unknown_crate_types, warnings)]
-#![deny(deprecated, improper_ctypes, non_shorthand_field_patterns, overflowing_literals,
-        plugin_as_library, private_no_mangle_fns, private_no_mangle_statics, stable_features,
-        unconditional_recursion, unknown_lints, unsafe_code, unused, unused_allocation,
-        unused_attributes, unused_comparisons, unused_features, unused_parens, while_true)]
-#![warn(trivial_casts, trivial_numeric_casts, unused_extern_crates, unused_import_braces,
-        unused_qualifications)]
-#![allow(box_pointers, missing_copy_implementations,
-         missing_debug_implementations, variant_size_differences)]
-
+#![forbid(
+    exceeding_bitshifts, mutable_transmutes, no_mangle_const_items, unknown_crate_types, warnings
+)]
+#![deny(
+    deprecated, improper_ctypes, non_shorthand_field_patterns, overflowing_literals,
+    plugin_as_library, private_no_mangle_fns, private_no_mangle_statics, stable_features,
+    unconditional_recursion, unknown_lints, unsafe_code, unused, unused_allocation,
+    unused_attributes, unused_comparisons, unused_features, unused_parens, while_true
+)]
+#![warn(
+    trivial_casts, trivial_numeric_casts, unused_extern_crates, unused_import_braces,
+    unused_qualifications
+)]
+#![allow(
+    box_pointers, missing_copy_implementations, missing_debug_implementations,
+    variant_size_differences
+)]
 // FIXME: add documentation and deny `missing_documentation`
 #![allow(missing_docs)]
-
 #![cfg_attr(not(feature = "with-syntex"), feature(rustc_private))]
+#![recursion_limit = "128"]
 
-#![recursion_limit="128"]
-
-#[cfg(feature = "with-syntex")]
-extern crate syntex_errors as errors;
+extern crate inflector;
 #[cfg(not(feature = "with-syntex"))]
 extern crate rustc_errors as errors;
-#[cfg(feature = "with-syntex")]
-extern crate syntex_syntax as syntax;
 #[cfg(not(feature = "with-syntex"))]
 extern crate syntax;
-extern crate inflector;
+#[cfg(feature = "with-syntex")]
+extern crate syntex_errors as errors;
+#[cfg(feature = "with-syntex")]
+extern crate syntex_syntax as syntax;
 extern crate toml;
 #[macro_use]
 extern crate quote;
 extern crate jni;
-extern crate rustfmt;
 extern crate petgraph;
+extern crate rustfmt;
 
 #[cfg(test)]
 extern crate colored;
@@ -49,8 +53,8 @@ extern crate indoc;
 #[macro_use]
 extern crate unwrap;
 
-use common::{Lang, Outputs};
 pub use common::FilterMode;
+use common::{Lang, Outputs};
 pub use csharp::LangCSharp;
 pub use errors::Level;
 pub use java::LangJava;
@@ -58,14 +62,14 @@ pub use lang_c::LangC;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
-use std::io::{Read, Write};
 use std::io::Error as IoError;
+use std::io::{Read, Write};
 use std::path::{self, Component, Path, PathBuf};
 
 mod common;
-mod lang_c;
 mod csharp;
 mod java;
+mod lang_c;
 mod output;
 mod parse;
 mod struct_field;
@@ -146,16 +150,13 @@ impl Error {
                     sess.span_diagnostic.span_warn(span, &self.message);
                 }
                 Level::Note => {
-                    sess.span_diagnostic.span_note_without_error(
-                        span,
-                        &self.message,
-                    );
+                    sess.span_diagnostic
+                        .span_note_without_error(span, &self.message);
                 }
                 Level::Help => {
-                    sess.span_diagnostic.struct_dummy().span_help(
-                        span,
-                        &self.message,
-                    );
+                    sess.span_diagnostic
+                        .struct_dummy()
+                        .span_help(span, &self.message);
                 }
                 _ => unreachable!(),
             };
@@ -375,9 +376,9 @@ fn convert_lib_path_to_module<P: AsRef<Path>>(path: &P) -> Vec<String> {
 
 /// Extract the path to the root source file from a `Cargo.toml`.
 fn source_file_from_cargo() -> Result<String, Error> {
-    let cargo_toml = path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| {
-        std::ffi::OsString::from("")
-    })).join("Cargo.toml");
+    let cargo_toml = path::Path::new(
+        &std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| std::ffi::OsString::from("")),
+    ).join("Cargo.toml");
 
     // If no `Cargo.toml` assume `src/lib.rs` until told otherwise.
     let default = "src/lib.rs";
@@ -410,12 +411,10 @@ fn source_file_from_cargo() -> Result<String, Error> {
     };
 
     // If not explicitly stated then defaults to `src/lib.rs`.
-    Ok(
-        table
-            .get("lib")
-            .and_then(|t| t.get("path"))
-            .and_then(|s| s.as_str())
-            .unwrap_or(default)
-            .into(),
-    )
+    Ok(table
+        .get("lib")
+        .and_then(|t| t.get("path"))
+        .and_then(|s| s.as_str())
+        .unwrap_or(default)
+        .into())
 }

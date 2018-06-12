@@ -5,17 +5,18 @@ mod tests;
 mod types;
 
 use self::types::{CPtrType, CType, CTypeNamed};
-use Error;
-use Level;
-use common::{Lang, Outputs, append_output, check_no_mangle, check_repr_c, parse_attr,
-             retrieve_docstring};
-use petgraph::{Graph, algo};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use common::{
+    append_output, check_no_mangle, check_repr_c, parse_attr, retrieve_docstring, Lang, Outputs,
+};
+use petgraph::{algo, Graph};
 use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path;
-use syntax::{ast, codemap, print};
 use syntax::abi::Abi;
 use syntax::print::pprust;
+use syntax::{ast, codemap, print};
+use Error;
+use Level;
 
 pub struct LangC {
     lib_name: String,
@@ -187,10 +188,8 @@ impl Lang for LangC {
         buffer.push_str(&format!("typedef {};\n\n", new_type));
         self.append_to_header(buffer, module, outputs)?;
 
-        self.decls.insert(
-            name.to_string(),
-            header_name(module, &self.lib_name)?,
-        );
+        self.decls
+            .insert(name.to_string(), header_name(module, &self.lib_name)?);
 
         Ok(())
     }
@@ -207,11 +206,9 @@ impl Lang for LangC {
         module: &[String],
         outputs: &mut Outputs,
     ) -> Result<(), Error> {
-        let (repr_c, docs) = parse_attr(
-            &item.attrs,
-            check_repr_c,
-            |attr| retrieve_docstring(attr, ""),
-        );
+        let (repr_c, docs) = parse_attr(&item.attrs, check_repr_c, |attr| {
+            retrieve_docstring(attr, "")
+        });
         // If it's not #[repr(C)] then it can't be called from C.
         if !repr_c {
             return Ok(());
@@ -276,11 +273,9 @@ impl Lang for LangC {
         module: &[String],
         outputs: &mut Outputs,
     ) -> Result<(), Error> {
-        let (repr_c, docs) = parse_attr(
-            &item.attrs,
-            check_repr_c,
-            |attr| retrieve_docstring(attr, ""),
-        );
+        let (repr_c, docs) = parse_attr(&item.attrs, check_repr_c, |attr| {
+            retrieve_docstring(attr, "")
+        });
         // If it's not #[repr(C)] then it can't be called from C.
         if !repr_c {
             return Ok(());
@@ -344,10 +339,8 @@ impl Lang for LangC {
         buffer.push_str(&format!(" {};\n\n", name));
         self.append_to_header(buffer, module, outputs)?;
 
-        self.decls.insert(
-            name.to_string(),
-            header_name(module, &self.lib_name)?,
-        );
+        self.decls
+            .insert(name.to_string(), header_name(module, &self.lib_name)?);
 
         Ok(())
     }
@@ -389,13 +382,7 @@ impl Lang for LangC {
                 });
             }
 
-            self.transform_native_fn(
-                &*fn_decl,
-                &docs,
-                &format!("{}", name),
-                module,
-                outputs,
-            )?;
+            self.transform_native_fn(&*fn_decl, &docs, &format!("{}", name), module, outputs)?;
 
             Ok(())
         } else {
@@ -481,8 +468,9 @@ fn anon_rust_to_c(ty: &ast::Ty) -> Result<CType, Error> {
         ast::TyKind::BareFn(..) => Err(Error {
             level: Level::Error,
             span: Some(ty.span),
-            message: "C function ptrs must have a name or function declaration associated with them"
-                .into(),
+            message:
+                "C function ptrs must have a name or function declaration associated with them"
+                    .into(),
         }),
         // Fixed-length arrays, converted into pointers.
         ast::TyKind::Array(ref ty, _) => {
@@ -597,9 +585,10 @@ fn path_to_c(path: &ast::Path) -> Result<CType, Error> {
 
     // Types in modules, `my_mod::MyType`.
     if path.segments.len() > 1 {
-        let (ty, module) = path.segments.split_last().expect(
-            "already checked that there were at least two elements",
-        );
+        let (ty, module) = path
+            .segments
+            .split_last()
+            .expect("already checked that there were at least two elements");
         let ty: &str = &ty.identifier.name.as_str();
         let mut segments = Vec::with_capacity(module.len());
         for segment in module {
@@ -692,7 +681,6 @@ fn rust_ty_to_c(ty: &str) -> CType {
         ty => libc_ty_to_c(ty),
     }
 }
-
 
 /// Wrap a block of code with an extern declaration.
 fn wrap_extern(code: &str) -> String {

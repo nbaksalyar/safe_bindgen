@@ -10,9 +10,7 @@ use std::collections::HashMap;
 fn main() {
     let matches = clap::App::new("bindgen")
         .version(crate_version!())
-        .author(
-            "Sean Marshallsay <srm.1708@gmail.com>, MaidSafe Developers <dev@maidsafe.net>",
-        )
+        .author("Sean Marshallsay <srm.1708@gmail.com>, MaidSafe Developers <dev@maidsafe.net>")
         .about("create binding files using a Rust source file")
         .arg(
             clap::Arg::with_name("FILE")
@@ -38,9 +36,11 @@ fn main() {
                 .required(true)
                 .help("name of the native library to link"),
         )
-        .arg(clap::Arg::with_name("OUTPUT").index(1).help(
-            "set the output directory",
-        ))
+        .arg(
+            clap::Arg::with_name("OUTPUT")
+                .index(1)
+                .help("set the output directory"),
+        )
         .get_matches();
 
     let mut bindgen = Bindgen::new().expect("cargo manifest could not be read");

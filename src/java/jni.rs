@@ -1,7 +1,7 @@
 //! Functions to generate JNI bindings
 
-use super::{Context, Outputs};
 use super::types::{callback_name, rust_ty_to_java};
+use super::{Context, Outputs};
 use common::{append_output, is_array_arg, is_user_data_arg};
 use inflector::Inflector;
 use jni::signature::{self, JavaType, Primitive, TypeSignature};
@@ -23,9 +23,10 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
 
         // Plain old types.
         ast::TyKind::Path(None, ref path) => {
-            let (ty, _module) = path.segments.split_last().expect(
-                "already checked that there were at least two elements",
-            );
+            let (ty, _module) = path
+                .segments
+                .split_last()
+                .expect("already checked that there were at least two elements");
             let ty: &str = &ty.identifier.name.as_str();
 
             let jni_type = match ty {
@@ -50,7 +51,6 @@ fn transform_jni_arg(arg: &ast::Arg) -> quote::Tokens {
         }
 
         _ => to_jni_arg(arg, &pprust::ty_to_string(&arg.ty)),
-
     }
 }
 
@@ -79,9 +79,10 @@ fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
 
         // Plain old types.
         ast::TyKind::Path(None, ref path) => {
-            let (ty, _module) = path.segments.split_last().expect(
-                "already checked that there were at least two elements",
-            );
+            let (ty, _module) = path
+                .segments
+                .split_last()
+                .expect("already checked that there were at least two elements");
             let ty: &str = &ty.identifier.name.as_str();
             rust_ty_to_java(ty).or_else(|| Some(lookup_object_type(ty, context)))
         }
@@ -97,7 +98,6 @@ fn rust_ty_to_signature(ty: &ast::Ty, context: &Context) -> Option<JavaType> {
         }
 
         _ => None,
-
     }
 }
 
@@ -109,10 +109,9 @@ struct JniArgResult {
 fn transform_string_arg(arg_name: &str) -> JniArgResult {
     // statements
     let arg_name = quote::Ident::new(arg_name);
-    let stmt =
-        quote! {
-            let #arg_name = jni_unwrap!(CString::from_java(&env, #arg_name));
-        };
+    let stmt = quote! {
+        let #arg_name = jni_unwrap!(CString::from_java(&env, #arg_name));
+    };
 
     // call arg value(s)
     let call_args = vec![quote! { #arg_name.as_ptr() }];
@@ -124,10 +123,9 @@ fn transform_struct_arg(arg_name: &str, arg_ty: &ast::Ty) -> JniArgResult {
     // statements
     let arg_name = quote::Ident::new(arg_name);
     let struct_ty = quote::Ident::new(pprust::ty_to_string(arg_ty));
-    let stmt =
-        quote! {
-            let #arg_name = jni_unwrap!(#struct_ty::from_java(&env, #arg_name));
-        };
+    let stmt = quote! {
+        let #arg_name = jni_unwrap!(#struct_ty::from_java(&env, #arg_name));
+    };
 
     // call arg value(s)
     let call_args = vec![quote! { &#arg_name }];
@@ -138,10 +136,9 @@ fn transform_struct_arg(arg_name: &str, arg_ty: &ast::Ty) -> JniArgResult {
 fn transform_array_arg(arg_name: &str) -> JniArgResult {
     // statements
     let arg_name = quote::Ident::new(arg_name);
-    let stmt =
-        quote! {
-            let #arg_name = jni_unwrap!(Vec::from_java(&env, #arg_name));
-        };
+    let stmt = quote! {
+        let #arg_name = jni_unwrap!(Vec::from_java(&env, #arg_name));
+    };
 
     // call arg value(s)
     let call_args = vec![quote! { #arg_name.as_ptr() }, quote! { #arg_name.len() }];
@@ -159,10 +156,9 @@ fn transform_callbacks_arg(
         .map(|&(_, ref ident)| ident.clone())
         .collect();
 
-    let stmt =
-        quote! {
-            let ctx = gen_ctx!(env, #(#cb_ids),*);
-        };
+    let stmt = quote! {
+        let ctx = gen_ctx!(env, #(#cb_ids),*);
+    };
 
     // call arg value(s)
     let multi_callback = cb_idents.len() > 1;
@@ -187,10 +183,9 @@ fn transform_opaque_ptr(arg_name: &str, ty: &str) -> JniArgResult {
     // statements
     let arg_name = quote::Ident::new(arg_name);
     let ty = quote::Ident::new(ty);
-    let stmt =
-        quote! {
-            let #arg_name = #arg_name as *mut #ty;
-        };
+    let stmt = quote! {
+        let #arg_name = #arg_name as *mut #ty;
+    };
 
     // call arg value(s)
     let call_args = vec![quote! { #arg_name }];
@@ -220,7 +215,8 @@ pub fn generate_jni_function(
     let mut callbacks = Vec::new();
     let mut jni_fn_inputs = Vec::new();
 
-    let mut args_iter = args.into_iter()
+    let mut args_iter = args
+        .into_iter()
         .filter(|arg| !is_user_data_arg(arg))
         .peekable();
 
@@ -242,8 +238,9 @@ pub fn generate_jni_function(
                 ast::TyKind::Ptr(ref ptr) => {
                     match pprust::ty_to_string(&ptr.ty).as_str() {
                         // Opaque pointer that should be passed as a long value
-                        opaque @ "App" |
-                        opaque @ "Authenticator" => Some(transform_opaque_ptr(&arg_name, opaque)),
+                        opaque @ "App" | opaque @ "Authenticator" => {
+                            Some(transform_opaque_ptr(&arg_name, opaque))
+                        }
                         // Detect strings, which are *const c_char or *mut c_char
                         "c_char" => Some(transform_string_arg(&arg_name)),
                         _ => Some(transform_struct_arg(&arg_name, &ptr.ty)),
@@ -303,18 +300,17 @@ pub fn generate_jni_function(
         }
     }
 
-    let tokens =
-        quote! {
-            #[no_mangle]
-            pub unsafe extern "system" fn #func_name(
-                env: JNIEnv,
-                _class: JClass,
-                #(#jni_fn_inputs),*
-            ) {
-                #(#stmts)*
-                #native_name(#(#call_args),*);
-            }
-        };
+    let tokens = quote! {
+        #[no_mangle]
+        pub unsafe extern "system" fn #func_name(
+            env: JNIEnv,
+            _class: JClass,
+            #(#jni_fn_inputs),*
+        ) {
+            #(#stmts)*
+            #native_name(#(#call_args),*);
+        }
+    };
 
     tokens.to_string()
 }
@@ -398,12 +394,12 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
                         // Other ptrs
                         _ => {
                             quote! {
-                                let #arg_name = if #arg_name.is_null() {
-                                    JObject::null()
-                                } else {
-                                    jni_unwrap!((*#arg_name).to_java(&env))
-                                };
-                        }
+                                    let #arg_name = if #arg_name.is_null() {
+                                        JObject::null()
+                                    } else {
+                                        jni_unwrap!((*#arg_name).to_java(&env))
+                                    };
+                            }
                         }
                     }
                 }
@@ -451,8 +447,7 @@ fn generate_multi_jni_callback(
         arg_ty_str,
     } = generate_callback(cb, context);
 
-    let tokens =
-        quote! {
+    let tokens = quote! {
         extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
             unsafe {
                 let env = JVM.as_ref()
@@ -493,8 +488,7 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_name: &str, context: &mut Co
         arg_ty_str,
     } = generate_callback(cb, context);
 
-    let tokens =
-        quote! {
+    let tokens = quote! {
         extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
             unsafe {
                 let env = JVM.as_ref()
@@ -568,18 +562,15 @@ fn generate_struct_to_java(
                             )?;
                         }
                     } else {
-                        let signature = format!(
-                            "{}",
-                            JavaType::Array(
-                                Box::new(unwrap!(rust_ty_to_signature(&ptr.ty, context))),
-                            )
-                        );
+                        let full_ty = unwrap!(rust_ty_to_signature(&ptr.ty, context));
+                        let signature = format!("{}", JavaType::Array(Box::new(full_ty.clone()),));
+                        let full_ty_str = format!("{}", full_ty);
 
                         // Struct array
                         quote! {
                             let arr = env.new_object_array(
                                 self.#len_field_ident as jni::sys::jsize,
-                                #ty_str,
+                                #full_ty_str,
                                 JObject::null()
                             )?;
                             let items = unsafe {
@@ -639,28 +630,27 @@ fn generate_struct_to_java(
                 // Skip len/cap fields transformation - it's covered by `ArrayField`
                 quote!{}
             }
-            StructField::Primitive(ref f) => {
-                match f.ty.node {
-                    ast::TyKind::Path(None, ref path) => {
-                        let (ty, _module) = path.segments.split_last().expect(
-                            "already checked that there were at least two elements",
-                        );
-                        let ty: &str = &ty.identifier.name.as_str();
-                        let conv =
-                            rust_ty_to_java(ty).unwrap_or_else(|| lookup_object_type(ty, context));
-                        let signature = format!("{}", conv);
-                        quote! {
-                            env.set_field(
-                                output,
-                                #java_field_name,
-                                #signature,
-                                self.#field_name.to_java(env)?.into()
-                            )?;
-                        }
+            StructField::Primitive(ref f) => match f.ty.node {
+                ast::TyKind::Path(None, ref path) => {
+                    let (ty, _module) = path
+                        .segments
+                        .split_last()
+                        .expect("already checked that there were at least two elements");
+                    let ty: &str = &ty.identifier.name.as_str();
+                    let conv =
+                        rust_ty_to_java(ty).unwrap_or_else(|| lookup_object_type(ty, context));
+                    let signature = format!("{}", conv);
+                    quote! {
+                        env.set_field(
+                            output,
+                            #java_field_name,
+                            #signature,
+                            self.#field_name.to_java(env)?.into()
+                        )?;
                     }
-                    _ => quote!{},
                 }
-            }
+                _ => quote!{},
+            },
         };
 
         stmts.push(stmt);
@@ -743,9 +733,9 @@ fn generate_struct_from_java(
                         let ty = quote::Ident::new(ty_str);
                         let signature = format!(
                             "{}",
-                            JavaType::Array(
-                                Box::new(unwrap!(rust_ty_to_signature(&ptr.ty, context))),
-                            )
+                            JavaType::Array(Box::new(unwrap!(rust_ty_to_signature(
+                                &ptr.ty, context
+                            ))),)
                         );
 
                         quote! {
@@ -806,9 +796,10 @@ fn generate_struct_from_java(
             StructField::Primitive(ref f) => {
                 match f.ty.node {
                     ast::TyKind::Path(None, ref path) => {
-                        let (ty, _module) = path.segments.split_last().expect(
-                            "already checked that there were at least two elements",
-                        );
+                        let (ty, _module) = path
+                            .segments
+                            .split_last()
+                            .expect("already checked that there were at least two elements");
                         let mut ty: &str = &ty.identifier.name.as_str();
 
                         if let Some(rewrite_ty) = context.type_map.get(ty) {
@@ -825,10 +816,9 @@ fn generate_struct_from_java(
                             "c_byte" | "i8" | "u8" => Some(("B", quote! { b() })),
                             "c_short" | "u16" | "i16" => Some(("S", quote! { s() })),
                             "c_int" | "u32" | "i32" => Some(("I", quote! { i() })),
-                            "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => Some((
-                                "J",
-                                quote! { j() },
-                            )),
+                            "c_long" | "u64" | "i64" | "c_usize" | "usize" | "isize" => {
+                                Some(("J", quote! { j() }))
+                            }
                             "c_bool" | "bool" => Some(("Z", quote! { z() })),
                             _ => None,
                         };
@@ -869,7 +859,6 @@ fn generate_struct_from_java(
             }
         }
     }
-
 }
 
 /// Generates JNI struct binding based on a native struct
@@ -884,12 +873,11 @@ pub fn generate_struct(
     let from_java = generate_struct_from_java(&struct_ident, fields, context);
     let to_java = generate_struct_to_java(&struct_ident, java_class_name, fields, context);
 
-    let tokens =
-        quote! {
-            #from_java
+    let tokens = quote! {
+        #from_java
 
-            #to_java
-        };
+        #to_java
+    };
 
     tokens.to_string()
 }

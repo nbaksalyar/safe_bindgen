@@ -7,30 +7,32 @@ macro_rules! compile {
 }
 
 macro_rules! try_compile {
-        ($lang:expr, $rust:tt) => {{
-            let rust_src = stringify!($rust);
-            let rust_src = rust_src[1..rust_src.len() - 1].to_string();
-            try_compile($lang, rust_src)
-        }};
-    }
+    ($lang:expr, $rust:tt) => {{
+        let rust_src = stringify!($rust);
+        let rust_src = rust_src[1..rust_src.len() - 1].to_string();
+        try_compile($lang, rust_src)
+    }};
+}
 
 // This is like `assert_eq`, but produces more readable output for multiline
 // strings.
 macro_rules! assert_multiline_eq {
-        ($left:expr, $right:expr) => {{
-            use $crate::colored::*;
+    ($left:expr, $right:expr) => {{
+        use $crate::colored::*;
 
-            let left = $left;
-            let right = $right;
+        let left = $left;
+        let right = $right;
 
-            if left != right {
-                panic!("assertion failed: `({} == {})`\n```\n{}```\n",
-                       "left".red(),
-                       "right".green(),
-                       format_diff(&left, &right));
-            }
-        }}
-    }
+        if left != right {
+            panic!(
+                "assertion failed: `({} == {})`\n```\n{}```\n",
+                "left".red(),
+                "right".green(),
+                format_diff(&left, &right)
+            );
+        }
+    }};
+}
 
 #[test]
 fn non_repr_c_types_are_ignored() {
@@ -120,19 +122,23 @@ fn native_structs() {
         #[no_mangle]
         pub extern "C" fn fun2(
             user_data: *mut c_void,
-            cb: extern "C" fn(user_data: *mut c_void,
-                              result: *const FfiResult,
-                              entry: *const Entry),
+            cb: extern "C" fn(
+                user_data: *mut c_void,
+                result: *const FfiResult,
+                entry: *const Entry,
+            ),
         ) {
         }
 
         #[no_mangle]
         pub extern "C" fn fun3(
             user_data: *mut c_void,
-            cb: extern "C" fn(user_data: *mut c_void,
-                              result: *const FfiResult,
-                              entries: *const Entry,
-                              entries_len: usize),
+            cb: extern "C" fn(
+                user_data: *mut c_void,
+                result: *const FfiResult,
+                entries: *const Entry,
+                entries_len: usize,
+            ),
         ) {
         }
     });
@@ -568,9 +574,7 @@ fn functions_taking_multiple_callbacks() {
             input: i32,
             user_data: *mut c_void,
             cb0: extern "C" fn(user_data: *mut c_void),
-            cb1: extern "C" fn(user_data: *mut c_void,
-                               result: *const FfiResult,
-                               output: i32),
+            cb1: extern "C" fn(user_data: *mut c_void, result: *const FfiResult, output: i32),
         ) {
         }
     });
@@ -702,9 +706,7 @@ fn functions_taking_callback_taking_const_size_array() {
         #[no_mangle]
         pub extern "C" fn fun2(
             user_data: *mut c_void,
-            cb: extern "C" fn(user_data: *mut c_void,
-                              result: *const FfiResult,
-                              key: [u8; 32]),
+            cb: extern "C" fn(user_data: *mut c_void, result: *const FfiResult, key: [u8; 32]),
         ) {
         }
 
@@ -712,12 +714,13 @@ fn functions_taking_callback_taking_const_size_array() {
         #[no_mangle]
         pub extern "C" fn fun3(
             user_data: *mut c_void,
-            cb: extern "C" fn(user_data: *mut c_void,
-                              result: *const FfiResult,
-                              nonce: *const Nonce),
+            cb: extern "C" fn(
+                user_data: *mut c_void,
+                result: *const FfiResult,
+                nonce: *const Nonce,
+            ),
         ) {
         }
-
     });
 
     let actual = fetch(&outputs, "Backend.cs");
@@ -802,10 +805,12 @@ fn functions_taking_callback_taking_dynamic_array() {
         #[no_mangle]
         pub extern "C" fn fun0(
             user_data: *mut c_void,
-            cb: extern "C" fn(user_data: *mut c_void,
-                              result: *const FfiResult,
-                              data_ptr: *const u8,
-                              data_len: usize),
+            cb: extern "C" fn(
+                user_data: *mut c_void,
+                result: *const FfiResult,
+                data_ptr: *const u8,
+                data_len: usize,
+            ),
         ) {
         }
 
@@ -813,10 +818,12 @@ fn functions_taking_callback_taking_dynamic_array() {
         #[no_mangle]
         pub extern "C" fn fun1(
             user_data: *mut c_void,
-            cb: extern "C" fn(user_data: *mut c_void,
-                              result: *const FfiResult,
-                              records_ptr: *const Record,
-                              records_len: usize),
+            cb: extern "C" fn(
+                user_data: *mut c_void,
+                result: *const FfiResult,
+                records_ptr: *const Record,
+                records_len: usize,
+            ),
         ) {
         }
     });
@@ -1211,9 +1218,9 @@ fn fetch<'a>(outputs: &'a HashMap<String, String>, name: &str) -> &'a str {
 }
 
 fn format_diff(left: &str, right: &str) -> String {
+    use colored::*;
     use diff;
     use std::fmt::Write;
-    use colored::*;
 
     let mut output = String::new();
 
