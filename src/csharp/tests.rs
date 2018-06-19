@@ -257,7 +257,7 @@ fn native_structs() {
 
              public Task<Entry> Fun2Async() {
                var (ret, userData) = Utils.PrepareTask<Entry>();
-               Fun2Native(userData, OnFfiResultEntryCb);
+               Fun2Native(userData, DelegateOnFfiResultEntryCb);
                return ret;
              }
 
@@ -267,7 +267,7 @@ fn native_structs() {
 
              public Task<List<Entry>> Fun3Async() {
                var (ret, userData) = Utils.PrepareTask<List<Entry>>();
-               Fun3Native(userData, OnFfiResultEntryListCb);
+               Fun3Native(userData, DelegateOnFfiResultEntryListCb);
                return ret;
              }
 
@@ -289,6 +289,8 @@ fn native_structs() {
                                   () => new Entry(Marshal.PtrToStructure<EntryNative>(entry)));
              }
 
+             private static FfiResultEntryCb DelegateOnFfiResultEntryCb = OnFfiResultEntryCb;
+
              private delegate void FfiResultEntryListCb(IntPtr userData, \
                                                         IntPtr result, \
                                                         IntPtr entriesPtr, \
@@ -308,6 +310,8 @@ fn native_structs() {
                    entriesPtr, \
                    (int) entriesLen).Select(native => new Entry(native)).ToList());
              }
+
+             private static FfiResultEntryListCb DelegateOnFfiResultEntryListCb = OnFfiResultEntryListCb;
 
            }
          }
@@ -378,7 +382,7 @@ fn type_aliases() {
 
              public Task<ulong> FunAsync(ulong id) {
                var (ret, userData) = Utils.PrepareTask<ulong>();
-               FunNative(id, userData, OnFfiResultULongCb);
+               FunNative(id, userData, DelegateOnFfiResultULongCb);
                return ret;
              }
 
@@ -401,6 +405,8 @@ fn type_aliases() {
                                   Marshal.PtrToStructure<FfiResult>(arg1), \
                                   () => arg2);
              }
+
+             private static FfiResultULongCb DelegateOnFfiResultULongCb = OnFfiResultULongCb;
 
            }
          }
@@ -536,7 +542,7 @@ fn functions_taking_one_callback() {
 
              public Task Fun1Async(int num, string name) {
                var (ret, userData) = Utils.PrepareTask();
-               Fun1Native(num, name, userData, OnFfiResultCb);
+               Fun1Native(num, name, userData, DelegateOnFfiResultCb);
                return ret;
              }
 
@@ -555,6 +561,8 @@ fn functions_taking_one_callback() {
              private static void OnFfiResultCb(IntPtr userData, IntPtr result) {
                Utils.CompleteTask(userData, Marshal.PtrToStructure<FfiResult>(result));
              }
+
+             private static FfiResultCb DelegateOnFfiResultCb = OnFfiResultCb;
 
            }
          }
@@ -741,7 +749,7 @@ fn functions_taking_callback_taking_const_size_array() {
 
              public Task<byte[]> Fun2Async() {
                var (ret, userData) = Utils.PrepareTask<byte[]>();
-               Fun2Native(userData, OnFfiResultByteArray32Cb);
+               Fun2Native(userData, DelegateOnFfiResultByteArray32Cb);
                return ret;
              }
 
@@ -751,7 +759,7 @@ fn functions_taking_callback_taking_const_size_array() {
 
              public Task<byte[]> Fun3Async() {
                var (ret, userData) = Utils.PrepareTask<byte[]>();
-               Fun3Native(userData, OnFfiResultByteArrayNonceLenCb);
+               Fun3Native(userData, DelegateOnFfiResultByteArrayNonceLenCb);
                return ret;
              }
 
@@ -774,6 +782,8 @@ fn functions_taking_callback_taking_const_size_array() {
                                   () => Utils.CopyToByteArray(key, 32));
              }
 
+             private static FfiResultByteArray32Cb DelegateOnFfiResultByteArray32Cb = OnFfiResultByteArray32Cb;
+
              private delegate void FfiResultByteArrayNonceLenCb(IntPtr userData, \
                                                                 IntPtr result, \
                                                                 IntPtr nonce);
@@ -789,6 +799,8 @@ fn functions_taking_callback_taking_const_size_array() {
                  Marshal.PtrToStructure<FfiResult>(result), \
                  () => Utils.CopyToByteArray(nonce, (int) Constants.NonceLen));
              }
+
+             private static FfiResultByteArrayNonceLenCb DelegateOnFfiResultByteArrayNonceLenCb = OnFfiResultByteArrayNonceLenCb;
 
            }
          }
@@ -846,7 +858,7 @@ fn functions_taking_callback_taking_dynamic_array() {
 
              public Task<List<byte>> Fun0Async() {
                var (ret, userData) = Utils.PrepareTask<List<byte>>();
-               Fun0Native(userData, OnFfiResultByteListCb);
+               Fun0Native(userData, DelegateOnFfiResultByteListCb);
                return ret;
              }
 
@@ -856,7 +868,7 @@ fn functions_taking_callback_taking_dynamic_array() {
 
              public Task<List<Record>> Fun1Async() {
                var (ret, userData) = Utils.PrepareTask<List<Record>>();
-               Fun1Native(userData, OnFfiResultRecordListCb);
+               Fun1Native(userData, DelegateOnFfiResultRecordListCb);
                return ret;
              }
 
@@ -881,6 +893,8 @@ fn functions_taking_callback_taking_dynamic_array() {
                                   () => Utils.CopyToByteList(dataPtr, (int) dataLen));
              }
 
+             private static FfiResultByteListCb DelegateOnFfiResultByteListCb = OnFfiResultByteListCb;
+
              private delegate void FfiResultRecordListCb(IntPtr userData, \
                                                           IntPtr result, \
                                                           IntPtr recordsPtr, \
@@ -899,6 +913,8 @@ fn functions_taking_callback_taking_dynamic_array() {
                                     recordsPtr, \
                                     (int) recordsLen));
              }
+
+             private static FfiResultRecordListCb DelegateOnFfiResultRecordListCb = OnFfiResultRecordListCb;
 
            }
          }
