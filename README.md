@@ -16,4 +16,4 @@ This project is based on [moz-cheddar](https://github.com/mozilla/moz-cheddar), 
 
 ## License
 
-Licensed under the ([MIT](LICENSE)) license.
+This SAFE Network library is dual-licensed under the Modified BSD ([LICENSE-BSD](LICENSE-BSD) https://opensource.org/licenses/BSD-3-Clause) or the MIT license ([LICENSE-MIT](LICENSE-MIT) https://opensource.org/licenses/MIT) at your option.
