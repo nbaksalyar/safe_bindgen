@@ -13,7 +13,7 @@ homepage = "https://github.com/maidsafe/safe_bindgen"
 repository = "https://github.com/maidsafe/safe_bindgen"
 documentation = "https://docs.rs/safe_bindgen"
 
-license = "MIT"
+license = "MIT OR BSD-3-Clause"
 
 [features]
 default = ["with-syntex"]
