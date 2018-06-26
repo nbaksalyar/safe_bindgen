@@ -88,7 +88,7 @@ pub fn emit_wrapper_function(
         }
 
         if let Some(callback) = extract_callback(ty) {
-            emit!(writer, "On");
+            emit!(writer, "DelegateOn");
             emit_callback_wrapper_name(writer, callback);
         } else {
             let name = param_name(name, index);
@@ -192,6 +192,13 @@ pub fn emit_callback_wrapper(writer: &mut IndentedWriter, context: &Context, cal
 
     writer.unindent();
     emit!(writer, "}}\n\n");
+    emit!(writer, "private static ");
+    emit_callback_wrapper_name(writer, callback);
+    emit!(writer, " DelegateOn");
+    emit_callback_wrapper_name(writer, callback);
+    emit!(writer, " = On");
+    emit_callback_wrapper_name(writer, callback);
+    emit!(writer, ";\n\n");
 }
 
 pub fn emit_callback_wrapper_name(writer: &mut IndentedWriter, callback: &Function) {
