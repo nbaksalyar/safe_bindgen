@@ -192,7 +192,7 @@ pub fn emit_callback_wrapper(writer: &mut IndentedWriter, context: &Context, cal
 
     writer.unindent();
     emit!(writer, "}}\n\n");
-    emit!(writer, "private static ");
+    emit!(writer, "private static readonly ");
     emit_callback_wrapper_name(writer, callback);
     emit!(writer, " DelegateOn");
     emit_callback_wrapper_name(writer, callback);

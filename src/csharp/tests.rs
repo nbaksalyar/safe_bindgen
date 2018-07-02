@@ -289,7 +289,7 @@ fn native_structs() {
                                   () => new Entry(Marshal.PtrToStructure<EntryNative>(entry)));
              }
 
-             private static FfiResultEntryCb DelegateOnFfiResultEntryCb = OnFfiResultEntryCb;
+             private static readonly FfiResultEntryCb DelegateOnFfiResultEntryCb = OnFfiResultEntryCb;
 
              private delegate void FfiResultEntryListCb(IntPtr userData, \
                                                         IntPtr result, \
@@ -311,7 +311,7 @@ fn native_structs() {
                    (int) entriesLen).Select(native => new Entry(native)).ToList());
              }
 
-             private static FfiResultEntryListCb DelegateOnFfiResultEntryListCb = OnFfiResultEntryListCb;
+             private static readonly FfiResultEntryListCb DelegateOnFfiResultEntryListCb = OnFfiResultEntryListCb;
 
            }
          }
@@ -406,7 +406,7 @@ fn type_aliases() {
                                   () => arg2);
              }
 
-             private static FfiResultULongCb DelegateOnFfiResultULongCb = OnFfiResultULongCb;
+             private static readonly FfiResultULongCb DelegateOnFfiResultULongCb = OnFfiResultULongCb;
 
            }
          }
@@ -562,7 +562,7 @@ fn functions_taking_one_callback() {
                Utils.CompleteTask(userData, Marshal.PtrToStructure<FfiResult>(result));
              }
 
-             private static FfiResultCb DelegateOnFfiResultCb = OnFfiResultCb;
+             private static readonly FfiResultCb DelegateOnFfiResultCb = OnFfiResultCb;
 
            }
          }
@@ -782,7 +782,7 @@ fn functions_taking_callback_taking_const_size_array() {
                                   () => Utils.CopyToByteArray(key, 32));
              }
 
-             private static FfiResultByteArray32Cb DelegateOnFfiResultByteArray32Cb = OnFfiResultByteArray32Cb;
+             private static readonly FfiResultByteArray32Cb DelegateOnFfiResultByteArray32Cb = OnFfiResultByteArray32Cb;
 
              private delegate void FfiResultByteArrayNonceLenCb(IntPtr userData, \
                                                                 IntPtr result, \
@@ -800,7 +800,7 @@ fn functions_taking_callback_taking_const_size_array() {
                  () => Utils.CopyToByteArray(nonce, (int) Constants.NonceLen));
              }
 
-             private static FfiResultByteArrayNonceLenCb DelegateOnFfiResultByteArrayNonceLenCb = OnFfiResultByteArrayNonceLenCb;
+             private static readonly FfiResultByteArrayNonceLenCb DelegateOnFfiResultByteArrayNonceLenCb = OnFfiResultByteArrayNonceLenCb;
 
            }
          }
@@ -893,7 +893,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                                   () => Utils.CopyToByteList(dataPtr, (int) dataLen));
              }
 
-             private static FfiResultByteListCb DelegateOnFfiResultByteListCb = OnFfiResultByteListCb;
+             private static readonly FfiResultByteListCb DelegateOnFfiResultByteListCb = OnFfiResultByteListCb;
 
              private delegate void FfiResultRecordListCb(IntPtr userData, \
                                                           IntPtr result, \
@@ -914,7 +914,7 @@ fn functions_taking_callback_taking_dynamic_array() {
                                     (int) recordsLen));
              }
 
-             private static FfiResultRecordListCb DelegateOnFfiResultRecordListCb = OnFfiResultRecordListCb;
+             private static readonly FfiResultRecordListCb DelegateOnFfiResultRecordListCb = OnFfiResultRecordListCb;
 
            }
          }
