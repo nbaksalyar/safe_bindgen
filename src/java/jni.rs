@@ -563,8 +563,17 @@ fn generate_struct_to_java(
                         }
                     } else {
                         let full_ty = unwrap!(rust_ty_to_signature(&ptr.ty, context));
-                        let signature = format!("{}", JavaType::Array(Box::new(full_ty.clone()),));
-                        let full_ty_str = format!("{}", full_ty);
+
+                        // Extract the class name in form of 'java/lang/Abc' instead of 'Ljava/lang/Abc;' -
+                        // Android JNI expects it to be that way.
+                        let full_ty_str = if let JavaType::Object(ref obj_name) = full_ty {
+                            format!("{}", obj_name)
+                        } else {
+                            format!("{}", full_ty)
+                        };
+
+                        let arr_signature =
+                            format!("{}", JavaType::Array(Box::new(full_ty.clone()),));
 
                         // Struct array
                         quote! {
@@ -586,7 +595,7 @@ fn generate_struct_to_java(
                             env.set_field(
                                 output,
                                 #java_field_name,
-                                #signature,
+                                #arr_signature,
                                 JObject::from(arr).into()
                             )?;
                             env.set_field(
