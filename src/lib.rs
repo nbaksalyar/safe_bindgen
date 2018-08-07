@@ -67,6 +67,9 @@ use std::io::{Read, Write};
 use std::path::{self, Component, Path, PathBuf};
 use syntax::codemap::{FilePathMapping, Span};
 
+#[cfg(test)]
+#[macro_use]
+mod test_utils;
 mod common;
 mod csharp;
 mod java;
