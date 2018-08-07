@@ -298,7 +298,7 @@ fn transform_const_literal(lit: &ast::Lit) -> Option<ConstValue> {
         ast::LitKind::Bool(value) => ConstValue::Bool(value),
         ast::LitKind::Byte(value) => ConstValue::Int(i64::from(value)),
         ast::LitKind::Char(value) => ConstValue::Char(value),
-        ast::LitKind::Int(value, _) => ConstValue::Int(value as i64),
+        ast::LitKind::Int(value, _) => ConstValue::Int(value.low64() as i64),
         ast::LitKind::Float(ref value, _) | ast::LitKind::FloatUnsuffixed(ref value) => {
             ConstValue::Float(value.as_str().to_string())
         }
@@ -457,7 +457,7 @@ fn transform_pointer(ptr: &ast::MutTy) -> Option<Type> {
 
 fn transform_reference(lifetime: &Option<ast::Lifetime>, ty: &ast::Ty) -> Option<Type> {
     if lifetime
-        .map(|lifetime| &*lifetime.name.as_str() != "'static")
+        .map(|lifetime| &*lifetime.ident.name.as_str() != "'static")
         .unwrap_or(false)
     {
         return None;
@@ -482,7 +482,7 @@ fn extract_enum_variant_value(variant: &ast::Variant) -> Option<i64> {
 
 fn extract_int_literal(lit: &ast::Lit) -> Option<i64> {
     if let ast::LitKind::Int(val, ..) = lit.node {
-        Some(val as i64)
+        Some(val.low64() as i64)
     } else {
         None
     }

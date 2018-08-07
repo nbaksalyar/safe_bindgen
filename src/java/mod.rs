@@ -582,12 +582,13 @@ fn callback_to_java(
 mod tests {
     use super::*;
     use syntax::ast::{Arg, ItemKind};
+    use syntax::codemap::FilePathMapping;
     use syntax::parse::{self, ParseSess};
 
     #[test]
     fn cb_names() {
         fn get_inputs(source: &str) -> Vec<Arg> {
-            let parse_sess = ParseSess::new();
+            let parse_sess = ParseSess::new(FilePathMapping::empty());
 
             let item = unwrap!(unwrap!(parse::parse_item_from_source_str(
                 "dummy.rs".to_owned(),

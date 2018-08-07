@@ -1215,8 +1215,9 @@ fn try_compile<T: Into<Option<LangCSharp>>>(
 ) -> Result<HashMap<String, String>, Vec<Error>> {
     use parse;
     use syntax;
+    use syntax::codemap::FilePathMapping;
 
-    let session = syntax::parse::ParseSess::new();
+    let session = syntax::parse::ParseSess::new(FilePathMapping::empty());
     let ast = syntax::parse::parse_crate_from_source_str("lib.rs".to_string(), rust_src, &session)
         .unwrap();
 

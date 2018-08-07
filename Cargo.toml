@@ -32,8 +32,8 @@ doc = false
 path = "src/bin/bindgen.rs"
 
 [dependencies]
-syntex_errors = {version = "~0.58.1", optional = true}
-syntex_syntax = {version = "~0.58.1", optional = true}
+syntex_errors = {version = "~0.59.1", optional = true}
+syntex_syntax = {version = "~0.59.1", optional = true}
 toml = "~0.3.2"
 clap = "~2.25.1"
 Inflector = "~0.11.1"

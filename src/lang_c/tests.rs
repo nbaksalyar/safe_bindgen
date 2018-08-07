@@ -1,5 +1,6 @@
 use super::types::CType;
-use syntax::ast;
+use syntax::codemap::FilePathMapping;
+use syntax::{ast, parse};
 
 #[test]
 fn sanitise_id() {
@@ -10,18 +11,17 @@ fn sanitise_id() {
 }
 
 fn ty(source: &str) -> ast::Ty {
-    let sess = ::syntax::parse::ParseSess::new();
+    let sess = parse::ParseSess::new(FilePathMapping::empty());
     let result = {
-        let mut parser =
-            ::syntax::parse::new_parser_from_source_str(&sess, "".into(), source.into());
+        let mut parser = parse::new_parser_from_source_str(&sess, "".into(), source.into());
         parser.parse_ty()
     };
 
     match result {
         Ok(p) => (*p).clone(),
-        _ => panic!(
-            "internal testing error: could not parse type from {:?}",
-            source
+        Err(e) => panic!(
+            "internal testing error: could not parse type from {:?}, reason: {:?}",
+            source, e
         ),
     }
 }
