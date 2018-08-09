@@ -1,4 +1,5 @@
 use super::*;
+use test_utils::fetch;
 
 #[test]
 fn non_repr_c_types_are_ignored() {
@@ -1173,8 +1174,4 @@ fn interface() {
     );
 
     assert_multiline_eq!(actual, expected);
-}
-
-fn fetch<'a>(outputs: &'a HashMap<String, String>, name: &str) -> &'a str {
-    outputs.get(name).map(String::as_str).unwrap_or("")
 }

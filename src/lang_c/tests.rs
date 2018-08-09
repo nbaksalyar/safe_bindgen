@@ -1,6 +1,8 @@
 use super::types::CType;
+use lang_c::LangC;
 use syntax::codemap::FilePathMapping;
 use syntax::{ast, parse};
+use test_utils::fetch;
 
 #[test]
 fn sanitise_id() {
@@ -253,4 +255,88 @@ fn paths() {
         parsed_type.is_err(),
         "can't use a multi-segment path which isn't `libc`"
     );
+}
+
+#[test]
+fn async_functions() {
+    let outputs = compile!(LangC::default(), {
+        #[no_mangle]
+        pub unsafe extern "C" fn foo(
+            user_data: *mut c_void,
+            o_cb: extern "C" fn(user_data: *mut c_void, result: *const FfiResult),
+        ) {
+            ()
+        }
+    });
+
+    let expected = indoc!(
+        "\n\n#ifndef bindgen_h
+#define bindgen_h
+
+
+#ifdef __cplusplus
+extern \"C\" {
+#endif
+
+#include <stdint.h>
+#include <stdbool.h>
+
+void foo(void* user_data, void (*o_cb)(void* user_data, FfiResult const* result));
+
+
+
+#ifdef __cplusplus
+}
+#endif
+
+
+#endif\n\n"
+    );
+
+    let actual = fetch(&outputs, ".h");
+
+    assert_multiline_eq!(actual, expected);
+}
+
+#[test]
+fn sync_functions() {
+    let outputs = compile!(LangC::default(), {
+        #[no_mangle]
+        pub extern "C" fn new_block(
+            payload: *const u8,
+            public_ids: *const *const u8,
+            votes: *const *const Vote,
+            votes_len: usize,
+            o_block: *mut *const Block,
+        ) -> *const FfiResult {
+        }
+    });
+
+    let expected = indoc!(
+        "\n\n#ifndef bindgen_h
+#define bindgen_h
+
+
+#ifdef __cplusplus
+extern \"C\" {
+#endif
+
+#include <stdint.h>
+#include <stdbool.h>
+
+FfiResult const* new_block(uint8_t const* payload, uint8_t const* const* public_ids, Vote const* const* votes, uintptr_t votes_len, Block const** o_block);
+
+
+
+#ifdef __cplusplus
+}
+#endif
+
+
+#endif\n\n"
+    );
+
+    let actual = fetch(&outputs, ".h");
+
+    assert_multiline_eq!(actual, expected);
 }

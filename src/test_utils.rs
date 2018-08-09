@@ -75,3 +75,7 @@ pub fn format_diff(left: &str, right: &str) -> String {
 
     output
 }
+
+pub fn fetch<'a>(outputs: &'a HashMap<String, String>, name: &str) -> &'a str {
+    outputs.get(name).map(String::as_str).unwrap_or("")
+}
