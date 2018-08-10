@@ -50,6 +50,9 @@ pub fn parse_mod<L: Lang>(
         if let ast::Visibility::Inherited = item.vis {
             continue;
         }
+        if let ast::Visibility::Crate(_) = item.vis {
+            continue;
+        }
 
         // Dispatch to correct method.
         let res = match item.node {
