@@ -1,42 +1,9 @@
 use super::*;
-
-macro_rules! compile {
-    ($lang:expr, $rust:tt) => {
-        try_compile!($lang, $rust).unwrap()
-    };
-}
-
-macro_rules! try_compile {
-    ($lang:expr, $rust:tt) => {{
-        let rust_src = stringify!($rust);
-        let rust_src = rust_src[1..rust_src.len() - 1].to_string();
-        try_compile($lang, rust_src)
-    }};
-}
-
-// This is like `assert_eq`, but produces more readable output for multiline
-// strings.
-macro_rules! assert_multiline_eq {
-    ($left:expr, $right:expr) => {{
-        use $crate::colored::*;
-
-        let left = $left;
-        let right = $right;
-
-        if left != right {
-            panic!(
-                "assertion failed: `({} == {})`\n```\n{}```\n",
-                "left".red(),
-                "right".green(),
-                format_diff(&left, &right)
-            );
-        }
-    }};
-}
+use test_utils::fetch;
 
 #[test]
 fn non_repr_c_types_are_ignored() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         pub struct Foo {
             bar: i32,
         }
@@ -54,7 +21,7 @@ fn non_repr_c_types_are_ignored() {
 
 #[test]
 fn structs() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[repr(C)]
         pub struct Record {
             id: u64,
@@ -97,7 +64,7 @@ fn structs() {
 
 #[test]
 fn native_structs() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[repr(C)]
         pub struct Entry {
             id: u32,
@@ -322,7 +289,7 @@ fn native_structs() {
 
 #[test]
 fn type_aliases() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         pub type Id = u64;
         // Double indirection.
         pub type UserId = Id;
@@ -417,7 +384,7 @@ fn type_aliases() {
 
 #[test]
 fn enums() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[repr(C)]
         pub enum Mode {
             ReadOnly,
@@ -462,7 +429,7 @@ fn enums() {
 
 #[test]
 fn functions_without_extern_and_no_mangle_are_ignored() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         pub extern "C" fn fun1() {}
 
         #[no_mangle]
@@ -475,7 +442,7 @@ fn functions_without_extern_and_no_mangle_are_ignored() {
 
 #[test]
 fn functions_taking_no_callbacks() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[no_mangle]
         pub extern "C" fn fun0(engine: *mut Engine) {}
     });
@@ -513,7 +480,7 @@ fn functions_taking_no_callbacks() {
 
 #[test]
 fn functions_taking_one_callback() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[no_mangle]
         pub extern "C" fn fun1(
             num: i32,
@@ -576,7 +543,7 @@ fn functions_taking_one_callback() {
 fn functions_taking_multiple_callbacks() {
     // Only the native declaration should be produced.
 
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[no_mangle]
         pub extern "C" fn fun(
             input: i32,
@@ -625,7 +592,7 @@ fn functions_taking_multiple_callbacks() {
 
 #[test]
 fn functions_taking_array() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[no_mangle]
         pub extern "C" fn fun0(data_ptr: *const u8, data_len: usize) {}
 
@@ -707,7 +674,7 @@ fn functions_taking_array() {
 
 #[test]
 fn functions_taking_callback_taking_const_size_array() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         pub type Nonce = [u8; NONCE_LEN];
 
         // Literal.
@@ -812,7 +779,7 @@ fn functions_taking_callback_taking_const_size_array() {
 
 #[test]
 fn functions_taking_callback_taking_dynamic_array() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         // Primitive type.
         #[no_mangle]
         pub extern "C" fn fun0(
@@ -926,7 +893,7 @@ fn functions_taking_callback_taking_dynamic_array() {
 
 #[test]
 fn functions_with_return_values() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[no_mangle]
         pub extern "C" fn fun(arg: i32) -> bool {}
     });
@@ -965,7 +932,7 @@ fn functions_with_return_values() {
 
 #[test]
 fn functions_taking_out_param() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[no_mangle]
         pub extern "C" fn fun(o_app: *mut *mut App) {}
     });
@@ -1050,7 +1017,7 @@ fn constants() {
 
 #[test]
 fn arrays() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         pub const ARRAY_SIZE: usize = 20;
         pub type Key = [u8; 32];
 
@@ -1182,7 +1149,7 @@ fn opaque_types() {
 
 #[test]
 fn interface() {
-    let outputs = compile!(None, {
+    let outputs = compile!(LangCSharp::default(), {
         #[no_mangle]
         pub extern "C" fn fun(
             enabled: bool,
@@ -1207,48 +1174,4 @@ fn interface() {
     );
 
     assert_multiline_eq!(actual, expected);
-}
-
-fn try_compile<T: Into<Option<LangCSharp>>>(
-    lang: T,
-    rust_src: String,
-) -> Result<HashMap<String, String>, Vec<Error>> {
-    use parse;
-    use syntax;
-
-    let session = syntax::parse::ParseSess::new();
-    let ast = syntax::parse::parse_crate_from_source_str("lib.rs".to_string(), rust_src, &session)
-        .unwrap();
-
-    let mut outputs = Outputs::default();
-    let mut lang = lang.into().unwrap_or_else(LangCSharp::new);
-
-    parse::parse_mod(&mut lang, &ast.module, &[Default::default()], &mut outputs)?;
-    lang.finalise_output(&mut outputs)?;
-
-    Ok(outputs)
-}
-
-fn fetch<'a>(outputs: &'a HashMap<String, String>, name: &str) -> &'a str {
-    outputs.get(name).map(String::as_str).unwrap_or("")
-}
-
-fn format_diff(left: &str, right: &str) -> String {
-    use colored::*;
-    use diff;
-    use std::fmt::Write;
-
-    let mut output = String::new();
-
-    for res in diff::lines(left, right) {
-        match res {
-            diff::Result::Left(line) => writeln!(output, "{}{}", "-".red(), line.red()).unwrap(),
-            diff::Result::Right(line) => {
-                writeln!(output, "{}{}", "+".green(), line.green()).unwrap()
-            }
-            diff::Result::Both(line, _) => writeln!(output, " {}", line.white()).unwrap(),
-        };
-    }
-
-    output
 }

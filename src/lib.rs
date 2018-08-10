@@ -65,7 +65,11 @@ use std::fs;
 use std::io::Error as IoError;
 use std::io::{Read, Write};
 use std::path::{self, Component, Path, PathBuf};
+use syntax::codemap::{FilePathMapping, Span};
 
+#[cfg(test)]
+#[macro_use]
+mod test_utils;
 mod common;
 mod csharp;
 mod java;
@@ -80,7 +84,7 @@ mod struct_field;
 #[derive(Debug)]
 pub struct Error {
     pub level: Level,
-    span: Option<syntax::codemap::Span>,
+    span: Option<Span>,
     pub message: String,
 }
 
@@ -234,7 +238,7 @@ impl Bindgen {
 
         Ok(Bindgen {
             input: input,
-            session: syntax::parse::ParseSess::new(),
+            session: syntax::parse::ParseSess::new(FilePathMapping::empty()),
         })
     }
 

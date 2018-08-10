@@ -86,10 +86,7 @@ pub fn append_output(text: String, file: &str, o: &mut Outputs) {
 
 /// Check the attribute is `#[no_mangle]`.
 pub fn check_no_mangle(attr: &ast::Attribute) -> bool {
-    match attr.value.node {
-        ast::MetaItemKind::Word if attr.name() == "no_mangle" => true,
-        _ => false,
-    }
+    attr.is_word() && attr.check_name("no_mangle")
 }
 
 /// Check the function argument is `user_data: *mut c_void`
@@ -151,8 +148,8 @@ where
 
 /// Check the attribute is #[repr(C)].
 pub fn check_repr_c(attr: &ast::Attribute) -> bool {
-    match attr.value.node {
-        ast::MetaItemKind::List(ref word) if attr.name() == "repr" => {
+    match unwrap!(attr.meta()).node {
+        ast::MetaItemKind::List(ref word) if attr.check_name("repr") => {
             match word.first() {
                 Some(word) => {
                     match word.node {
@@ -170,8 +167,8 @@ pub fn check_repr_c(attr: &ast::Attribute) -> bool {
 
 /// If the attribute is  a docstring, indent it the required amount and return it.
 pub fn retrieve_docstring(attr: &ast::Attribute, prepend: &str) -> Option<String> {
-    match attr.value.node {
-        ast::MetaItemKind::NameValue(ref val) if attr.name() == "doc" => {
+    match unwrap!(attr.meta()).node {
+        ast::MetaItemKind::NameValue(ref val) if attr.check_name("doc") => {
             match val.node {
                 // Docstring attributes omit the trailing newline.
                 ast::LitKind::Str(ref docs, _) => Some(format!("{}{}\n", prepend, docs)),
