@@ -272,7 +272,7 @@ pub fn generate_jni_function(
             format!("call_{}", native_name_str)
         } else {
             let &(ref cb, _) = &callbacks[0];
-            format!("call_{}", callback_name(&*cb.decl.inputs, context).unwrap())
+            format!("call_{}", unwrap!(callback_name(&*cb.decl.inputs, context)))
         };
 
         let cb_arg_res = transform_callbacks_arg(&callbacks, &cb_base_name);
@@ -352,7 +352,7 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
 
         if is_array_arg(arg, args_iter.peek().cloned()) {
             // Handle array arguments
-            let val_java_type = rust_ty_to_signature(&arg.ty, context).unwrap();
+            let val_java_type = unwrap!(rust_ty_to_signature(&arg.ty, context));
             arg_java_ty.push(JavaType::Array(Box::new(val_java_type)));
 
             if let Some(len_arg) = args_iter.next() {
@@ -408,7 +408,7 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
                 }
             };
 
-            arg_java_ty.push(rust_ty_to_signature(&arg.ty, context).unwrap());
+            arg_java_ty.push(unwrap!(rust_ty_to_signature(&arg.ty, context)));
             stmts.push(stmt);
         }
     }
@@ -449,7 +449,7 @@ fn generate_multi_jni_callback(
         extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
             unsafe {
                 let env = JVM.as_ref()
-                    .map(|vm| vm.attach_current_thread_as_daemon().unwrap())
+                    .map(|vm| unwrap!(vm.attach_current_thread_as_daemon()))
                     .expect("no JVM reference found");
 
                 let mut cbs = Box::from_raw(ctx as *mut [Option<GlobalRef>; #callbacks_count]);
@@ -490,7 +490,7 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_name: &str, context: &mut Co
         extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
             unsafe {
                 let env = JVM.as_ref()
-                    .map(|vm| vm.attach_current_thread_as_daemon().unwrap())
+                    .map(|vm| unwrap!(vm.attach_current_thread_as_daemon()))
                     .expect("no JVM reference found");
                 let cb = convert_cb_from_java(&env, ctx);
 

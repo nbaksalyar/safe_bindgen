@@ -1,7 +1,9 @@
-extern crate safe_bindgen;
 #[macro_use]
 extern crate clap;
 extern crate jni;
+extern crate safe_bindgen;
+#[macro_use]
+extern crate unwrap;
 
 use jni::signature::{JavaType, Primitive};
 use safe_bindgen::{Bindgen, LangC, LangCSharp, LangJava};
@@ -40,8 +42,8 @@ fn main() {
         ).get_matches();
 
     let mut bindgen = Bindgen::new().expect("cargo manifest could not be read");
-    let lang = matches.value_of("LANG").unwrap();
-    let lib = matches.value_of("LIB").unwrap();
+    let lang = unwrap!(matches.value_of("LANG"));
+    let lib = unwrap!(matches.value_of("LIB"));
 
     if let Some(file) = matches.value_of("FILE") {
         bindgen.source_file(&file);

@@ -41,7 +41,7 @@ jni = "~0.10.1"
 quote = "~0.3.15"
 rustfmt = "~0.10.0"
 petgraph = "~0.4.12"
-unwrap = "~1.1.0"
+unwrap = "~1.2.0"
 
 [dev-dependencies]
 colored = "~1.6.0"

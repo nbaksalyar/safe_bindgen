@@ -10,7 +10,7 @@ use Error;
 
 macro_rules! compile {
     ($lang:expr, $rust:tt) => {
-        try_compile!($lang, $rust).unwrap()
+        unwrap!(try_compile!($lang, $rust))
     };
 }
 
@@ -49,8 +49,11 @@ pub fn try_compile(
     rust_src: String,
 ) -> Result<HashMap<String, String>, Vec<Error>> {
     let session = syntax::parse::ParseSess::new(FilePathMapping::empty());
-    let ast = syntax::parse::parse_crate_from_source_str("lib.rs".to_string(), rust_src, &session)
-        .unwrap();
+    let ast = unwrap!(syntax::parse::parse_crate_from_source_str(
+        "lib.rs".to_string(),
+        rust_src,
+        &session
+    ));
 
     let mut outputs = Outputs::default();
 
@@ -65,11 +68,11 @@ pub fn format_diff(left: &str, right: &str) -> String {
 
     for res in diff::lines(left, right) {
         match res {
-            diff::Result::Left(line) => writeln!(output, "{}{}", "-".red(), line.red()).unwrap(),
+            diff::Result::Left(line) => unwrap!(writeln!(output, "{}{}", "-".red(), line.red())),
             diff::Result::Right(line) => {
-                writeln!(output, "{}{}", "+".green(), line.green()).unwrap()
+                unwrap!(writeln!(output, "{}{}", "+".green(), line.green()))
             }
-            diff::Result::Both(line, _) => writeln!(output, " {}", line.white()).unwrap(),
+            diff::Result::Both(line, _) => unwrap!(writeln!(output, " {}", line.white())),
         };
     }
 

@@ -216,7 +216,7 @@ pub fn transform_struct(fields: &[ast::StructField]) -> Option<Struct> {
         .into_iter()
         .map(|field| {
             let (_, docs) = common::parse_attr(&field.attrs, |_| true, retrieve_docstring);
-            let name = field.ident.unwrap().name.as_str().to_string();
+            let name = unwrap!(field.ident).name.as_str().to_string();
             let ty = try_opt!(transform_type(&field.ty));
 
             Some(StructField {
@@ -507,7 +507,7 @@ fn process_struct_fields(mut input: Vec<StructField>) -> Vec<StructField> {
                     has_cap: false,
                 });
 
-                let last = output.last_mut().unwrap();
+                let last = unwrap!(output.last_mut());
 
                 if let Some(field) = iter.next() {
                     if is_capacity(&field, &last.name) {

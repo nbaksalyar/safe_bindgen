@@ -11,7 +11,7 @@ const LEN_ZERO: &str = "UIntPtr.Zero";
 
 macro_rules! emit {
     ($writer:expr, $($arg:tt)*) => {
-        write!($writer, $($arg)*).unwrap()
+        unwrap!(write!($writer, $($arg)*))
     }
 }
 macro_rules! emitln {
