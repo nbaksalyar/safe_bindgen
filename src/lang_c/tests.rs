@@ -53,10 +53,8 @@ fn pure_rust_types() {
             .unwrap_or_else(|_| panic!("error while parsing {:?} with no name", rust_type));
         assert_eq!(&parsed_c_type, correct_c_type);
 
-        let parsed_c_type = super::rust_to_c(&ty(rust_type), name).unwrap_or_else(|_| panic!(
-            "error while parsing {:?} with name {:?}",
-            rust_type, name
-        ));
+        let parsed_c_type = super::rust_to_c(&ty(rust_type), name)
+            .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", rust_type, name));
         assert_eq!(
             format!("{}", parsed_c_type),
             format!("{} {}", correct_c_type, name)
@@ -94,10 +92,8 @@ fn libc_types() {
             .unwrap_or_else(|_| panic!("error while parsing {:?} with no name", rust_type));
         assert_eq!(format!("{}", parsed_c_type), correct_c_type);
 
-        let parsed_c_type = super::rust_to_c(&ty(rust_type), name).unwrap_or_else(|_| panic!(
-            "error while parsing {:?} with name {:?}",
-            rust_type, name
-        ));
+        let parsed_c_type = super::rust_to_c(&ty(rust_type), name)
+            .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", rust_type, name));
         assert_eq!(
             format!("{}", parsed_c_type),
             format!("{} {}", correct_c_type, name)
@@ -115,10 +111,8 @@ fn const_pointers() {
     assert_eq!(format!("{}", parsed_type), "uint8_t const*");
 
     let source = "*const ()";
-    let parsed_type = super::rust_to_c(&ty(source), name).unwrap_or_else(|_| panic!(
-        "error while parsing {:?} with name {:?}",
-        source, name
-    ));
+    let parsed_type = super::rust_to_c(&ty(source), name)
+        .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", source, name));
     assert_eq!(format!("{}", parsed_type), format!("void const* {}", name));
 
     let source = "*const *const f64";
@@ -127,10 +121,8 @@ fn const_pointers() {
     assert_eq!(format!("{}", parsed_type), "double const* const*");
 
     let source = "*const *const i64";
-    let parsed_type = super::rust_to_c(&ty(source), name).unwrap_or_else(|_| panic!(
-        "error while parsing {:?} with name {:?}",
-        source, name
-    ));
+    let parsed_type = super::rust_to_c(&ty(source), name)
+        .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", source, name));
     assert_eq!(
         format!("{}", parsed_type),
         format!("int64_t const* const* {}", name)
@@ -147,10 +139,8 @@ fn mut_pointers() {
     assert_eq!(format!("{}", parsed_type), "uint16_t*");
 
     let source = "*mut f32";
-    let parsed_type = super::rust_to_c(&ty(source), name).unwrap_or_else(|_| panic!(
-        "error while parsing {:?} with name {:?}",
-        source, name
-    ));
+    let parsed_type = super::rust_to_c(&ty(source), name)
+        .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", source, name));
     assert_eq!(format!("{}", parsed_type), format!("float* {}", name));
 
     let source = "*mut *mut *mut i32";
@@ -159,10 +149,8 @@ fn mut_pointers() {
     assert_eq!(format!("{}", parsed_type), "int32_t***");
 
     let source = "*mut *mut i8";
-    let parsed_type = super::rust_to_c(&ty(source), name).unwrap_or_else(|_| panic!(
-        "error while parsing {:?} with name {:?}",
-        source, name
-    ));
+    let parsed_type = super::rust_to_c(&ty(source), name)
+        .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", source, name));
     assert_eq!(format!("{}", parsed_type), format!("int8_t** {}", name));
 }
 
@@ -176,20 +164,16 @@ fn mixed_pointers() {
     assert_eq!(format!("{}", parsed_type), "bool const** const*");
 
     let source = "*mut *mut *const libc::c_ulonglong";
-    let parsed_type = super::rust_to_c(&ty(source), name).unwrap_or_else(|_| panic!(
-        "error while parsing {:?} with name {:?}",
-        source, name
-    ));
+    let parsed_type = super::rust_to_c(&ty(source), name)
+        .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", source, name));
     assert_eq!(
         format!("{}", parsed_type),
         format!("unsigned long long const*** {}", name)
     );
 
     let source = "*const *mut *mut i8";
-    let parsed_type = super::rust_to_c(&ty(source), name).unwrap_or_else(|_| panic!(
-        "error while parsing {:?} with name {:?}",
-        source, name
-    ));
+    let parsed_type = super::rust_to_c(&ty(source), name)
+        .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", source, name));
     assert_eq!(
         format!("{}", parsed_type),
         format!("int8_t** const* {}", name)
@@ -216,10 +200,8 @@ fn function_pointers() {
     // assert!(parsed_type.is_none(), "parsed a non-C function pointer");
 
     let source = "extern fn(hi: libc::c_int) -> libc::c_double";
-    let parsed_type = super::rust_to_c(&ty(source), name).unwrap_or_else(|_| panic!(
-        "error while parsing {:?} with name {:?}",
-        source, name
-    ));
+    let parsed_type = super::rust_to_c(&ty(source), name)
+        .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", source, name));
     assert_eq!(
         format!("{}", parsed_type),
         format!("double (*{})(int hi)", name)
@@ -236,10 +218,8 @@ fn paths() {
     assert_eq!(format!("{}", parsed_type), "MyType");
 
     let source = "SomeType";
-    let parsed_type = super::rust_to_c(&ty(source), name).unwrap_or_else(|_| panic!(
-        "error while parsing {:?} with name {:?}",
-        source, name
-    ));
+    let parsed_type = super::rust_to_c(&ty(source), name)
+        .unwrap_or_else(|_| panic!("error while parsing {:?} with name {:?}", source, name));
     assert_eq!(format!("{}", parsed_type), format!("SomeType {}", name));
 
     let source = "my_mod::MyType";

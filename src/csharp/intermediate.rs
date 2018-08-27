@@ -206,8 +206,7 @@ pub fn transform_enum(variants: &[ast::Variant]) -> Option<Enum> {
             let value = extract_enum_variant_value(variant);
 
             Some(EnumVariant { docs, name, value })
-        })
-        .collect();
+        }).collect();
 
     variants.map(|variants| Enum { variants })
 }
@@ -226,8 +225,7 @@ pub fn transform_struct(fields: &[ast::StructField]) -> Option<Struct> {
                 ty,
                 has_cap: false,
             })
-        })
-        .collect();
+        }).collect();
 
     fields.map(|fields| Struct {
         fields: process_struct_fields(fields),
@@ -330,8 +328,7 @@ fn transform_const_struct(path: &ast::Path, fields: &[ast::Field]) -> Option<Con
             } else {
                 None
             }
-        })
-        .collect();
+        }).collect();
 
     fields.map(|fields| ConstValue::Struct(name, fields))
 }

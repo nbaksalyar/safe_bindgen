@@ -173,8 +173,7 @@ fn transform_callbacks_arg(
                 quote::Ident::new(cb_base_name)
             };
             quote! { #cb_fn }
-        })
-        .collect();
+        }).collect();
 
     JniArgResult { stmt, call_args }
 }
