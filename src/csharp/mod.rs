@@ -502,21 +502,21 @@ impl Lang for LangCSharp {
             // Functions
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
-            emit!(writer, "using System;\n");
-            emit!(writer, "using System.Collections.Generic;\n");
-            emit!(writer, "using System.Linq;\n");
-            emit!(writer, "using System.Runtime.InteropServices;\n");
-            emit!(writer, "using System.Threading.Tasks;\n\n");
-            emit!(
+            emitln!(writer, "using System;");
+            emitln!(writer, "using System.Collections.Generic;");
+            emitln!(writer, "using System.Linq;");
+            emitln!(writer, "using System.Runtime.InteropServices;");
+            emitln!(writer, "using System.Threading.Tasks;\n");
+            emitln!(
                 writer,
-                "namespace {} {{\n",
+                "namespace {} {{",
                 self.context.functions_section.namespace
             );
             writer.indent();
 
-            emit!(
+            emitln!(
                 writer,
-                "internal partial class {} : I{} {{\n",
+                "internal partial class {} : I{} {{",
                 self.context.functions_section.class,
                 self.context.functions_section.class
             );
@@ -524,15 +524,15 @@ impl Lang for LangCSharp {
 
             // Define constant with the native library name, to be used in
             // the [DllImport] attributes.
-            emit!(writer, "#if __IOS__\n");
-            emit!(writer, "private const string DllName = \"__Internal\";\n");
-            emit!(writer, "#else\n");
-            emit!(
+            emitln!(writer, "#if __IOS__");
+            emitln!(writer, "private const string DllName = \"__Internal\";");
+            emitln!(writer, "#else");
+            emitln!(
                 writer,
-                "private const string DllName = \"{}\";\n",
+                "private const string DllName = \"{}\";",
                 self.context.lib_name
             );
-            emit!(writer, "#endif\n\n");
+            emitln!(writer, "#endif\n");
 
             for snippet in &self.functions {
                 emit_docs(&mut writer, &self.context, &snippet.docs);
@@ -557,10 +557,10 @@ impl Lang for LangCSharp {
             }
 
             writer.unindent();
-            emit!(writer, "}}\n");
+            emitln!(writer, "}}");
 
             writer.unindent();
-            emit!(writer, "}}\n");
+            emitln!(writer, "}}");
 
             outputs.insert(
                 self.context.functions_section.path.clone(),
@@ -577,19 +577,19 @@ impl Lang for LangCSharp {
             if functions.peek().is_some() {
                 let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
-                emit!(writer, "using System;\n");
-                emit!(writer, "using System.Collections.Generic;\n");
-                emit!(writer, "using System.Threading.Tasks;\n\n");
-                emit!(
+                emitln!(writer, "using System;");
+                emitln!(writer, "using System.Collections.Generic;");
+                emitln!(writer, "using System.Threading.Tasks;\n");
+                emitln!(
                     writer,
-                    "namespace {} {{\n",
+                    "namespace {} {{",
                     self.context.interface_section.namespace
                 );
                 writer.indent();
 
-                emit!(
+                emitln!(
                     writer,
-                    "public partial interface {} {{\n",
+                    "public partial interface {} {{",
                     self.context.interface_section.class
                 );
                 writer.indent();
@@ -603,15 +603,15 @@ impl Lang for LangCSharp {
                             &snippet.name,
                             &snippet.item,
                         );
-                        emit!(writer, ";\n");
+                        emitln!(writer, ";");
                     }
                 }
 
                 writer.unindent();
-                emit!(writer, "}}\n");
+                emitln!(writer, "}}");
 
                 writer.unindent();
-                emit!(writer, "}}\n");
+                emitln!(writer, "}}");
 
                 outputs.insert(
                     self.context.interface_section.path.clone(),
@@ -624,20 +624,20 @@ impl Lang for LangCSharp {
         if self.consts_enabled && (!self.consts.is_empty() || !self.custom_consts.is_empty()) {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
-            emit!(writer, "using System;\n");
-            emit!(writer, "using JetBrains.Annotations;\n\n");
+            emitln!(writer, "using System;");
+            emitln!(writer, "using JetBrains.Annotations;\n");
 
-            emit!(
+            emitln!(
                 writer,
-                "namespace {} {{\n",
+                "namespace {} {{",
                 self.context.consts_section.namespace
             );
             writer.indent();
 
-            emit!(writer, "[PublicAPI]\n");
-            emit!(
+            emitln!(writer, "[PublicAPI]");
+            emitln!(
                 writer,
-                "public static class {} {{\n",
+                "public static class {} {{",
                 self.context.consts_section.class
             );
             writer.indent();
@@ -649,15 +649,15 @@ impl Lang for LangCSharp {
 
             if !self.custom_consts.is_empty() {
                 for decl in self.custom_consts.drain(..) {
-                    emit!(writer, "{}\n", decl);
+                    emitln!(writer, "{}", decl);
                 }
             }
 
             writer.unindent();
-            emit!(writer, "}}\n");
+            emitln!(writer, "}}");
 
             writer.unindent();
-            emit!(writer, "}}\n");
+            emitln!(writer, "}}");
 
             outputs.insert(
                 self.context.consts_section.path.clone(),
@@ -669,14 +669,14 @@ impl Lang for LangCSharp {
         if self.types_enabled && (!self.enums.is_empty() || !self.structs.is_empty()) {
             let mut writer = IndentedWriter::new(INDENT_WIDTH);
 
-            emit!(writer, "using System;\n");
-            emit!(writer, "using System.Collections.Generic;\n");
-            emit!(writer, "using System.Runtime.InteropServices;\n");
-            emit!(writer, "using JetBrains.Annotations;\n\n");
+            emitln!(writer, "using System;");
+            emitln!(writer, "using System.Collections.Generic;");
+            emitln!(writer, "using System.Runtime.InteropServices;");
+            emitln!(writer, "using JetBrains.Annotations;\n");
 
-            emit!(
+            emitln!(
                 writer,
-                "namespace {} {{\n",
+                "namespace {} {{",
                 self.context.types_section.namespace
             );
             writer.indent();
@@ -700,7 +700,7 @@ impl Lang for LangCSharp {
             }
 
             writer.unindent();
-            emit!(writer, "}}\n");
+            emitln!(writer, "}}");
 
             outputs.insert(self.context.types_section.path.clone(), writer.into_inner());
         }

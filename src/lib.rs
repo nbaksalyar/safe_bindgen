@@ -237,7 +237,7 @@ impl Bindgen {
         let input = PathBuf::from(source_path);
 
         Ok(Bindgen {
-            input: input,
+            input,
             session: syntax::parse::ParseSess::new(FilePathMapping::empty()),
         })
     }

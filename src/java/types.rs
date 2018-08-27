@@ -8,8 +8,8 @@ use syntax::print::pprust;
 use syntax::{ast, codemap};
 use {Error, Level};
 
-fn primitive_type_to_str(ty: &Primitive) -> &str {
-    match *ty {
+fn primitive_type_to_str(ty: Primitive) -> &'static str {
+    match ty {
         Primitive::Boolean => "boolean",
         Primitive::Byte => "byte",
         Primitive::Char => "char",
@@ -25,7 +25,7 @@ fn primitive_type_to_str(ty: &Primitive) -> &str {
 /// Converts `JavaType` into Java code
 pub fn java_type_to_str(ty: &JavaType) -> Result<String, Error> {
     match *ty {
-        JavaType::Primitive(ref primitive) => Ok(primitive_type_to_str(primitive).to_string()),
+        JavaType::Primitive(primitive) => Ok(primitive_type_to_str(primitive).to_string()),
         JavaType::Object(ref obj) => match obj.as_str() {
             "java/lang/String" => Ok("String".into()),
             _ => Ok(obj.to_string()),
