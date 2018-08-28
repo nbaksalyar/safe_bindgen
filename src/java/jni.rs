@@ -173,8 +173,7 @@ fn transform_callbacks_arg(
                 quote::Ident::new(cb_base_name)
             };
             quote! { #cb_fn }
-        })
-        .collect();
+        }).collect();
 
     JniArgResult { stmt, call_args }
 }
@@ -340,8 +339,7 @@ fn generate_callback(cb: &ast::BareFnTy, context: &Context) -> JniCallback {
     let mut jni_cb_inputs = Vec::new();
     let mut arg_java_ty = Vec::new();
 
-    let mut args_iter = (&*cb.decl)
-        .inputs
+    let mut args_iter = (*cb.decl.inputs)
         .iter()
         .filter(|arg| !is_user_data_arg(arg))
         .peekable();
@@ -567,7 +565,7 @@ fn generate_struct_to_java(
                         // Extract the class name in form of 'java/lang/Abc' instead of 'Ljava/lang/Abc;' -
                         // Android JNI expects it to be that way.
                         let full_ty_str = if let JavaType::Object(ref obj_name) = full_ty {
-                            format!("{}", obj_name)
+                            obj_name.to_string()
                         } else {
                             format!("{}", full_ty)
                         };

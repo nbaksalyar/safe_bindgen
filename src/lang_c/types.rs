@@ -61,8 +61,7 @@ impl CType {
                 .chain(
                     args.iter()
                         .flat_map(|&CTypeNamed(_, ref cty)| cty.dependencies()),
-                )
-                .collect(),
+                ).collect(),
             CType::Ptr(ref cty, _) => cty.dependencies(),
             CType::Mapping(ref mapping) => vec![mapping.clone()],
             _ => Default::default(),

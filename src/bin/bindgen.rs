@@ -19,8 +19,7 @@ fn main() {
                 .conflicts_with("STRING")
                 .takes_value(true)
                 .help("the root source file"),
-        )
-        .arg(
+        ).arg(
             clap::Arg::with_name("LANG")
                 .short("-l")
                 .long("--lang")
@@ -28,20 +27,17 @@ fn main() {
                 .required(true)
                 .help("target language")
                 .possible_values(&["csharp", "java", "c"]),
-        )
-        .arg(
+        ).arg(
             clap::Arg::with_name("LIB")
                 .long("--lib")
                 .takes_value(true)
                 .required(true)
                 .help("name of the native library to link"),
-        )
-        .arg(
+        ).arg(
             clap::Arg::with_name("OUTPUT")
                 .index(1)
                 .help("set the output directory"),
-        )
-        .get_matches();
+        ).get_matches();
 
     let mut bindgen = Bindgen::new().expect("cargo manifest could not be read");
     let lang = matches.value_of("LANG").unwrap();
