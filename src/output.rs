@@ -89,13 +89,13 @@ mod tests {
     fn smoke() {
         let mut output = IndentedWriter::new(4);
 
-        writeln!(output, "pub struct Foo {{").unwrap();
+        unwrap!(writeln!(output, "pub struct Foo {{"));
         output.indent();
-        writeln!(output, "bar: Bar,").unwrap();
-        write!(output, "baz").unwrap();
-        writeln!(output, ": Baz,").unwrap();
+        unwrap!(writeln!(output, "bar: Bar,"));
+        unwrap!(write!(output, "baz"));
+        unwrap!(writeln!(output, ": Baz,"));
         output.unindent();
-        writeln!(output, "}}").unwrap();
+        unwrap!(writeln!(output, "}}"));
 
         let expected = "pub struct Foo {\n    bar: Bar,\n    baz: Baz,\n}\n";
         assert_eq!(&*output, expected);
@@ -106,7 +106,7 @@ mod tests {
         let mut output = IndentedWriter::new(4);
         output.indent();
 
-        write!(output, "foo\n\n\nbar").unwrap();
+        unwrap!(write!(output, "foo\n\n\nbar"));
 
         let expected = "    foo\n\n\n    bar";
         assert_eq!(&*output, expected);

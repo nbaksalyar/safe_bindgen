@@ -30,7 +30,7 @@ impl StructField {
     }
 
     pub fn name(&self) -> symbol::InternedString {
-        self.struct_field().ident.unwrap().name.as_str()
+        unwrap!(self.struct_field().ident).name.as_str()
     }
 }
 
@@ -38,11 +38,11 @@ pub fn transform_struct_fields(fields: &[ast::StructField]) -> Vec<StructField> 
     let mut results = Vec::new();
     let field_names: BTreeSet<_> = fields
         .iter()
-        .map(|f| f.ident.unwrap().name.as_str().to_string())
+        .map(|f| unwrap!(f.ident).name.as_str().to_string())
         .collect();
 
     for f in fields {
-        let mut field_name: String = f.ident.unwrap().name.as_str().to_string();
+        let mut field_name: String = unwrap!(f.ident).name.as_str().to_string();
 
         match f.ty.node {
             // Pointers
@@ -97,7 +97,7 @@ pub fn transform_struct_fields(fields: &[ast::StructField]) -> Vec<StructField> 
 }
 
 fn is_array_meta_field(field: &ast::StructField) -> bool {
-    let str_name = field.ident.unwrap().name.as_str();
+    let str_name = unwrap!(field.ident).name.as_str();
 
     if let ast::TyKind::Path(None, ref path) = field.ty.node {
         let (ty, _module) = path

@@ -1,7 +1,5 @@
 # safe_bindgen
 
-**Maintainer:** Spandan Sharma (spandan.sharma@maidsafe.net)
-
 Language bindings generator framework that is intended to work in pair with [SAFE Client Libs](https://github.com/maidsafe/safe_client_libs).
 It is used to automatically build bindings to SAFE Client Libs for Java and C#.
 

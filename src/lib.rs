@@ -3,6 +3,11 @@
 //!
 //! It is built specifically for the SAFE Client Libs project.
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/maidsafe/QA/master/Images/maidsafe_logo.png",
+    html_favicon_url = "http://maidsafe.net/img/favicon.ico",
+    test(attr(forbid(warnings))),
+)]
 // For explanation of lint checks, run `rustc -W help` or see
 // https://github.com/maidsafe/QA/blob/master/Documentation/Rust%20Lint%20Checks.md
 #![forbid(
@@ -287,11 +292,14 @@ impl Bindgen {
         outputs: &mut Outputs,
         finalise: bool,
     ) -> Result<(), Vec<Error>> {
-        let base_path = self.input.parent().unwrap();
+        let base_path = unwrap!(self.input.parent());
         let mod_path = unwrap!(self.input.to_str()).to_string();
 
         // Parse the top level mod.
-        let krate = syntax::parse::parse_crate_from_file(&self.input, &self.session).unwrap();
+        let krate = unwrap!(syntax::parse::parse_crate_from_file(
+            &self.input,
+            &self.session
+        ));
         let module = convert_lib_path_to_module(&PathBuf::from(mod_path.clone()));
         eprintln!("Parsing {} ({:?})", module.join("::"), mod_path);
 
@@ -314,7 +322,10 @@ impl Bindgen {
 
             eprintln!("Parsing {} ({:?})", module.join("::"), mod_path);
 
-            let krate = syntax::parse::parse_crate_from_file(&mod_path, &self.session).unwrap();
+            let krate = unwrap!(syntax::parse::parse_crate_from_file(
+                &mod_path,
+                &self.session
+            ));
             parse::parse_mod(lang, &krate.module, &module, outputs)?;
         }
 
