@@ -218,6 +218,11 @@ impl Error {
     }
 }
 
+enum Input {
+    File(PathBuf),
+    Code { file_name: String, code: String },
+}
+
 /// Stores configuration for the bindgen.
 ///
 /// # Examples
@@ -248,7 +253,7 @@ impl Error {
 /// ```
 pub struct Bindgen {
     /// The root source file of the crate.
-    input: PathBuf,
+    input: Input,
     /// The current parser session.
     ///
     /// Used for printing errors.
@@ -262,7 +267,7 @@ impl Bindgen {
     /// manifest available then the source file defaults to `src/lib.rs`.
     pub fn new() -> Result<Self, Error> {
         let source_path = source_file_from_cargo()?;
-        let input = PathBuf::from(source_path);
+        let input = Input::File(PathBuf::from(source_path));
 
         Ok(Bindgen {
             input,
@@ -277,7 +282,19 @@ impl Bindgen {
     where
         PathBuf: From<T>,
     {
-        self.input = PathBuf::from(path);
+        self.input = Input::File(PathBuf::from(path));
+        self
+    }
+
+    /// Use custom code as input.
+    pub fn source_code<S>(&mut self, file_name: S, code: S) -> &mut Self
+    where
+        S: Into<String>,
+    {
+        self.input = Input::Code {
+            file_name: file_name.into(),
+            code: code.into(),
+        };
         self
     }
 
@@ -287,19 +304,36 @@ impl Bindgen {
     /// intended for internal use, but may be of interest to people who wish to embed
     /// moz-cheddar's generated code in another file.
     pub fn compile<L: Lang>(
-        &self,
+        &mut self,
         lang: &mut L,
         outputs: &mut Outputs,
         finalise: bool,
     ) -> Result<(), Vec<Error>> {
-        let base_path = unwrap!(self.input.parent());
-        let mod_path = unwrap!(self.input.to_str()).to_string();
+        match &self.input {
+            Input::Code { file_name, code } => {
+                self.compile_from_source(lang, outputs, file_name.clone(), code.clone())?;
+            }
+            Input::File(path) => {
+                self.compile_from_path(lang, outputs, path)?;
+            }
+        }
+        if finalise {
+            lang.finalise_output(outputs)?;
+        }
+        Ok(())
+    }
+
+    fn compile_from_path<L: Lang>(
+        &self,
+        lang: &mut L,
+        outputs: &mut Outputs,
+        path: &PathBuf,
+    ) -> Result<(), Vec<Error>> {
+        let base_path = unwrap!(path.parent());
+        let mod_path = unwrap!(path.to_str()).to_string();
 
         // Parse the top level mod.
-        let krate = unwrap!(syntax::parse::parse_crate_from_file(
-            &self.input,
-            &self.session
-        ));
+        let krate = unwrap!(syntax::parse::parse_crate_from_file(path, &self.session));
         let module = convert_lib_path_to_module(&PathBuf::from(mod_path.clone()));
         eprintln!("Parsing {} ({:?})", module.join("::"), mod_path);
 
@@ -328,15 +362,36 @@ impl Bindgen {
             ));
             parse::parse_mod(lang, &krate.module, &module, outputs)?;
         }
-
-        if finalise {
-            lang.finalise_output(outputs)?;
-        }
-
         Ok(())
     }
 
-    pub fn compile_or_panic<L: Lang>(&self, lang: &mut L, outputs: &mut Outputs, finalise: bool) {
+    fn compile_from_source<L: Lang>(
+        &self,
+        lang: &mut L,
+        outputs: &mut Outputs,
+        file_name: String,
+        source: String,
+    ) -> Result<(), Vec<Error>> {
+        let module = convert_lib_path_to_module(&PathBuf::from(file_name.clone()));
+
+        let krate = unwrap!(syntax::parse::parse_crate_from_source_str(
+            file_name,
+            source,
+            &self.session
+        ));
+
+        eprintln!("Parsing {} (from string)", module.join("::"));
+
+        parse::parse_mod(lang, &krate.module, &module, outputs)?;
+        Ok(())
+    }
+
+    pub fn compile_or_panic<L: Lang>(
+        &mut self,
+        lang: &mut L,
+        outputs: &mut Outputs,
+        finalise: bool,
+    ) {
         if let Err(errors) = self.compile(lang, outputs, finalise) {
             for error in &errors {
                 self.print_error(error);
@@ -380,7 +435,7 @@ impl Bindgen {
     /// # Panics
     ///
     /// Panics on any compilation error so that the build script exits and prints output.
-    pub fn run_build<P: AsRef<Path>, L: Lang>(&self, lang: &mut L, output_dir: P) {
+    pub fn run_build<P: AsRef<Path>, L: Lang>(&mut self, lang: &mut L, output_dir: P) {
         let mut outputs = HashMap::new();
         self.compile_or_panic(lang, &mut outputs, true);
         self.write_outputs_or_panic(output_dir, &outputs);
