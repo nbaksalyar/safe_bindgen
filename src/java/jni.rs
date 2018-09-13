@@ -562,8 +562,7 @@ fn generate_struct_to_java(
                     } else {
                         let full_ty = unwrap!(rust_ty_to_signature(&ptr.ty, context));
 
-                        // Extract the class name in form of 'java/lang/Abc' instead of 'Ljava/lang/Abc;' -
-                        // Android JNI expects it to be that way.
+                        // Extract the class name in form of 'java/lang/Abc' instead of 'Ljava/lang/Abc;'.
                         let full_ty_str = if let JavaType::Object(ref obj_name) = full_ty {
                             obj_name.to_string()
                         } else {
@@ -575,9 +574,10 @@ fn generate_struct_to_java(
 
                         // Struct array
                         quote! {
+                            let cls = find_class(env, #full_ty_str);
                             let arr = env.new_object_array(
                                 self.#len_field_ident as jni::sys::jsize,
-                                #full_ty_str,
+                                &cls,
                                 JObject::null()
                             )?;
                             let items = unsafe {
@@ -668,7 +668,8 @@ fn generate_struct_to_java(
     quote! {
         impl<'a> ToJava<'a, JObject<'a>> for #struct_ident {
             fn to_java(&self, env: &'a JNIEnv) -> Result<JObject<'a>, JniError> {
-                let output = env.new_object(#fully_qualified_name, "()V", &[])?;
+                let cls = find_class(env, #fully_qualified_name);
+                let output = env.new_object(&cls, "()V", &[])?;
                 #(#stmts)*
                 Ok(output)
             }

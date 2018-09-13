@@ -10,7 +10,7 @@ os:
 language: rust
 rust:
   - 1.28.0
-  - nightly-2018-07-07
+  - nightly
 sudo: false
 branches:
   only:
@@ -22,7 +22,7 @@ before_script:
   - bash cargo_install.sh cargo-prune;
   - if [[ "$TRAVIS_RUST_VERSION" =~ ^nightly.* && "$TRAVIS_OS_NAME" == linux ]]; then
       bash cargo_install.sh rustfmt-nightly $RUST_RUSTFMT;
-      bash cargo_install.sh clippy $RUST_CLIPPY;
+      # bash cargo_install.sh clippy $RUST_CLIPPY;
     fi
 script:
   - if [[ ! "$TRAVIS_RUST_VERSION" =~ ^nightly.* ]]; then
@@ -34,8 +34,9 @@ script:
       (
         set -x;
         cargo fmt -- --check &&
-        cargo check &&
-        cargo clippy && cargo clippy --profile=test
+        # cargo check &&
+        # cargo clippy && cargo clippy --profile=test
+        cargo check --profile=test
       );
     fi
 before_cache:
