@@ -489,10 +489,12 @@ pub fn generate_jni_callback(cb: &ast::BareFnTy, cb_name: &str, context: &mut Co
     let tokens = quote! {
         extern "C" fn #cb_name(ctx: *mut c_void, #(#jni_cb_inputs),*) {
             unsafe {
-                let env = JVM.as_ref()
-                    .map(|vm| unwrap!(vm.attach_current_thread_as_daemon()))
-                    .expect("no JVM reference found");
-                let cb = convert_cb_from_java(&env, ctx);
+                let env = jni_unwrap!(
+                    JVM.as_ref()
+                        .ok_or_else(|| From::from("no JVM reference found"))
+                        .and_then(|vm| vm.attach_current_thread_as_daemon())
+                );
+                let cb = jni_unwrap!(convert_cb_from_java(&env, ctx));
 
                 #(#stmts);*
 
@@ -574,7 +576,7 @@ fn generate_struct_to_java(
 
                         // Struct array
                         quote! {
-                            let cls = find_class(env, #full_ty_str);
+                            let cls = unsafe { find_class(env, #full_ty_str)? };
                             let arr = env.new_object_array(
                                 self.#len_field_ident as jni::sys::jsize,
                                 &cls,
@@ -668,7 +670,7 @@ fn generate_struct_to_java(
     quote! {
         impl<'a> ToJava<'a, JObject<'a>> for #struct_ident {
             fn to_java(&self, env: &'a JNIEnv) -> Result<JObject<'a>, JniError> {
-                let cls = find_class(env, #fully_qualified_name);
+                let cls = unsafe { find_class(env, #fully_qualified_name)? };
                 let output = env.new_object(&cls, "()V", &[])?;
                 #(#stmts)*
                 Ok(output)
