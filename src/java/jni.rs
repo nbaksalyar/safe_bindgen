@@ -545,12 +545,14 @@ fn generate_struct_to_java(
                                 )
                             };
                             env.set_byte_array_region(arr, 0, slice)?;
+                            let jobj = JObject::from(arr);
                             env.set_field(
                                 output,
                                 #java_field_name,
                                 "[B",
-                                JObject::from(arr).into()
+                                jobj.into()
                             )?;
+                            env.delete_local_ref(jobj)?;
                             env.set_field(
                                 output,
                                 #len_field,
@@ -583,18 +585,22 @@ fn generate_struct_to_java(
                                 slice::from_raw_parts(self.#field_name, self.#len_field_ident)
                             };
                             for (idx, item) in items.iter().enumerate() {
+                                let jobj = item.to_java(env)?;
                                 env.set_object_array_element(
                                     arr,
                                     idx as jni::sys::jsize,
-                                    item.to_java(env)?
+                                    jobj
                                 )?;
+                                env.delete_local_ref(jobj)?;
                             }
+                            let jobj = JObject::from(arr);
                             env.set_field(
                                 output,
                                 #java_field_name,
                                 #arr_signature,
-                                JObject::from(arr).into()
+                                jobj.into()
                             )?;
+                            env.delete_local_ref(jobj)?;
                             env.set_field(
                                 output,
                                 #len_field,
@@ -617,6 +623,7 @@ fn generate_struct_to_java(
                             "Ljava/lang/String;",
                             #field_name.into()
                         )?;
+                        env.delete_local_ref(#field_name)?;
                     }
                 }
             }
@@ -624,12 +631,14 @@ fn generate_struct_to_java(
                 let signature = format!("{}", unwrap!(rust_ty_to_signature(&ty.ty, context)));
 
                 quote! {
+                    let jobj = self.#field_name.to_java(env)?;
                     env.set_field(
                         output,
                         #field_name_str,
                         #signature,
-                        self.#field_name.to_java(env)?.into()
+                        jobj.into()
                     )?;
+                    env.delete_local_ref(jobj)?;
                 }
             }
             StructField::LenField(ref _f) => {
@@ -646,13 +655,22 @@ fn generate_struct_to_java(
                     let conv =
                         rust_ty_to_java(ty).unwrap_or_else(|| lookup_object_type(ty, context));
                     let signature = format!("{}", conv);
+                    let del_ref = if let JavaType::Object(..) = conv {
+                        quote!{
+                            env.delete_local_ref(jobj)?;
+                        }
+                    } else {
+                        quote!{}
+                    };
                     quote! {
+                        let jobj = self.#field_name.to_java(env)?;
                         env.set_field(
                             output,
                             #java_field_name,
                             #signature,
-                            self.#field_name.to_java(env)?.into()
+                            jobj.into()
                         )?;
+                        #del_ref
                     }
                 }
                 _ => quote!{},
