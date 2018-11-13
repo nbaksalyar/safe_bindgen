@@ -143,6 +143,7 @@ impl common::Lang for LangJava {
 
             transform_native_fn(
                 &*fn_decl,
+                &item.attrs,
                 &docs,
                 &format!("{}", name),
                 outputs,
@@ -392,6 +393,7 @@ fn generate_parametrised_constructor(
 /// Transform a Rust FFI function into a Java native function
 pub fn transform_native_fn(
     fn_decl: &ast::FnDecl,
+    attrs: &[ast::Attribute],
     docs: &str,
     name: &str,
     outputs: &mut Outputs,
@@ -476,6 +478,12 @@ pub fn transform_native_fn(
     append_output(buffer, "NativeBindings.java", outputs);
 
     // Append the function declaration to import it as an "extern fn"
+    let mut fn_attrs = String::new();
+    for attr in attrs {
+        if attr.check_name("cfg") {
+            fn_attrs.push_str(&pprust::attr_to_string(attr));
+        }
+    }
     let fn_decl_import = pprust::fun_to_string(
         fn_decl,
         ast::Unsafety::Normal,
@@ -484,13 +492,16 @@ pub fn transform_native_fn(
         &ast::Generics::default(),
     );
     let mut jni = format!(
-        "\n#[link(name = \"safe_app\")]\nextern {{ {fndecl}; }}\n",
+        "\n{attrs}#[link(name = \"{libname}\")]\nextern {{ {fndecl}; }}\n",
+        attrs = fn_attrs,
+        libname = context.lib_name,
         fndecl = fn_decl_import,
     );
 
     // Generate the JNI part of the interface
     jni.push_str(&jni::generate_jni_function(
         fn_decl.inputs.clone(),
+        attrs,
         name,
         &java_name,
         context,

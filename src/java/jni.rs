@@ -195,6 +195,7 @@ fn transform_opaque_ptr(arg_name: &str, ty: &str) -> JniArgResult {
 /// Generates JNI function binding based on a native function
 pub fn generate_jni_function(
     args: Vec<ast::Arg>,
+    attrs: &[ast::Attribute],
     native_name: &str,
     func_name: &str,
     context: &mut Context,
@@ -311,7 +312,18 @@ pub fn generate_jni_function(
         }
     };
 
-    tokens.to_string()
+    let mut output = String::new();
+
+    for attr in attrs {
+        if attr.check_name("cfg") {
+            output.push_str(&pprust::attr_to_string(attr));
+            output.push_str("\n");
+        }
+    }
+
+    output.push_str(&tokens.to_string());
+
+    output
 }
 
 /// Transform `ast::Arg` into an (identifier, type) tuple
