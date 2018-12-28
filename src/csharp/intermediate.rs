@@ -1,11 +1,11 @@
 //! Types and utilities for the intermediate representation between the rust code
 //! and the target language code.
 
-use common;
+use crate::common;
+use crate::syntax::ast;
+use crate::syntax::print::pprust;
+use crate::syntax::ptr;
 use std::collections::BTreeMap;
-use syntax::ast;
-use syntax::print::pprust;
-use syntax::ptr;
 
 // TODO: replace whit macro with the ? operator one we upgrade to rust 1.22
 macro_rules! try_opt {

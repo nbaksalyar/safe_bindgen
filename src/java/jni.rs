@@ -2,13 +2,13 @@
 
 use super::types::{callback_name, rust_ty_to_java};
 use super::{Context, Outputs};
-use common::{append_output, is_array_arg, is_user_data_arg};
+use crate::common::{append_output, is_array_arg, is_user_data_arg};
+use crate::quote;
+use crate::struct_field::StructField;
+use crate::syntax::ast;
+use crate::syntax::print::pprust;
 use inflector::Inflector;
 use jni::signature::{self, JavaType, Primitive, TypeSignature};
-use quote;
-use struct_field::StructField;
-use syntax::ast;
-use syntax::print::pprust;
 
 fn to_jni_arg(arg: &ast::Arg, ty_name: &str) -> quote::Tokens {
     let pat = quote::Ident::new(pprust::pat_to_string(&*arg.pat));

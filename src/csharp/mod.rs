@@ -6,17 +6,17 @@ mod tests;
 
 use self::emit::*;
 use self::intermediate::*;
-use common::{self, FilterMode, Lang, Outputs};
+use crate::common::{self, FilterMode, Lang, Outputs};
+use crate::output::IndentedWriter;
+use crate::syntax::ast;
+use crate::syntax::print::pprust;
+use crate::Error;
+use crate::Level;
 use inflector::Inflector;
-use output::IndentedWriter;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Display, Write};
 use std::mem;
-use syntax::ast;
-use syntax::print::pprust;
-use Error;
-use Level;
 
 const INDENT_WIDTH: usize = 2;
 

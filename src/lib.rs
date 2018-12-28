@@ -53,7 +53,6 @@
 #![cfg_attr(not(feature = "with-syntex"), feature(rustc_private))]
 #![recursion_limit = "128"]
 
-extern crate inflector;
 #[cfg(not(feature = "with-syntex"))]
 extern crate rustc_errors as errors;
 #[cfg(not(feature = "with-syntex"))]
@@ -62,12 +61,9 @@ extern crate syntax;
 extern crate syntex_errors as errors;
 #[cfg(feature = "with-syntex")]
 extern crate syntex_syntax as syntax;
-extern crate toml;
+use toml;
 #[macro_use]
 extern crate quote;
-extern crate jni;
-extern crate petgraph;
-extern crate rustfmt;
 
 #[cfg(test)]
 extern crate colored;
@@ -79,19 +75,20 @@ extern crate indoc;
 #[macro_use]
 extern crate unwrap;
 
-pub use common::FilterMode;
-use common::{Lang, Outputs};
-pub use csharp::LangCSharp;
-pub use errors::Level;
-pub use java::LangJava;
-pub use lang_c::LangC;
+pub use crate::common::FilterMode;
+use crate::common::{Lang, Outputs};
+pub use crate::csharp::LangCSharp;
+pub use crate::errors::Level;
+pub use crate::java::LangJava;
+pub use crate::lang_c::LangC;
+use crate::syntax::codemap::{FilePathMapping, Span};
+use jni;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
 use std::io::Error as IoError;
 use std::io::{Read, Write};
 use std::path::{self, Component, Path, PathBuf};
-use syntax::codemap::{FilePathMapping, Span};
 
 #[cfg(test)]
 #[macro_use]

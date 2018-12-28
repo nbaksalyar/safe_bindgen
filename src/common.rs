@@ -1,10 +1,10 @@
 //! Functions common for all target languages.
 
+use crate::syntax::abi::Abi;
+use crate::syntax::ast;
+use crate::syntax::print::pprust;
+use crate::Error;
 use std::collections::hash_map::{Entry, HashMap};
-use syntax::abi::Abi;
-use syntax::ast;
-use syntax::print::pprust;
-use Error;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum FilterMode {

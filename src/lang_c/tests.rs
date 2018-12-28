@@ -1,8 +1,8 @@
 use super::types::CType;
-use lang_c::LangC;
-use syntax::codemap::FilePathMapping;
-use syntax::{ast, parse};
-use test_utils::fetch;
+use crate::lang_c::LangC;
+use crate::syntax::codemap::FilePathMapping;
+use crate::syntax::{ast, parse};
+use crate::test_utils::fetch;
 
 #[test]
 fn sanitise_id() {

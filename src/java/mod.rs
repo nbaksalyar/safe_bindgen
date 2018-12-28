@@ -3,21 +3,20 @@
 mod jni;
 mod types;
 
-use common::{
+use crate::common::{
     self, append_output, check_no_mangle, is_array_arg, is_user_data_arg, parse_attr,
     retrieve_docstring, FilterMode, Outputs,
 };
+use crate::java::types::{callback_name, java_type_to_str, rust_to_java, struct_to_java_classname};
+use crate::jni::signature::JavaType;
+use crate::struct_field::{transform_struct_fields, StructField};
+use crate::syntax::abi::Abi;
+use crate::syntax::print::pprust;
+use crate::syntax::{ast, codemap};
+use crate::Error;
+use crate::Level;
 use inflector::Inflector;
-use java::types::{callback_name, java_type_to_str, rust_to_java, struct_to_java_classname};
-use jni::signature::JavaType;
-use rustfmt;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use struct_field::{transform_struct_fields, StructField};
-use syntax::abi::Abi;
-use syntax::print::pprust;
-use syntax::{ast, codemap};
-use Error;
-use Level;
 
 pub struct LangJava {
     context: Context,
@@ -626,9 +625,9 @@ fn callback_to_java(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use syntax::ast::{Arg, ItemKind};
-    use syntax::codemap::FilePathMapping;
-    use syntax::parse::{self, ParseSess};
+    use crate::syntax::ast::{Arg, ItemKind};
+    use crate::syntax::codemap::FilePathMapping;
+    use crate::syntax::parse::{self, ParseSess};
 
     #[test]
     fn cb_names() {

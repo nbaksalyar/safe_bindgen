@@ -5,18 +5,18 @@ mod tests;
 mod types;
 
 use self::types::{CPtrType, CType, CTypeNamed};
-use common::{
+use crate::common::{
     append_output, check_no_mangle, check_repr_c, parse_attr, retrieve_docstring, Lang, Outputs,
 };
+use crate::syntax::abi::Abi;
+use crate::syntax::print::pprust;
+use crate::syntax::{ast, codemap, print};
+use crate::Error;
+use crate::Level;
 use petgraph::{algo, Graph};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path;
-use syntax::abi::Abi;
-use syntax::print::pprust;
-use syntax::{ast, codemap, print};
-use Error;
-use Level;
 
 pub struct LangC {
     lib_name: String,
