@@ -1,6 +1,6 @@
+use crate::syntax::print::pprust;
+use crate::syntax::{ast, symbol};
 use std::collections::BTreeSet;
-use syntax::print::pprust;
-use syntax::{ast, symbol};
 
 #[derive(Debug)]
 pub enum StructField {

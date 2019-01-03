@@ -1,8 +1,8 @@
 //! Functions for actually parsing the source file.
 
-use common::{Lang, Outputs};
-use syntax::ast;
-use Error;
+use crate::common::{Lang, Outputs};
+use crate::syntax::ast;
+use crate::Error;
 
 /// Returns a list of FFI submodules imported in a top-level module
 pub fn imported_mods(module: &ast::Mod) -> Vec<Vec<String>> {

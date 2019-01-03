@@ -1,10 +1,10 @@
 //! Functions common for all target languages.
 
+use crate::syntax::abi::Abi;
+use crate::syntax::ast;
+use crate::syntax::print::pprust;
+use crate::Error;
 use std::collections::hash_map::{Entry, HashMap};
-use syntax::abi::Abi;
-use syntax::ast;
-use syntax::print::pprust;
-use Error;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum FilterMode {
@@ -111,9 +111,10 @@ pub fn is_ptr_len_arg(ty: &ast::Ty, arg_name: &str) -> bool {
 /// `ptr: *const u8, ptr_len: usize` we're going to skip the `len` part.
 pub fn is_array_arg(arg: &ast::Arg, next_arg: Option<&ast::Arg>) -> bool {
     if let ast::TyKind::Ptr(..) = arg.ty.node {
-        !is_result_arg(arg) && next_arg
-            .map(|arg| is_ptr_len_arg(&*arg.ty, &pprust::pat_to_string(&*arg.pat)))
-            .unwrap_or(false)
+        !is_result_arg(arg)
+            && next_arg
+                .map(|arg| is_ptr_len_arg(&*arg.ty, &pprust::pat_to_string(&*arg.pat)))
+                .unwrap_or(false)
     } else {
         false
     }

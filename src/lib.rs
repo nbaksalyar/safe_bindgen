@@ -6,7 +6,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/maidsafe/QA/master/Images/maidsafe_logo.png",
     html_favicon_url = "http://maidsafe.net/img/favicon.ico",
-    test(attr(forbid(warnings))),
+    test(attr(forbid(warnings)))
 )]
 // For explanation of lint checks, run `rustc -W help` or see
 // https://github.com/maidsafe/QA/blob/master/Documentation/Rust%20Lint%20Checks.md
@@ -23,8 +23,6 @@
     non_shorthand_field_patterns,
     overflowing_literals,
     plugin_as_library,
-    private_no_mangle_fns,
-    private_no_mangle_statics,
     stable_features,
     unconditional_recursion,
     unknown_lints,
@@ -55,7 +53,6 @@
 #![cfg_attr(not(feature = "with-syntex"), feature(rustc_private))]
 #![recursion_limit = "128"]
 
-extern crate inflector;
 #[cfg(not(feature = "with-syntex"))]
 extern crate rustc_errors as errors;
 #[cfg(not(feature = "with-syntex"))]
@@ -64,12 +61,9 @@ extern crate syntax;
 extern crate syntex_errors as errors;
 #[cfg(feature = "with-syntex")]
 extern crate syntex_syntax as syntax;
-extern crate toml;
+use toml;
 #[macro_use]
 extern crate quote;
-extern crate jni;
-extern crate petgraph;
-extern crate rustfmt;
 
 #[cfg(test)]
 extern crate colored;
@@ -81,19 +75,20 @@ extern crate indoc;
 #[macro_use]
 extern crate unwrap;
 
-pub use common::FilterMode;
-use common::{Lang, Outputs};
-pub use csharp::LangCSharp;
-pub use errors::Level;
-pub use java::LangJava;
-pub use lang_c::LangC;
+pub use crate::common::FilterMode;
+use crate::common::{Lang, Outputs};
+pub use crate::csharp::LangCSharp;
+pub use crate::errors::Level;
+pub use crate::java::LangJava;
+pub use crate::lang_c::LangC;
+use crate::syntax::codemap::{FilePathMapping, Span};
+use jni;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
 use std::io::Error as IoError;
 use std::io::{Read, Write};
 use std::path::{self, Component, Path, PathBuf};
-use syntax::codemap::{FilePathMapping, Span};
 
 #[cfg(test)]
 #[macro_use]
@@ -471,7 +466,8 @@ fn convert_lib_path_to_module<P: AsRef<Path>>(path: &P) -> Vec<String> {
 fn source_file_from_cargo() -> Result<String, Error> {
     let cargo_toml = path::Path::new(
         &std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| std::ffi::OsString::from("")),
-    ).join("Cargo.toml");
+    )
+    .join("Cargo.toml");
 
     // If no `Cargo.toml` assume `src/lib.rs` until told otherwise.
     let default = "src/lib.rs";

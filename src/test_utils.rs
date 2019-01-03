@@ -1,12 +1,12 @@
+use crate::common::{Lang, Outputs};
+use crate::parse;
+use crate::syntax;
+use crate::syntax::codemap::FilePathMapping;
+use crate::Error;
 use colored::*;
-use common::{Lang, Outputs};
 use diff;
-use parse;
 use std::collections::HashMap;
 use std::fmt::Write;
-use syntax;
-use syntax::codemap::FilePathMapping;
-use Error;
 
 macro_rules! compile {
     ($lang:expr, $rust:tt) => {

@@ -1,12 +1,12 @@
 //! Functions for converting Rust types to Java types.
 
-use common::{is_array_arg, is_result_arg, is_user_data_arg};
-use java::Context;
+use crate::common::{is_array_arg, is_result_arg, is_user_data_arg};
+use crate::java::Context;
+use crate::syntax::abi::Abi;
+use crate::syntax::print::pprust;
+use crate::syntax::{ast, codemap};
+use crate::{Error, Level};
 use jni::signature::{JavaType, Primitive};
-use syntax::abi::Abi;
-use syntax::print::pprust;
-use syntax::{ast, codemap};
-use {Error, Level};
 
 fn primitive_type_to_str(ty: Primitive) -> &'static str {
     match ty {
@@ -271,10 +271,10 @@ pub fn rust_ty_to_java(ty: &str) -> Option<JavaType> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::syntax::ast::*;
+    use crate::syntax::codemap::DUMMY_SP;
+    use crate::syntax::ptr::P;
     use jni::signature::{JavaType, Primitive};
-    use syntax::ast::*;
-    use syntax::codemap::DUMMY_SP;
-    use syntax::ptr::P;
 
     #[test]
     fn test_rust_to_java() {
@@ -314,14 +314,16 @@ mod tests {
         assert_eq!(
             unwrap!(java_type_to_str(&JavaType::Object(
                 "net.maidsafe.Test".to_string()
-            ),)).as_str(),
+            ),))
+            .as_str(),
             "net.maidsafe.Test"
         );
 
         assert_eq!(
             unwrap!(java_type_to_str(&JavaType::Array(Box::new(
                 JavaType::Primitive(Primitive::Byte)
-            ),))).as_str(),
+            ),)))
+            .as_str(),
             "byte[]"
         );
     }

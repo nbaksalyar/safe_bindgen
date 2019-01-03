@@ -1,11 +1,11 @@
 //! Types and utilities for the intermediate representation between the rust code
 //! and the target language code.
 
-use common;
+use crate::common;
+use crate::syntax::ast;
+use crate::syntax::print::pprust;
+use crate::syntax::ptr;
 use std::collections::BTreeMap;
-use syntax::ast;
-use syntax::print::pprust;
-use syntax::ptr;
 
 // TODO: replace whit macro with the ? operator one we upgrade to rust 1.22
 macro_rules! try_opt {
@@ -206,7 +206,8 @@ pub fn transform_enum(variants: &[ast::Variant]) -> Option<Enum> {
             let value = extract_enum_variant_value(variant);
 
             Some(EnumVariant { docs, name, value })
-        }).collect();
+        })
+        .collect();
 
     variants.map(|variants| Enum { variants })
 }
@@ -225,7 +226,8 @@ pub fn transform_struct(fields: &[ast::StructField]) -> Option<Struct> {
                 ty,
                 has_cap: false,
             })
-        }).collect();
+        })
+        .collect();
 
     fields.map(|fields| Struct {
         fields: process_struct_fields(fields),
@@ -328,7 +330,8 @@ fn transform_const_struct(path: &ast::Path, fields: &[ast::Field]) -> Option<Con
             } else {
                 None
             }
-        }).collect();
+        })
+        .collect();
 
     fields.map(|fields| ConstValue::Struct(name, fields))
 }

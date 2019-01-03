@@ -2,8 +2,8 @@
 
 use super::intermediate::*;
 use super::Context;
+use crate::output::IndentedWriter;
 use inflector::Inflector;
-use output::IndentedWriter;
 use std::fmt::Write;
 
 const LEN_TYPE: &str = "UIntPtr";

@@ -2,13 +2,13 @@
 
 use super::types::{callback_name, rust_ty_to_java};
 use super::{Context, Outputs};
-use common::{append_output, is_array_arg, is_user_data_arg};
+use crate::common::{append_output, is_array_arg, is_user_data_arg};
+use crate::quote;
+use crate::struct_field::StructField;
+use crate::syntax::ast;
+use crate::syntax::print::pprust;
 use inflector::Inflector;
 use jni::signature::{self, JavaType, Primitive, TypeSignature};
-use quote;
-use struct_field::StructField;
-use syntax::ast;
-use syntax::print::pprust;
 
 fn to_jni_arg(arg: &ast::Arg, ty_name: &str) -> quote::Tokens {
     let pat = quote::Ident::new(pprust::pat_to_string(&*arg.pat));
@@ -173,7 +173,8 @@ fn transform_callbacks_arg(
                 quote::Ident::new(cb_base_name)
             };
             quote! { #cb_fn }
-        }).collect();
+        })
+        .collect();
 
     JniArgResult { stmt, call_args }
 }
@@ -253,7 +254,7 @@ pub fn generate_jni_function(
                     let native_ty = quote::Ident::new(pprust::ty_to_string(&arg.ty));
 
                     Some(JniArgResult {
-                        stmt: quote!{},
+                        stmt: quote! {},
                         call_args: vec![quote! { #id as #native_ty }],
                     })
                 }
@@ -618,7 +619,7 @@ fn generate_struct_to_java(
                         }
                     }
                 } else {
-                    quote!{}
+                    quote! {}
                 }
             }
             StructField::String(ref _f) => {
@@ -651,7 +652,7 @@ fn generate_struct_to_java(
             }
             StructField::LenField(ref _f) => {
                 // Skip len/cap fields transformation - it's covered by `ArrayField`
-                quote!{}
+                quote! {}
             }
             StructField::Primitive(ref f) => match f.ty.node {
                 ast::TyKind::Path(None, ref path) => {
@@ -664,11 +665,11 @@ fn generate_struct_to_java(
                         rust_ty_to_java(ty).unwrap_or_else(|| lookup_object_type(ty, context));
                     let signature = format!("{}", conv);
                     let del_ref = if let JavaType::Object(..) = conv {
-                        quote!{
+                        quote! {
                             env.delete_local_ref(jobj)?;
                         }
                     } else {
-                        quote!{}
+                        quote! {}
                     };
                     quote! {
                         let jobj = self.#field_name.to_java(env)?;
@@ -681,7 +682,7 @@ fn generate_struct_to_java(
                         #del_ref
                     }
                 }
-                _ => quote!{},
+                _ => quote! {},
             },
         };
 
@@ -735,7 +736,7 @@ fn generate_struct_from_java(
                         let #cap_field = vec.capacity();
                     }
                 } else {
-                    quote!{}
+                    quote! {}
                 };
 
                 if let ast::TyKind::Ptr(ref ptr) = field.ty.node {
@@ -796,7 +797,7 @@ fn generate_struct_from_java(
                         }
                     }
                 } else {
-                    quote!{}
+                    quote! {}
                 }
             }
             StructField::StructPtr { ref ty, .. } => {
@@ -816,7 +817,7 @@ fn generate_struct_from_java(
             }
             StructField::LenField(ref _f) => {
                 // Skip len/cap fields transformation - it's covered by `ArrayField`
-                quote!{}
+                quote! {}
             }
             StructField::String(ref _f) => {
                 quote! {
@@ -866,14 +867,14 @@ fn generate_struct_from_java(
                             }
                         } else {
                             let obj_sig = format!("{}", lookup_object_type(ty, context));
-                            quote!{
+                            quote! {
                                 let #field_name = env.get_field(input, #java_field_name, #obj_sig)?
                                     .l()?;
                                 let #field_name = #rust_ty::from_java(env, #field_name)?;
                             }
                         }
                     }
-                    _ => quote!{},
+                    _ => quote! {},
                 }
             }
         };
