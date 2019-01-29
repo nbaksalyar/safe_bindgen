@@ -71,6 +71,8 @@ extern crate jni;
 extern crate petgraph;
 extern crate rustfmt;
 
+extern crate syn;
+
 #[cfg(test)]
 extern crate colored;
 #[cfg(test)]
@@ -90,6 +92,7 @@ pub use lang_c::LangC;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
+use std::fs::File;
 use std::io::Error as IoError;
 use std::io::{Read, Write};
 use std::path::{self, Component, Path, PathBuf};
@@ -333,6 +336,17 @@ impl Bindgen {
         let mod_path = unwrap!(path.to_str()).to_string();
 
         // Parse the top level mod.
+
+
+        // Creates AST for the entire file
+        let mut file = unwrap!(File::open(path));
+        let mut content = String::new();
+        unwrap!(file.read_to_string(&mut content));
+        let _ast = unwrap!(syn::parse_file(&content));
+
+        // TODO: Extract Mod from AST
+        for item in _ast.items{}
+
         let krate = unwrap!(syntax::parse::parse_crate_from_file(path, &self.session));
         let module = convert_lib_path_to_module(&PathBuf::from(mod_path.clone()));
         eprintln!("Parsing {} ({:?})", module.join("::"), mod_path);
@@ -356,6 +370,16 @@ impl Bindgen {
 
             eprintln!("Parsing {} ({:?})", module.join("::"), mod_path);
 
+
+            // Creates AST for the entire file
+            let mut file = unwrap!(File::open(path));
+            let mut content = String::new();
+            unwrap!(file.read_to_string(&mut content));
+            let _ast = unwrap!(syn::parse_file(&content));
+
+            // TODO: Extract Mod from AST
+            for item in _ast.items{}
+
             let krate = unwrap!(syntax::parse::parse_crate_from_file(
                 &mod_path,
                 &self.session
@@ -373,6 +397,11 @@ impl Bindgen {
         source: String,
     ) -> Result<(), Vec<Error>> {
         let module = convert_lib_path_to_module(&PathBuf::from(file_name.clone()));
+
+        let _ast: syn::File= unwrap!(syn::parse_str(&source));
+
+        //TODO: Extract Mod from AST
+        for item in _ast.items{}
 
         let krate = unwrap!(syntax::parse::parse_crate_from_source_str(
             file_name,
