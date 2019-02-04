@@ -98,7 +98,7 @@ fn callback_arg_to_java(
                 level: Level::Error,
                 span: Some(fn_span),
                 message: "callbacks that don't have C ABI are not supported".into(),
-            })
+            });
         }
     }
 
@@ -314,14 +314,16 @@ mod tests {
         assert_eq!(
             unwrap!(java_type_to_str(&JavaType::Object(
                 "net.maidsafe.Test".to_string()
-            ),)).as_str(),
+            ),))
+            .as_str(),
             "net.maidsafe.Test"
         );
 
         assert_eq!(
             unwrap!(java_type_to_str(&JavaType::Array(Box::new(
                 JavaType::Primitive(Primitive::Byte)
-            ),))).as_str(),
+            ),)))
+            .as_str(),
             "byte[]"
         );
     }
