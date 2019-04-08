@@ -4,8 +4,7 @@ use diff;
 use parse;
 use std::collections::HashMap;
 use std::fmt::Write;
-use syntax;
-use syntax::codemap::FilePathMapping;
+use syn;
 use Error;
 
 macro_rules! compile {
@@ -44,20 +43,19 @@ macro_rules! assert_multiline_eq {
     }};
 }
 
+/// Convert source string into an AST type
+pub fn ty(source: &str) -> syn::Type {
+    let item: Result<syn::Type, _> = syn::parse_str(source);
+    unwrap!(item)
+}
+
 pub fn try_compile(
     mut lang: impl Lang,
     rust_src: String,
 ) -> Result<HashMap<String, String>, Vec<Error>> {
-    let session = syntax::parse::ParseSess::new(FilePathMapping::empty());
-    let ast = unwrap!(syntax::parse::parse_crate_from_source_str(
-        "lib.rs".to_string(),
-        rust_src,
-        &session
-    ));
-
+    let ast: syn::File = unwrap!(syn::parse_str(&rust_src));
     let mut outputs = Outputs::default();
-
-    parse::parse_mod(&mut lang, &ast.module, &[Default::default()], &mut outputs)?;
+    parse::parse_file(&mut lang, &ast, &[Default::default()], &mut outputs)?;
     lang.finalise_output(&mut outputs)?;
 
     Ok(outputs)

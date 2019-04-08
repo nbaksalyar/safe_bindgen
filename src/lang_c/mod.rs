@@ -333,7 +333,7 @@ impl Lang for LangC {
         });
 
         // If it's not #[no_mangle] then it can't be called from C.
-        if no_mangle {
+        if !no_mangle {
             return Ok(());
         }
 
@@ -437,28 +437,32 @@ fn anon_rust_to_c(ty: &syn::Type) -> Result<CType, Error> {
                     .into(),
         }),
         // Fixed-length arrays, converted into pointers.
-        syn::Type::Array(ref ty1) => Ok(CType::Ptr(
-            Box::new(anon_rust_to_c(&*ty1.elem)?),
+        syn::Type::Array(syn::TypeArray { ref elem, .. }) => Ok(CType::Ptr(
+            Box::new(anon_rust_to_c(&*elem)?),
             CPtrType::Const,
         )),
         // Standard pointers.
         syn::Type::Ptr(ref ptr) => ptr_to_c(ptr),
         // Plain old types.
         syn::Type::Path(ref path) => path_to_c(path),
-        // Possibly void, likely not.
-        _ => {
-            let new_type = ty.to_owned().into_token_stream().to_string();
-            if new_type == "()" {
-                // Ok("void".into())
+        // Tuple
+        syn::Type::Tuple(syn::TypeTuple { elems, .. }) => {
+            if elems.is_empty() {
+                // Empty tuple () == void
                 Ok(CType::Void)
             } else {
                 Err(Error {
                     level: Level::Error,
-                    span: None, //NONE FOR NOW
-                    message: format!("bindgen can not handle the type `{}`", new_type),
+                    span: None,
+                    message: format!("bindgen can not handle the type `{:?}`", ty),
                 })
             }
         }
+        ty => Err(Error {
+            level: Level::Error,
+            span: None,
+            message: format!("bindgen can not handle the type `{:?}`", ty),
+        }),
     }
 }
 
@@ -553,26 +557,22 @@ fn path_to_c(path: &syn::TypePath) -> Result<CType, Error> {
 
     // Types in modules, `my_mod::MyType`.
     if path.path.segments.len() > 1 {
-        let ty = unwrap!(path.path.segments.last()).into_value();
-        //.expect("already checked that there were at least two elements");            .split_last()
-        let ty = ty.ident.to_string();
-        //        path
-        //            .path
-        //            .segments
-        //            .last().clone()
-        //            .expect("poping last element for module failed");
-        let mut module = String::new();
-        module.to_owned();
-        for segment in path.path.segments.iter() {
-            module.push_str(segment.ident.to_string().as_str());
-        }
-        //let module = module.join("::");
-        match &*module.into_boxed_str() {
+        let mut path = path.path.clone();
+        let ty = unwrap!(path.segments.pop()).into_value().ident.to_string();
+
+        let module = path
+            .segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::");
+
+        match module.as_str() {
             "libc" => Ok(libc_ty_to_c(ty)),
             "std::os::raw" => Ok(osraw_ty_to_c(ty)),
             _ => Err(Error {
                 level: Level::Error,
-                span: None, //NONE FOR NOW
+                span: None,
                 message: "can not handle types in other modules (except `libc` and `std::os::raw`)"
                     .into(),
             }),

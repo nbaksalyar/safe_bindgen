@@ -84,11 +84,7 @@ pub fn append_output(text: String, file: &str, o: &mut Outputs) {
 
 /// Check the attribute is `#[no_mangle]`.
 pub fn check_no_mangle(attr: &syn::Attribute) -> bool {
-    if attr.tts.to_string() == "no_mangle" {
-        return true;
-    } else {
-        return false;
-    }
+    attr.path.clone().into_token_stream().to_string() == "no_mangle"
 }
 
 pub fn transform_fnarg_to_argcap(fnarg: &syn::FnArg) -> Option<&syn::ArgCaptured> {
@@ -200,17 +196,12 @@ pub fn is_result_arg(arg: &syn::ArgCaptured) -> bool {
 }
 
 pub fn is_result_arg_barefn(arg: &syn::BareFnArg) -> bool {
-    let mut vector = vec![];
-    for vec in arg.to_owned().into_token_stream().to_string().split(":") {
-        vector.push(format!("{}", &vec));
-    }
-    if unwrap!(vector.first()).as_str() == "result "
-        && unwrap!(vector.last()).as_str() == "*const FfiResult"
-    {
-        return true;
+    let arg_name = if let Some((syn::BareFnArgName::Named(ref arg_name), _)) = arg.name {
+        arg_name.to_string()
     } else {
         return false;
-    }
+    };
+    arg_name == "result" && arg.ty.clone().into_token_stream().to_string() == "* const FfiResult"
 }
 
 /// Check the function argument is a length argument for a *const u8 pointer
@@ -224,7 +215,7 @@ pub fn is_ptr_len_arg(ty: &syn::Type, arg_name: &str) -> bool {
 pub fn is_array_arg(arg: &syn::ArgCaptured, next_arg: Option<&syn::ArgCaptured>) -> bool {
     let pat = unwrap!(take_out_pat(&arg.pat));
     let name = pat.ident.to_owned().into_token_stream().to_string();
-    if let syn::Type::Ptr(ref typeptr) = arg.ty {
+    if let syn::Type::Ptr(ref _typeptr) = arg.ty {
         !is_result_arg(&arg)
             && next_arg
                 .map(|arg| is_ptr_len_arg(&arg.ty, name.as_str()))
@@ -239,7 +230,7 @@ pub fn is_array_arg_barefn(arg: &syn::BareFnArg, next_arg: Option<&syn::BareFnAr
         .0
         .into_token_stream()
         .to_string();
-//    println!("{}",name);
+    //    println!("{}",name);
 
     if let syn::Type::Ptr(ref typeptr) = arg.ty {
         !is_result_arg_barefn(&arg)

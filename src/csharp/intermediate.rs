@@ -226,13 +226,13 @@ pub fn transform_function(func: syn::FnDecl) -> Option<Function> {
 
 pub fn transform_function_param_from_type(fnarg: &syn::BareFnArg) -> Option<(String, Type)> {
     if let Some(ty) = transform_type(&fnarg.ty) {
-        let mut name = String::new();
-        if let syn::BareFnArgName::Named(id) = unwrap!(fnarg.to_owned().name).0 {
-            name.push_str(id.to_owned().to_string().as_str());
-        }
-        return Some((name.to_owned().to_string(), ty));
+        let name = match fnarg.name {
+            Some((ref name, _)) => name.clone().into_token_stream().to_string(),
+            None => "".to_owned(),
+        };
+        Some((name, ty))
     } else {
-        return None;
+        None
     }
 }
 
@@ -264,8 +264,9 @@ pub fn transform_enum(variants: &[syn::Variant]) -> Option<Enum> {
     let variants: Option<Vec<_>> = variants
         .into_iter()
         .map(|variant| {
-            if let syn::Fields::Unit = variant.fields {
-                return None;
+            match variant.fields {
+                syn::Fields::Unit => (),
+                _ => return None,
             }
 
             let (_, docs) = common::parse_attr(&variant.attrs[..], |_| true, retrieve_docstring);
@@ -351,10 +352,10 @@ pub fn retrieve_docstring(attr: &syn::Attribute) -> Option<String> {
 
 fn transform_const_value(expr: &syn::Expr) -> Option<ConstValue> {
     match expr {
-        syn::Expr::Lit(ref ExprLit) => transform_const_literal(&ExprLit.lit),
-        syn::Expr::Array(ref Array) => transform_const_array(Array),
-        syn::Expr::Struct(ref Struct) => transform_const_struct(Struct),
-        syn::Expr::Reference(ref exprref) => transform_const_value(expr),
+        syn::Expr::Lit(ref exprlit) => transform_const_literal(&exprlit.lit),
+        syn::Expr::Array(ref array) => transform_const_array(array),
+        syn::Expr::Struct(ref s_struct) => transform_const_struct(s_struct),
+        syn::Expr::Reference(syn::ExprReference { ref expr, .. }) => transform_const_value(&expr),
         syn::Expr::Cast(ref exprcast) => transform_const_cast(&*exprcast.expr, &*exprcast.ty),
         _ => None,
     }
