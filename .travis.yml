@@ -2,15 +2,12 @@ env:
   global:
     - RUST_BACKTRACE=1
     - PATH=$PATH:$HOME/.cargo/bin
-    - RUST_RUSTFMT=0.99.2
-    - RUST_CLIPPY=0.0.212
 os:
   - linux
   - osx
 language: rust
 rust:
-  - 1.28.0
-  - nightly
+  - stable
 sudo: false
 branches:
   only:
@@ -20,24 +17,16 @@ cache:
 before_script:
   - curl -sSL https://github.com/maidsafe/QA/raw/master/travis/cargo_install.sh > cargo_install.sh
   - bash cargo_install.sh cargo-prune;
-  - if [[ "$TRAVIS_RUST_VERSION" =~ ^nightly.* && "$TRAVIS_OS_NAME" == linux ]]; then
-      bash cargo_install.sh rustfmt-nightly $RUST_RUSTFMT;
-      # bash cargo_install.sh clippy $RUST_CLIPPY;
-    fi
+  - rustup component add rustfmt;
+  - rustup component add clippy;
 script:
-  - if [[ ! "$TRAVIS_RUST_VERSION" =~ ^nightly.* ]]; then
-      (
-        set -x;
-        cargo test --release --verbose
-      );
-    elif [ "${TRAVIS_OS_NAME}" = linux ]; then
-      (
-        set -x;
-        cargo fmt -- --check &&
-        # cargo check &&
-        # cargo clippy && cargo clippy --profile=test
-        cargo check --profile=test
-      );
-    fi
+  - set -x;
+    if [[ -n "$TARGET" ]]; then
+      TARGET_FLAG="--target $TARGET";
+    fi &&
+    cargo fmt -- --check &&
+    # cargo check --verbose --all-targets $TARGET_FLAG &&
+    # cargo clippy --verbose --all-targets $TARGET_FLAG &&
+    cargo test --verbose --release $TARGET_FLAG
 before_cache:
 - cargo prune
