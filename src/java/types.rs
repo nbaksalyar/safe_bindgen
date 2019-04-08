@@ -1,10 +1,11 @@
 //! Functions for converting Rust types to Java types.
 
-use common::{is_array_arg_barefn, is_result_arg_barefn, is_user_data_arg_barefn};
-use java::Context;
+use crate::common::{is_array_arg_barefn, is_result_arg_barefn, is_user_data_arg_barefn};
+use crate::java::Context;
+use crate::{Error, Level};
 use jni::signature::{JavaType, Primitive};
 use syn::export::ToTokens;
-use {Error, Level};
+use unwrap::unwrap;
 
 fn primitive_type_to_str(ty: Primitive) -> &'static str {
     match ty {
@@ -52,7 +53,7 @@ pub fn callback_name(inputs: &[syn::BareFnArg], context: &Context) -> Result<Str
     let mut components = Vec::new();
     let mut inputs = inputs.iter().peekable();
 
-    while let Some(&ref arg) = inputs.next() {
+    while let Some(arg) = inputs.next() {
         if is_user_data_arg_barefn(&arg.clone()) {
             // Skip user_data args
             continue;
@@ -68,7 +69,7 @@ pub fn callback_name(inputs: &[syn::BareFnArg], context: &Context) -> Result<Str
         let mut arg_type = struct_to_java_classname(arg_type);
 
         if is_array_arg_barefn(&arg, inputs.peek().cloned()) {
-            &inputs.next();
+            inputs.next();
             arg_type.push_str("ArrayLen");
         }
 
@@ -269,8 +270,8 @@ pub fn rust_ty_to_java(ty: &str) -> Option<JavaType> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::ty;
     use jni::signature::{JavaType, Primitive};
-    use test_utils::ty;
 
     #[test]
     fn test_rust_to_java() {

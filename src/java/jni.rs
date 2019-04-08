@@ -3,21 +3,22 @@ extern crate inflector;
 use self::inflector::Inflector;
 use super::types::{callback_name, rust_ty_to_java};
 use super::{Context, Outputs};
-use common::{
+use crate::common::{
     append_output, is_array_arg, is_array_arg_barefn, is_user_data_arg, is_user_data_arg_barefn,
     take_out_ident_from_type, take_out_pat, transform_fnarg_to_argcap,
     transform_fnarg_to_argcap_option,
 };
+use crate::struct_field::StructField;
 use jni::signature::{self, JavaType, Primitive, TypeSignature};
 use proc_macro2;
 use quote::ToTokens;
 use quote::*;
-use struct_field::StructField;
 //use self::proc_macro2::TokenStream;
 //use self::proc_macro2::*;
 //use syn::Ident;
 use self::proc_macro2::Span;
 use core::borrow::Borrow;
+use unwrap::unwrap;
 
 fn to_jni_arg(arg: &syn::ArgCaptured, ty_name: &str) -> proc_macro2::TokenStream {
     let pat = take_out_pat(&arg.pat);
@@ -423,7 +424,7 @@ fn generate_callback(cb: &syn::TypeBareFn, context: &Context) -> JniCallback {
                 // Pointers
                 syn::Type::Ptr(ref ptr) => {
                     let tokens: proc_macro2::TokenStream;
-                    let mut ty = &*ptr.elem;
+                    let ty = &*ptr.elem;
                     match format!("{}", quote!(#ty)).as_str() {
                         // Opaque ptrs passed as long values
                         "* mut App"

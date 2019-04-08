@@ -1,10 +1,10 @@
 //! Utilities for emiting fragments of the target language code.
-extern crate inflector;
-use self::inflector::Inflector;
 use super::intermediate::*;
 use super::Context;
-use output::IndentedWriter;
+use crate::output::IndentedWriter;
+use inflector::Inflector;
 use std::fmt::Write;
+use unwrap::unwrap;
 
 const LEN_TYPE: &str = "UIntPtr";
 const LEN_ZERO: &str = "UIntPtr.Zero";
@@ -532,7 +532,6 @@ fn emit_struct_field(
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(explicit_counter_loop))]
 fn emit_wrapper_function_params(
     writer: &mut IndentedWriter,
     context: &Context,
@@ -566,7 +565,6 @@ fn emit_wrapper_function_params(
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(explicit_counter_loop))]
 fn emit_native_function_params(
     writer: &mut IndentedWriter,
     context: &Context,

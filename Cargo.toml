@@ -11,13 +11,7 @@ homepage = "https://github.com/maidsafe/safe_bindgen"
 repository = "https://github.com/maidsafe/safe_bindgen"
 documentation = "https://docs.rs/safe_bindgen"
 license = "MIT OR BSD-3-Clause"
-
-[features]
-default = ["with-syntex"]
-with-syntex = [
-    "syntex_errors",
-    "syntex_syntax",
-]
+edition = "2018"
 
 [lib]
 name = "safe_bindgen"
@@ -29,10 +23,8 @@ doc = false
 path = "src/bin/bindgen.rs"
 
 [dependencies]
-syntex_errors = {version = "~0.59.1", optional = true}
-syntex_syntax = {version = "~0.59.1", optional = true}
+clap = "~2.33.0"
 toml = "~0.4.6"
-clap = "~2.25.1"
 Inflector = "~0.11.3"
 jni = "~0.10.1"
 quote = "~0.6.11"
@@ -45,4 +37,4 @@ proc-macro2 = "~0.4.27"
 [dev-dependencies]
 colored = "~1.6.0"
 diff = "~0.1.11"
-indoc = "~0.2.3"
+indoc = "~0.3.1"

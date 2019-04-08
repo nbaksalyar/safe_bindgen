@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use syn::export::ToTokens;
+use unwrap::unwrap;
 
 #[derive(Debug)]
 pub enum StructField {
@@ -105,7 +106,7 @@ fn is_array_meta_field(field: &syn::Field) -> bool {
             .ident
             .to_owned()
             .to_string();
-        ty == "usize".to_string() && (ident.ends_with("_len") || ident.ends_with("_cap"))
+        ty == "usize" && (ident.ends_with("_len") || ident.ends_with("_cap"))
     } else {
         false
     }
