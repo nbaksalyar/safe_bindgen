@@ -216,7 +216,7 @@ pub fn is_array_arg(arg: &syn::ArgCaptured, next_arg: Option<&syn::ArgCaptured>)
 }
 
 pub fn is_array_arg_barefn(arg: &syn::BareFnArg, next_arg: Option<&syn::BareFnArg>) -> bool {
-    if let syn::Type::Ptr(ref typeptr) = arg.ty {
+    if let syn::Type::Ptr(ref _typeptr) = arg.ty {
         !is_result_arg_barefn(&arg)
             && next_arg
                 .map(|arg| {
